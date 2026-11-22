@@ -9,7 +9,7 @@ PocketAgent is an Android app prototype for controlling a phone with an on-devic
 - Android 9 (API 28) or newer
 - Java 17
 - Android SDK with API 35 installed
-- Gradle 8.9
+- Gradle 8.14.4
 
 ## Build a debug APK
 
@@ -25,7 +25,7 @@ The APK is created at:
 app/build/outputs/apk/debug/app-debug.apk
 ```
 
-The project currently uses Gradle build files directly and does not include a Gradle Wrapper, so install Gradle 8.9 separately before running the command.
+The project currently uses Gradle build files directly and does not include a Gradle Wrapper, so install Gradle 8.14.4 separately before running the command.
 
 ## Build with GitHub Actions
 

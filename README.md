@@ -1,8 +1,8 @@
 # PocketAgent
 
-PocketAgent is an Android app prototype for controlling a phone with an on-device LiteRT-LM model. You choose a compatible `.litertlm` model, enable the app's Accessibility Service, then enter or speak a goal. The agent reads visible UI elements and can tap, type, scroll, open apps, or use the system Back and Home actions.
+PocketAgent is an on-device task-instruction assistant. Select a compatible `.litertlm` model, describe a task, and the model suggests steps for you to review and perform manually.
 
-> **Important:** Accessibility access gives the service the ability to inspect screen content and interact with apps. Enable it only if you understand and trust this app. The model is not included in this repository; select a compatible model in the app. Speech recognition depends on the recognizer installed on the device, even though the app requests offline recognition.
+**This redesigned version does not read other apps' screens, launch apps, tap, type, scroll, or change settings.** It has no Accessibility Service. It requests microphone access only if you choose to dictate a task; speech recognition behavior depends on the provider installed on your device. The app requests offline recognition when supported, but that preference is controlled by the speech provider.
 
 ## Requirements
 
@@ -34,8 +34,8 @@ The **Build APK** workflow runs on branch pushes, pull requests targeting `main`
 ## First launch
 
 1. Install and open PocketAgent.
-2. Tap **Pick model (.litertlm)** and select a compatible model file.
-3. Tap **Enable accessibility service** and enable PocketAgent in Android Settings.
-4. Enter a goal or tap **Speak (offline)**, then tap **Run** (spoken goals run immediately after recognition).
+2. Tap **Choose model (.litertlm)** and select a compatible model file.
+3. Type a task, or tap **Dictate goal** and review the recognized text.
+4. Tap **Suggest steps**, then review and carry out any suggestions yourself.
 
-The app has a fast path for goals like `open Settings`; other goals require a selected model. The model is stored in the app's private files directory and is not packaged in the APK.
+The model is copied to the app's private files directory and is not bundled in the APK. Suggestions are not executed automatically; verify each instruction, especially for account, payment, or security tasks.

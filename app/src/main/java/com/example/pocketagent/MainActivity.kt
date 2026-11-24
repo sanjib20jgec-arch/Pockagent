@@ -454,7 +454,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     override fun onInit(status: Int) {
         ttsReady = status == TextToSpeech.SUCCESS
-        if (ttsReady) tts?.language = Locale.getDefault()
+        if (ttsReady) tts?.setLanguage(Locale.getDefault())
     }
 
     private fun refreshModelStatus() {

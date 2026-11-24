@@ -249,6 +249,10 @@ class MainViewModel internal constructor(
         updateState { it.withTaskInput(text) }
     }
 
+    fun updateTaskInput(text: String) {
+        onTaskInputChanged(text)
+    }
+
     fun onTtsReady(ready: Boolean) {
         updateState { it.withTtsReady(ready) }
     }

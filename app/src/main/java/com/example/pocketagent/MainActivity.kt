@@ -153,7 +153,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             whisperTranscriber = DefaultWhisperTranscriber(),
             llmRunner = DefaultLlmInferenceRunner(filesDir, cacheDir),
             ttsSpeaker = ttsSpeaker,
-            workerExecutor = worker,
+            workerExecutor = inferenceExecutor,
             mainDispatcher = { mainHandler.post(it) },
         )
     }

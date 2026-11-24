@@ -228,7 +228,7 @@ class MainViewModelTest {
 
     @Test
     fun importsAndRemovesWhisperModelSafely() {
-        val dummyWeights = "Whisper GGML bytes".toByteArray()
+        val dummyWeights = "ggml valid whisper model bytes".toByteArray()
 
         // 1. Rejects wrong extension
         viewModel.importWhisperModel("whisper.litertlm") {

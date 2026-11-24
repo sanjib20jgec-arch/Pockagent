@@ -150,15 +150,15 @@ class SessionStore(
     }
 
     fun deleteSession(sessionId: String): Boolean {
+        val file = getSessionFile(sessionId)
         if (!directory.exists() || !directory.isDirectory) return false
         return try {
-            val file = getSessionFile(sessionId)
             val temp = File(directory, "$sessionId$TMP_EXT")
             val backup = File(directory, "$sessionId$BACKUP_EXT")
             if (temp.exists()) temp.delete()
             if (backup.exists()) backup.delete()
             file.exists() && file.delete()
-        } catch (_: Exception) {
+        } catch (_: IOException) {
             false
         }
     }

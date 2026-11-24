@@ -433,7 +433,7 @@ object SystemActionTools {
         """(?i)(?:set\s+(?:an?\s+)?)?alarm\s+(?:for|at)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?(?:(?:\s+(?:for|called|named|label)\s+)|:?\s+)?(?:["']([^"'\n]+)["']|([^.\n,]+))?"""
     )
     private val CONV_CALENDAR = Pattern.compile(
-        """(?i)(?:add|draft|schedule|create)\s+(?:a\s+)?(?:calendar\s+)?event[:\s]+(?:["']([^"'\n]+)["']|([^.\n,]+?))(?:\s+(?:at|in)\s+["']?([^.\n,]+?)["']?)?(?:\s+(?:on|for)\s+([^\n.]+))?"""
+        """(?i)(?:add|draft|schedule|create)\s+(?:a\s+)?(?:calendar\s+)?event[:\s]+(?:["']([^"'\n]+)["']|(.+?))(?:\s+(?:at|in)\s+["']?([^.\n,]+?)["']?)?(?:\s+(?:on|for)\s+([^\n.]+))?(?:\.|\z)"""
     )
     private val CONV_MAP = Pattern.compile(
         """(?i)(?:open\s+(?:in\s+)?(?:maps?|navigation)|navigate\s+to|directions\s+to)[:\s]+(?:["']([^"'\n]+)["']|([^.\n]+))"""
@@ -614,7 +614,11 @@ object SystemActionTools {
         val mapMatcher = CONV_MAP.matcher(text)
         if (mapMatcher.find()) {
             val query = (mapMatcher.group(1) ?: mapMatcher.group(2) ?: "").trim()
-            if (query.isNotBlank()) {
+            val isWebUrl = query.contains(Regex("""\.(com|org|net|edu|gov|io|app|html?)\b""", RegexOption.IGNORE_CASE)) ||
+                query.startsWith("http://", ignoreCase = true) ||
+                query.startsWith("https://", ignoreCase = true) ||
+                query.startsWith("www.", ignoreCase = true)
+            if (query.isNotBlank() && !isWebUrl) {
                 try {
                     out.add(SystemAction.OpenMap(query = query))
                     return

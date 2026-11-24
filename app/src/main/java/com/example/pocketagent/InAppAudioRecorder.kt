@@ -103,6 +103,7 @@ class InAppAudioRecorder(
     }
 
     private val isRecording = AtomicBoolean(false)
+    private val isCancelled = AtomicBoolean(false)
     private var recordingThread: Thread? = null
 
     val isRecordingActive: Boolean
@@ -123,6 +124,7 @@ class InAppAudioRecorder(
         }
 
         buffer.wipe()
+        isCancelled.set(false)
         isRecording.set(true)
 
         val thread = Thread({
@@ -154,14 +156,21 @@ class InAppAudioRecorder(
                 }
 
                 // If cancelled while recording, don't trigger completion
-                if (isRecording.getAndSet(false)) {
+                if (!isCancelled.get() && isRecording.getAndSet(false)) {
                     val samples = buffer.toNormalizedFloats()
                     listener.onRecordingComplete(samples)
                 }
             } catch (error: Throwable) {
-                isRecording.set(false)
-                buffer.wipe()
-                listener.onError(error)
+                if (error is InterruptedException) {
+                    if (!isCancelled.get() && isRecording.getAndSet(false)) {
+                        val samples = buffer.toNormalizedFloats()
+                        listener.onRecordingComplete(samples)
+                    }
+                } else {
+                    isRecording.set(false)
+                    buffer.wipe()
+                    listener.onError(error)
+                }
             } finally {
                 try {
                     source?.stop()
@@ -190,6 +199,7 @@ class InAppAudioRecorder(
      */
     @Synchronized
     fun cancelRecording() {
+        isCancelled.set(true)
         isRecording.set(false)
         recordingThread?.interrupt()
         buffer.wipe()

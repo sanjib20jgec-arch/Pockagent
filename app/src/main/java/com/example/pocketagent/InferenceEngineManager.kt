@@ -1,22 +1,28 @@
 package com.example.pocketagent
 
-import com.google.ai.edge.litertlm.Backend
-import com.google.ai.edge.litertlm.Engine
-import com.google.ai.edge.litertlm.EngineConfig
 import java.io.File
 
 /**
  * Manages LiteRT-LM engine lifecycle and hardware backend selection with automatic graceful
  * fallback from GPU acceleration to CPU execution.
+ *
+ * Parameterized by [T] (defaulting to [AutoCloseable]) so unit tests on standard JVMs can verify
+ * fallback policies without loading native LiteRT-LM classes that require Java 21 bytecode.
  */
-class InferenceEngineManager(
+class InferenceEngineManager<T : AutoCloseable>(
     var preference: BackendPreference = BackendPreference.GPU_PREFERRED,
-    private val engineFactory: (EngineConfig) -> Engine = { config ->
-        Engine(config).also { it.initialize() }
+    private val engineFactory: (isGpu: Boolean, modelFile: File, cacheDir: File) -> T = { isGpu, model, cache ->
+        val config = com.google.ai.edge.litertlm.EngineConfig(
+            modelPath = model.absolutePath,
+            backend = if (isGpu) com.google.ai.edge.litertlm.Backend.GPU() else com.google.ai.edge.litertlm.Backend.CPU(),
+            cacheDir = cache.absolutePath
+        )
+        @Suppress("UNCHECKED_CAST")
+        (com.google.ai.edge.litertlm.Engine(config).also { it.initialize() } as T)
     }
 ) : AutoCloseable {
 
-    @Volatile var engine: Engine? = null
+    @Volatile var engine: T? = null
         private set
 
     @Volatile var activeBackend: ActiveBackend? = null
@@ -37,7 +43,7 @@ class InferenceEngineManager(
         modelFile: File,
         cacheDir: File,
         preferredBackend: BackendPreference = preference
-    ): Engine {
+    ): T {
         require(modelFile.isFile && modelFile.length() > 0) {
             "Model file must exist and be non-empty: ${modelFile.name}"
         }
@@ -52,12 +58,7 @@ class InferenceEngineManager(
 
         if (preferredBackend == BackendPreference.GPU_PREFERRED) {
             try {
-                val gpuConfig = EngineConfig(
-                    modelPath = modelFile.absolutePath,
-                    backend = Backend.GPU(),
-                    cacheDir = cacheDir.absolutePath
-                )
-                val newEngine = engineFactory(gpuConfig)
+                val newEngine = engineFactory(true, modelFile, cacheDir)
                 engine = newEngine
                 activeBackend = ActiveBackend.GPU
                 return newEngine
@@ -69,12 +70,7 @@ class InferenceEngineManager(
             }
         }
 
-        val cpuConfig = EngineConfig(
-            modelPath = modelFile.absolutePath,
-            backend = Backend.CPU(),
-            cacheDir = cacheDir.absolutePath
-        )
-        val cpuEngine = engineFactory(cpuConfig)
+        val cpuEngine = engineFactory(false, modelFile, cacheDir)
         engine = cpuEngine
         activeBackend = ActiveBackend.CPU
         return cpuEngine

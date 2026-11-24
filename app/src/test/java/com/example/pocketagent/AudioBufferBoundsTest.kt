@@ -197,7 +197,7 @@ class AudioBufferBoundsTest {
                     return count
                 }
                 // Sleep briefly to avoid busy spin before stop
-                Thread.sleep(10)
+                try { Thread.sleep(10) } catch (_: InterruptedException) { return 0 }
                 return 0
             }
             override fun stop() { started = false }
@@ -240,6 +240,7 @@ class AudioBufferBoundsTest {
         val syntheticSource = object : AudioInputSource {
             override fun startRecording() {}
             override fun read(buf: ShortArray, offset: Int, size: Int): Int {
+                try { Thread.sleep(20) } catch (_: InterruptedException) { return -1 }
                 buf[0] = 999
                 return 1
             }

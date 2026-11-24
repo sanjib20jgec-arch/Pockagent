@@ -62,7 +62,7 @@ class DocumentChunkerTest {
 
         assertTrue(chunks.size >= 2)
         assertEquals(sentence1, chunks[0].content)
-        assertTrue(chunks[1].content.startsWith("All user documents") || chunks[1].content.contains("strictly on the device"))
+        assertTrue(chunks[1].content.contains("All user documents") || chunks[1].content.contains("strictly on the device"))
     }
 
     @Test

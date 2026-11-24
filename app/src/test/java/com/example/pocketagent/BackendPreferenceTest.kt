@@ -1,10 +1,6 @@
 package com.example.pocketagent
 
-import com.google.ai.edge.litertlm.Backend
-import com.google.ai.edge.litertlm.Engine
-import com.google.ai.edge.litertlm.EngineConfig
 import java.io.File
-import java.lang.reflect.Proxy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -20,6 +16,13 @@ class BackendPreferenceTest {
     @get:Rule
     val temporaryFolder = TemporaryFolder()
 
+    private class MockEngine(val isGpu: Boolean) : AutoCloseable {
+        var isClosed = false
+        override fun close() {
+            isClosed = true
+        }
+    }
+
     @Test
     fun parsesBackendPreferenceStringsCorrectly() {
         assertEquals(BackendPreference.GPU_PREFERRED, BackendPreference.fromString("GPU"))
@@ -34,7 +37,9 @@ class BackendPreferenceTest {
 
     @Test
     fun rejectsNonExistentOrEmptyModelFile() {
-        val manager = InferenceEngineManager()
+        val manager = InferenceEngineManager<MockEngine>(
+            engineFactory = { isGpu, _, _ -> MockEngine(isGpu) }
+        )
         val missing = File(temporaryFolder.root, "missing.litertlm")
         val cacheDir = temporaryFolder.newFolder("cache")
 
@@ -53,13 +58,13 @@ class BackendPreferenceTest {
         val model = temporaryFolder.newFile("test.litertlm").apply { writeBytes(byteArrayOf(1, 2, 3)) }
         val cacheDir = temporaryFolder.newFolder("cache")
 
-        var configuredBackend: Backend? = null
-        val mockEngine = createMockEngine()
+        var isGpuInvoked = false
+        val mockEngine = MockEngine(isGpu = true)
 
-        val manager = InferenceEngineManager(
+        val manager = InferenceEngineManager<MockEngine>(
             preference = BackendPreference.GPU_PREFERRED,
-            engineFactory = { config ->
-                configuredBackend = config.backend
+            engineFactory = { isGpu, _, _ ->
+                isGpuInvoked = isGpu
                 mockEngine
             }
         )
@@ -68,7 +73,7 @@ class BackendPreferenceTest {
         assertEquals(mockEngine, result)
         assertEquals(ActiveBackend.GPU, manager.activeBackend)
         assertNull(manager.lastFallbackReason)
-        assertTrue(configuredBackend is Backend.GPU)
+        assertTrue(isGpuInvoked)
     }
 
     @Test
@@ -76,14 +81,14 @@ class BackendPreferenceTest {
         val model = temporaryFolder.newFile("test.litertlm").apply { writeBytes(byteArrayOf(1, 2, 3)) }
         val cacheDir = temporaryFolder.newFolder("cache")
 
-        var attemptedBackends = mutableListOf<String>()
+        val attemptedBackends = mutableListOf<String>()
         var fallbackReported: String? = null
-        val mockEngine = createMockEngine()
+        val mockEngine = MockEngine(isGpu = false)
 
-        val manager = InferenceEngineManager(
+        val manager = InferenceEngineManager<MockEngine>(
             preference = BackendPreference.GPU_PREFERRED,
-            engineFactory = { config ->
-                if (config.backend is Backend.GPU) {
+            engineFactory = { isGpu, _, _ ->
+                if (isGpu) {
                     attemptedBackends.add("GPU")
                     throw IllegalStateException("libOpenCL.so not found on device")
                 } else {
@@ -109,13 +114,13 @@ class BackendPreferenceTest {
         val model = temporaryFolder.newFile("test.litertlm").apply { writeBytes(byteArrayOf(1, 2, 3)) }
         val cacheDir = temporaryFolder.newFolder("cache")
 
-        var attemptedBackends = mutableListOf<String>()
-        val mockEngine = createMockEngine()
+        val attemptedBackends = mutableListOf<String>()
+        val mockEngine = MockEngine(isGpu = false)
 
-        val manager = InferenceEngineManager(
+        val manager = InferenceEngineManager<MockEngine>(
             preference = BackendPreference.CPU_ONLY,
-            engineFactory = { config ->
-                if (config.backend is Backend.GPU) {
+            engineFactory = { isGpu, _, _ ->
+                if (isGpu) {
                     attemptedBackends.add("GPU")
                     error("GPU should not be attempted under CPU_ONLY preference")
                 } else {
@@ -137,9 +142,9 @@ class BackendPreferenceTest {
         val model = temporaryFolder.newFile("test.litertlm").apply { writeBytes(byteArrayOf(1, 2, 3)) }
         val cacheDir = temporaryFolder.newFolder("cache")
 
-        val manager = InferenceEngineManager(
+        val manager = InferenceEngineManager<MockEngine>(
             preference = BackendPreference.CPU_ONLY,
-            engineFactory = { throw RuntimeException("Corrupted model file") }
+            engineFactory = { _, _, _ -> throw RuntimeException("Corrupted model file") }
         )
 
         val error = assertThrows(RuntimeException::class.java) {
@@ -156,11 +161,11 @@ class BackendPreferenceTest {
         val cacheDir = temporaryFolder.newFolder("cache")
 
         var factoryCallCount = 0
-        val mockEngine = createMockEngine()
+        val mockEngine = MockEngine(isGpu = false)
 
-        val manager = InferenceEngineManager(
+        val manager = InferenceEngineManager<MockEngine>(
             preference = BackendPreference.CPU_ONLY,
-            engineFactory = {
+            engineFactory = { _, _, _ ->
                 factoryCallCount++
                 mockEngine
             }
@@ -172,31 +177,12 @@ class BackendPreferenceTest {
         assertEquals(1, factoryCallCount)
 
         manager.close()
+        assertTrue(mockEngine.isClosed)
         assertNull(manager.engine)
         assertNull(manager.activeBackend)
 
         val third = manager.getOrInitializeEngine(model, cacheDir)
         assertEquals(2, factoryCallCount)
         assertEquals(mockEngine, third)
-    }
-
-    /**
-     * Creates a lightweight mock of Engine for JVM unit testing without loading native libraries.
-     */
-    private fun createMockEngine(): Engine {
-        return try {
-            val config = EngineConfig(modelPath = "/stub", backend = Backend.CPU())
-            val constructor = Engine::class.java.getDeclaredConstructor(EngineConfig::class.java)
-            constructor.isAccessible = true
-            constructor.newInstance(config)
-        } catch (_: Throwable) {
-            // JVM mock using pure reflection without compile-time sun.misc imports
-            val unsafeClass = Class.forName("sun.misc.Unsafe")
-            val theUnsafeField = unsafeClass.getDeclaredField("theUnsafe")
-            theUnsafeField.isAccessible = true
-            val unsafe = theUnsafeField.get(null)
-            val allocateInstance = unsafeClass.getMethod("allocateInstance", Class::class.java)
-            allocateInstance.invoke(unsafe, Engine::class.java) as Engine
-        }
     }
 }

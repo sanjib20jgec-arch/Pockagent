@@ -67,7 +67,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private val worker = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val engineManager = InferenceEngineManager()
+    private val engineManager = InferenceEngineManager<Engine>()
     private val inAppAudioRecorder = InAppAudioRecorder()
     @Volatile private var whisperContext: Long = 0L
     private lateinit var taskInput: EditText

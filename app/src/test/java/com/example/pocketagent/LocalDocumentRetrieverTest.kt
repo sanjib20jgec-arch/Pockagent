@@ -62,4 +62,52 @@ class LocalDocumentRetrieverTest {
         assertEquals("", LocalDocumentRetriever.retrieveContext(query = "search", documentText = "   \n\t  "))
         assertTrue(LocalDocumentRetriever.retrieveChunks(query = "search", documentText = "").isEmpty())
     }
+
+    @Test
+    fun retrieveWithCitationsReturnsPromptContextAndDistinctBadges() {
+        val chunks = listOf(
+            DocumentChunker.DocumentChunk(
+                id = "doc_p1_0",
+                content = "Kotlin coroutines provide structured concurrency and non-blocking asynchronous programming.",
+                source = "guide.pdf",
+                chunkIndex = 0,
+                pageNumber = 1,
+            ),
+            DocumentChunker.DocumentChunk(
+                id = "doc_p2_0",
+                content = "StateFlow and SharedFlow are reactive state holders designed for unidirectional data flow in MVI.",
+                source = "guide.pdf",
+                chunkIndex = 1,
+                pageNumber = 2,
+            ),
+        )
+
+        val result = LocalDocumentRetriever.retrieveWithCitations(
+            query = "StateFlow reactive MVI",
+            chunks = chunks,
+            maxChars = 2000,
+        )
+
+        assertTrue(result.promptContext.isNotBlank())
+        assertTrue(result.promptContext.contains("StateFlow and SharedFlow"))
+        assertTrue(result.promptContext.contains("Page 2"))
+        assertTrue(result.citations.isNotEmpty())
+        assertEquals("guide.pdf", result.citations[0].documentName)
+        assertTrue(result.citations.any { it.pageNumber == 2 })
+    }
+
+    @Test
+    fun retrieveTextWithCitationsHandlesDocumentString() {
+        val docText = "Quantum computing uses superposition and entanglement to solve discrete optimization problems."
+        val result = LocalDocumentRetriever.retrieveTextWithCitations(
+            query = "superposition entanglement",
+            documentText = docText,
+            sourceName = "quantum.txt",
+            maxChars = 1000,
+        )
+
+        assertTrue(result.promptContext.contains("Quantum computing"))
+        assertEquals(1, result.citations.size)
+        assertEquals("quantum.txt", result.citations[0].documentName)
+    }
 }

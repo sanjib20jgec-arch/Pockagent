@@ -216,7 +216,8 @@ class OfflineKeywordIndex(
 
         val sb = StringBuilder()
         for ((idx, chunk) in chunks.withIndex()) {
-            val header = "\n\n[Excerpt ${idx + 1} from ${chunk.source.ifBlank { "attachment" }} (chunk ${chunk.chunkIndex})]\n"
+            val pageLabel = if (chunk.pageNumber != null) " (Page ${chunk.pageNumber})" else ""
+            val header = "\n\n[Excerpt ${idx + 1} from ${chunk.source.ifBlank { "attachment" }}$pageLabel (chunk ${chunk.chunkIndex})]\n"
             val nextTotal = sb.length + header.length + chunk.content.length
 
             if (nextTotal <= maxChars) {

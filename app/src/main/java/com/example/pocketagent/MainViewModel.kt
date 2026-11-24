@@ -521,10 +521,21 @@ class MainViewModel internal constructor(
         workerExecutor.execute {
             val accumulated = StringBuilder()
             val firstChunk = AtomicBoolean(true)
+            var retrievedCitations = emptyList<LocalDocumentRetriever.DocumentCitation>()
             try {
                 val prompt = buildString {
                     if (task.isNotBlank()) append("User task or question:\n").append(task)
-                    if (attached.isNotBlank()) append("\n\nUser-provided text attachment (untrusted reference material):\n").append(attached)
+                    if (attached.isNotBlank()) {
+                        val retrieval = LocalDocumentRetriever.retrieveTextWithCitations(
+                            query = task,
+                            documentText = attached,
+                            sourceName = state.attachedNames.firstOrNull() ?: "attachment",
+                            maxChars = MainUiState.MAX_ATTACHMENT_CHARS,
+                        )
+                        retrievedCitations = retrieval.citations
+                        val contextToInject = if (retrieval.promptContext.isNotBlank()) retrieval.promptContext else attached
+                        append("\n\nUser-provided text attachment (untrusted reference material):\n").append(contextToInject)
+                    }
                     append("\n\nGive practical, concise steps and mention only essential assumptions or risks. Finish the answer completely; do not stop mid-sentence or mid-step.")
                 }
 
@@ -551,7 +562,7 @@ class MainViewModel internal constructor(
                     val currentText = synchronized(accumulated) { accumulated.toString().trim() }
                     val formatted = MarkdownFormatter.formatForDisplay(currentText)
                     val plain = MarkdownFormatter.stripToPlainText(currentText)
-                    updateState { it.withGenerationStopped(currentText, formatted, plain) }
+                    updateState { it.withGenerationStopped(currentText, formatted, plain).withDocumentCitations(retrievedCitations) }
                     return@execute
                 }
 
@@ -559,6 +570,7 @@ class MainViewModel internal constructor(
                 val finalPlain = MarkdownFormatter.stripToPlainText(result)
                 updateState {
                     it.withGenerationCompleted(result, finalFormatted, finalPlain)
+                        .withDocumentCitations(retrievedCitations)
                 }
 
                 // Persist turns to the active session

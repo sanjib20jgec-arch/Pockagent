@@ -53,6 +53,7 @@ data class MainUiState(
     val sessionSearchQuery: String = "",
     val lastUserPrompt: String = "",
     val canRegenerate: Boolean = false,
+    val documentCitations: List<LocalDocumentRetriever.DocumentCitation> = emptyList(),
 ) {
     companion object {
         const val MAX_ATTACHMENT_CHARS = 12_000
@@ -287,6 +288,7 @@ data class MainUiState(
         formattedAnswer = "",
         plainTextAnswer = "",
         generationStatus = GenerationStatus.IDLE,
+        documentCitations = emptyList(),
     )
 
     fun withPendingAnswerToSave(answer: String?): MainUiState = copy(
@@ -328,5 +330,9 @@ data class MainUiState(
         statusMessage = "Generation stopped by user.",
         errorMessage = null,
         canRegenerate = lastUserPrompt.isNotBlank(),
+    )
+
+    fun withDocumentCitations(citations: List<LocalDocumentRetriever.DocumentCitation>): MainUiState = copy(
+        documentCitations = citations,
     )
 }

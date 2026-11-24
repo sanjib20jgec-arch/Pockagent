@@ -329,4 +329,22 @@ class MainViewModelTest {
         viewModel.stopGeneration()
         assertFalse(viewModel.uiState.value.isGenerating)
     }
+
+    @Test
+    fun suggestStepsExtractsDocumentCitationsFromAttachedContext() {
+        fakeLlmRunner.available = true
+        fakeLlmRunner.responseToReturn = "1. Follow instructions from attached document."
+
+        viewModel.createNewSession()
+        viewModel.importTextFiles(
+            listOf("specs.txt" to java.io.ByteArrayInputStream("System Architecture: Offline-first assistant with strict zero telemetry constraints.".toByteArray()))
+        )
+        viewModel.updateTaskInput("What are the system architecture constraints?")
+        viewModel.suggestSteps()
+
+        val state = viewModel.uiState.value
+        assertEquals("1. Follow instructions from attached document.", state.generatedAnswer)
+        assertTrue(state.documentCitations.isNotEmpty())
+        assertEquals("specs.txt", state.documentCitations[0].documentName)
+    }
 }

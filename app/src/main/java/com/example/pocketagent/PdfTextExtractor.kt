@@ -28,6 +28,7 @@ internal object PdfTextExtractor {
                 }
 
                 val result = StringBuilder(minOf(maxChars, 8_192))
+                val extractedPages = mutableListOf<ExtractedPdfPage>()
                 for (page in 1..pageCount) {
                     val remaining = maxChars - result.length
                     if (remaining <= 0) break
@@ -39,6 +40,7 @@ internal object PdfTextExtractor {
                     stripper.writeText(document, pageWriter)
                     val pageText = pageWriter.content().trim()
                     if (pageText.isNotEmpty()) {
+                        extractedPages.add(ExtractedPdfPage(page, pageText, pageText.length))
                         appendWithinLimit(result, "\n\n[PDF page $page]\n", maxChars)
                         appendWithinLimit(result, pageText, maxChars)
                     }
@@ -48,14 +50,25 @@ internal object PdfTextExtractor {
                 require(extracted.isNotEmpty()) {
                     "No selectable text was found. Scanned PDFs are not supported."
                 }
-                return Extraction(extracted, pageCount, extracted.length >= maxChars)
+                return Extraction(extracted, pageCount, extracted.length >= maxChars, extractedPages)
             }
         } finally {
             staged.delete()
         }
     }
 
-    data class Extraction(val text: String, val pageCount: Int, val limitReached: Boolean)
+    data class ExtractedPdfPage(
+        val pageNumber: Int,
+        val text: String,
+        val charCount: Int = text.length,
+    )
+
+    data class Extraction(
+        val text: String,
+        val pageCount: Int,
+        val limitReached: Boolean,
+        val pages: List<ExtractedPdfPage> = emptyList(),
+    )
 
     private fun appendWithinLimit(target: StringBuilder, value: String, limit: Int) {
         val remaining = limit - target.length

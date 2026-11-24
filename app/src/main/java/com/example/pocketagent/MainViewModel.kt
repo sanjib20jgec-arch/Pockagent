@@ -159,7 +159,7 @@ class DefaultWhisperTranscriber : WhisperTranscriber {
  *
  * Invariants:
  * - 100% offline, zero network access, zero analytics.
- * - Adheres strictly to manual guidance: provides step suggestions for human review.
+ * - Answers the user's request directly, using numbered steps only for genuine procedures.
  * - Never controls other apps, inspects screen, or automates user actions.
  * - Enforces safety bounds (12,000 char attachment limits, model rollback).
  */
@@ -188,8 +188,15 @@ class MainViewModel internal constructor(
         notesStore = PersonalNotesStore(PersonalNotesStore.defaultDir(filesDir)),
     )
 
+    private val promptContext = AnswerPromptComposer()
+
     private val _uiState = MutableStateFlow(MainUiState())
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
+
+    private companion object {
+        /** One normal answer plus one corrective retry if the model refuses to answer. */
+        const val MAX_ANSWER_ATTEMPTS = 2
+    }
 
     private val observers = CopyOnWriteArrayList<(MainUiState) -> Unit>()
     @Volatile private var whisperContext: Long = 0L
@@ -204,8 +211,26 @@ class MainViewModel internal constructor(
             ttsSpeaker = ttsSpeaker,
             workerExecutor = workerExecutor,
             mainDispatcher = mainDispatcher,
+            instructionFor = { spokenPrompt, base -> instructionForSpokenTurn(spokenPrompt, base) },
         )
     }
+
+    /**
+     * Voice answers must follow the same rules as typed ones: classify the request, then use the
+     * intent-aware directive (enriched with memory) so the assistant answers instead of pointing
+     * the user at another app.
+     */
+    private fun instructionForSpokenTurn(spokenPrompt: String, base: String): String {
+        val intent = AnswerDirective.classify(spokenPrompt)
+        val directive = AnswerDirective.systemInstructionFor(intent)
+        if (!uiState.value.isMemoryEnabled) return directive
+        val memoryBlock = userMemoryStore.buildPromptContext(maxTokens = 120)
+        if (memoryBlock.isBlank()) return directive
+        return ContextBudgetManager().enrichSystemInstructionWithMemory(directive, memoryBlock)
+    }
+
+    /** Set by the runaway guard so the UI can explain why generation stopped. */
+    @Volatile private var runawayFragment: String? = null
 
     /**
      * Subscribes a listener to UI state changes. Dispatches the current state immediately.
@@ -267,6 +292,7 @@ class MainViewModel internal constructor(
         updateState { it.withTaskInput(text) }
     }
 
+    /** Alias used when restoring a prompt from history or a regenerate request. */
     fun updateTaskInput(text: String) {
         onTaskInputChanged(text)
     }
@@ -319,7 +345,7 @@ class MainViewModel internal constructor(
                     it.withAttachmentsUpdated(
                         newContext = truncated,
                         newNames = names,
-                        status = "Text attached. Review the preview, add a question, then request suggestions.",
+                        status = "Text attached. Review the preview, then add your question.",
                     )
                 }
             } catch (e: Exception) {
@@ -350,7 +376,7 @@ class MainViewModel internal constructor(
                 val newNames = _uiState.value.attachedNames + "$name (${extraction.pageCount} pages)"
 
                 val status = if (extraction.limitReached) {
-                    "PDF text attached with the 12,000-character limit applied. Review it before requesting suggestions."
+                    "PDF text attached with the 12,000-character limit applied. Review it, then ask your question."
                 } else {
                     "PDF text attached. Review the document name and page count, then add a question."
                 }
@@ -513,11 +539,11 @@ class MainViewModel internal constructor(
     fun suggestSteps() {
         val state = _uiState.value
         if (state.isWhisperTranscribing) {
-            updateState { it.withStatus("Wait for transcription to finish before generating suggestions.") }
+            updateState { it.withStatus("Wait for transcription to finish before asking.") }
             return
         }
         if (state.transcriptReviewPending) {
-            updateState { it.withStatus("Expand and review the complete transcript, then tap Use reviewed transcript before generating suggestions.") }
+            updateState { it.withStatus("Expand and review the complete transcript, then tap Use reviewed transcript.") }
             return
         }
         val task = state.taskInput.trim()
@@ -542,25 +568,24 @@ class MainViewModel internal constructor(
             val firstChunk = AtomicBoolean(true)
             var retrievedCitations = emptyList<LocalDocumentRetriever.DocumentCitation>()
             try {
-                val prompt = buildString {
-                    if (calculation != null) {
-                        append("Offline Calculation Verification:\n${calculation.expression} = ${calculation.displayOutput}\n\n")
-                    }
-                    if (task.isNotBlank()) append("User task or question:\n").append(task)
-                    if (attached.isNotBlank()) {
-                        val retrieval = LocalDocumentRetriever.retrieveTextWithCitations(
-                            query = task,
-                            documentText = attached,
-                            sourceName = state.attachedNames.firstOrNull() ?: "attachment",
-                            maxChars = MainUiState.MAX_ATTACHMENT_CHARS,
-                        )
-                        retrievedCitations = retrieval.citations
-                        val contextToInject = if (retrieval.promptContext.isNotBlank()) retrieval.promptContext else attached
-                        append("\n\nUser-provided text attachment (untrusted reference material):\n").append(contextToInject)
-                    }
-                    append("\n\nGive practical, concise steps and mention only essential assumptions or risks. Finish the answer completely; do not stop mid-sentence or mid-step.")
+                val intent = AnswerDirective.classify(task.ifBlank { attached })
+                val history = conversationHistoryFor(task)
+                val calculation = if (task.isNotBlank()) LocalCalculatorTool.tryEvaluate(task) else null
+                val contextToInject = if (attached.isNotBlank()) {
+                    val retrieval = LocalDocumentRetriever.retrieveTextWithCitations(
+                        query = task,
+                        documentText = attached,
+                        sourceName = state.attachedNames.firstOrNull() ?: "attachment",
+                        maxChars = MainUiState.MAX_ATTACHMENT_CHARS,
+                    )
+                    retrievedCitations = retrieval.citations
+                    if (retrieval.promptContext.isNotBlank()) retrieval.promptContext else attached
+                } else {
+                    ""
                 }
 
+                // Long-term memory (from main) enriches the intent-aware instruction rather than
+                // replacing it, so the runaway guard and answer-shaped prompting still apply.
                 val effectiveInstruction = if (state.isMemoryEnabled) {
                     val candidateFacts = MemoryFactExtractor.extractCandidateFacts(task)
                     for (cf in candidateFacts) {
@@ -575,29 +600,62 @@ class MainViewModel internal constructor(
                         refreshMemories()
                     }
                     val memoryBlock = userMemoryStore.buildPromptContext(maxTokens = 120)
-                    ContextBudgetManager().enrichSystemInstructionWithMemory(MainUiState.SYSTEM_INSTRUCTION, memoryBlock)
+                    ContextBudgetManager().enrichSystemInstructionWithMemory(
+                        AnswerDirective.systemInstructionFor(intent),
+                        memoryBlock,
+                    )
                 } else {
-                    MainUiState.SYSTEM_INSTRUCTION
+                    AnswerDirective.systemInstructionFor(intent)
                 }
 
-                val result = llmRunner.runInference(
-                    prompt = prompt,
-                    systemInstruction = effectiveInstruction,
-                    maxTokens = MainUiState.MAX_RESPONSE_TOKENS,
-                    onChunk = { chunk ->
-                        if (isGenerationCancelled.get()) return@runInference
-                        val currentText = synchronized(accumulated) {
-                            accumulated.append(chunk)
-                            accumulated.toString()
-                        }
+                var attempt = 0
+                var result = ""
+                // Two attempts at most: one normal answer, plus one corrective retry if the model
+                // dodges the question with "go search for it yourself" instead of answering.
+                while (attempt < MAX_ANSWER_ATTEMPTS) {
+                    val isRetry = attempt > 0
+                    if (isRetry) {
+                        synchronized(accumulated) { accumulated.setLength(0) }
+                        firstChunk.set(true)
+                        updateState { it.withStatus("Answer needs more detail. Refining on this device…") }
+                    }
+
+                    val prompt = answerPrompt(task = task, attachment = contextToInject, intent = intent, isRetry = isRetry, history = history, calculation = calculation)
+                    // The guard stops a model that locks onto a phrase and repeats it forever.
+                    val guard = GuardedGeneration { currentText ->
                         val isFirst = firstChunk.compareAndSet(true, false)
                         val formatted = MarkdownFormatter.formatForDisplay(currentText)
                         val plain = MarkdownFormatter.stripToPlainText(currentText)
                         updateState {
                             it.withStreamChunk(currentText, formatted, plain, isFirst)
                         }
-                    },
-                ).trim()
+                    }
+                    val raw = llmRunner.runInference(
+                        prompt = prompt,
+                        // Memory-enriched, intent-aware instruction.
+                        systemInstruction = effectiveInstruction,
+                        maxTokens = MainUiState.MAX_RESPONSE_TOKENS,
+                        onChunk = { chunk ->
+                            if (isGenerationCancelled.get()) {
+                                guard.cancel()
+                            }
+                            guard.accept(accumulated, chunk)
+                        },
+                    )
+                    runawayFragment = guard.runawayFragment
+                    result = AnswerFinalizer.finalize(
+                        if (guard.runawayFragment != null) guard.text(accumulated) else raw
+                    ).text
+
+                    if (isGenerationCancelled.get()) break
+                    // A runaway answer is already the best we can get from this attempt.
+                    if (guard.runawayFragment != null) break
+
+                    val dodged = AnswerDirective.looksLikeDelegationRefusal(result, intent) ||
+                        AnswerDirective.isUnsubstantive(result)
+                    if (!dodged || isRetry) break
+                    attempt++
+                }
 
                 if (isGenerationCancelled.get()) {
                     val currentText = synchronized(accumulated) { accumulated.toString().trim() }
@@ -612,6 +670,14 @@ class MainViewModel internal constructor(
                 updateState {
                     it.withGenerationCompleted(result, finalFormatted, finalPlain)
                         .withDocumentCitations(retrievedCitations)
+                        .let { done ->
+                            val stopped = runawayFragment
+                            if (stopped != null && result.isNotBlank()) {
+                                done.withStatus(RunawayGuard.stoppedNotice(stopped))
+                            } else {
+                                done
+                            }
+                        }
                 }
 
                 // Persist turns to the active session
@@ -630,6 +696,25 @@ class MainViewModel internal constructor(
             }
         }
     }
+
+    /**
+     * Builds the prompt for one answer attempt, carrying real conversation history so follow-up
+     * questions ("and by train?") have context, and shaping the request by intent so a factual
+     * question is answered instead of being turned into a to-do list for the user.
+     */
+    /** Recent turns for the active session, minus the turn currently being generated. */
+    private fun conversationHistoryFor(task: String): List<ChatMessage> =
+        promptContext.historyFor(activeSession?.messages.orEmpty(), task)
+
+    /** Answer-shaped prompt for one attempt; see [AnswerPromptComposer]. */
+    private fun answerPrompt(
+        task: String,
+        attachment: String,
+        intent: AnswerDirective.Intent,
+        isRetry: Boolean,
+        history: List<ChatMessage>,
+        calculation: LocalCalculatorTool.CalculationResult? = null,
+    ): String = promptContext.answerPrompt(task, attachment, intent, isRetry, history, calculation)
 
     /**
      * Halts an in-progress token generation loop cleanly.
@@ -973,7 +1058,17 @@ class MainViewModel internal constructor(
             val updated = current.withMessage(userMsg).withMessage(assistantMsg)
             sessionStore.saveSession(updated)
             activeSession = updated
-            refreshSessions()
+            // Point the UI state at this session explicitly. refreshSessions() would read the
+            // previous currentSessionId (still null on the first turn) and null out activeSession,
+            // dropping the history that was just saved.
+            updateState {
+                it.withSessions(
+                    summaries = sessionStore.listSessionSummaries(),
+                    activeId = updated.id,
+                    activeTitle = updated.title,
+                    isPinned = updated.isPinned,
+                )
+            }
         } catch (_: Exception) {}
     }
 

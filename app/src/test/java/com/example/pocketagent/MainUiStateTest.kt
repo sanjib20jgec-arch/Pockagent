@@ -197,10 +197,15 @@ class MainUiStateTest {
 
     @Test
     fun verifiesSafetyInvariants() {
-        assertEquals(256, MainUiState.MAX_RESPONSE_TOKENS)
+        // A real answer needs room: 256 tokens truncated factual answers mid-sentence.
+        assertEquals(1024, MainUiState.MAX_RESPONSE_TOKENS)
         assertNotNull(MainUiState.SYSTEM_INSTRUCTION)
         assertTrue(MainUiState.SYSTEM_INSTRUCTION.contains("cannot see or control their device"))
         assertTrue(MainUiState.SYSTEM_INSTRUCTION.contains("untrusted content"))
         assertTrue(MainUiState.SYSTEM_INSTRUCTION.contains("Do not ask for passwords"))
+        // The instruction must demand an answer, not a generic "give me 3-5 steps" reply.
+        assertTrue(MainUiState.SYSTEM_INSTRUCTION.contains("answer the user's request yourself"))
+        assertFalse(MainUiState.SYSTEM_INSTRUCTION.contains("usually 3–5 steps"))
+        assertEquals(MainUiState.SYSTEM_INSTRUCTION, AnswerDirective.SYSTEM_INSTRUCTION)
     }
 }

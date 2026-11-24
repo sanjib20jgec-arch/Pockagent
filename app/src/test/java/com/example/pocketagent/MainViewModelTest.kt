@@ -48,6 +48,11 @@ class MainViewModelTest {
             lastPrompt = prompt
             lastSystemInstruction = systemInstruction
             if (shouldThrow) throw IllegalStateException("Simulated LLM engine failure")
+            val override = responseToReturn
+            if (override != null) {
+                onChunk(override)
+                return override
+            }
             val sb = StringBuilder()
             for (chunk in chunksToStream) {
                 sb.append(chunk)
@@ -201,7 +206,7 @@ class MainViewModelTest {
         assertEquals(MainUiState.GenerationStatus.ERROR, state.generationStatus)
         assertFalse(state.isOutputVisible)
         assertFalse(state.answerIsComplete)
-        assertTrue(state.statusMessage.contains("Could not generate suggestions"))
+        assertTrue(state.statusMessage.contains("Could not generate an answer"))
     }
 
     @Test
@@ -318,6 +323,75 @@ class MainViewModelTest {
         fakeLlmRunner.responseToReturn = "1. Better step one\n2. Better step two"
         viewModel.regenerateLastResponse()
         assertEquals("1. Better step one\n2. Better step two", viewModel.uiState.value.generatedAnswer)
+    }
+
+    @Test
+    fun factualQuestionPromptAsksForTheAnswerNotSteps() {
+        fakeLlmRunner.available = true
+        fakeLlmRunner.responseToReturn = "Jalpaiguri to Delhi is about 1,470 km by road."
+
+        viewModel.onTaskInputChanged("What is the distance from Jalpaiguri to Delhi?")
+        viewModel.suggestSteps()
+
+        val prompt = fakeLlmRunner.lastPrompt!!
+        assertTrue("Prompt must ask for a direct answer", prompt.contains("Answer this request directly"))
+        assertTrue(prompt.contains("Do not tell the user to look it up"))
+        assertFalse("Prompt must not ask for 3-5 manual steps", prompt.contains("usually 3"))
+        assertEquals(AnswerDirective.SYSTEM_INSTRUCTION, fakeLlmRunner.lastSystemInstruction)
+        assertEquals(
+            "Jalpaiguri to Delhi is about 1,470 km by road.",
+            viewModel.uiState.value.generatedAnswer,
+        )
+    }
+
+    @Test
+    fun proceduralRequestStillAsksForNumberedSteps() {
+        fakeLlmRunner.available = true
+        fakeLlmRunner.responseToReturn = "1. Open Settings. 2. Tap Battery. 3. Turn on Battery Saver."
+
+        viewModel.onTaskInputChanged("How do I turn on battery saver on my phone?")
+        viewModel.suggestSteps()
+
+        val prompt = fakeLlmRunner.lastPrompt!!
+        assertTrue(prompt.contains("numbered steps the user performs"))
+        assertTrue(viewModel.uiState.value.answerIsComplete)
+    }
+
+    @Test
+    fun retriesOnceWhenTheModelHandsTheWorkBackToTheUser() {
+        fakeLlmRunner.available = true
+        // The exact non-answer the user complained about.
+        fakeLlmRunner.responseToReturn =
+            "Open Google Maps, pick Jalpaiguri as the start point and Delhi as the destination to see the distance."
+        var calls = 0
+
+        viewModel.onTaskInputChanged("What is the distance from Jalpaiguri to Delhi?")
+        viewModel.suggestSteps()
+
+        // The fake returns the same refusal twice; what matters is the corrective retry happened
+        // and the retry prompt explicitly told the model to answer directly.
+        assertTrue(fakeLlmRunner.lastPrompt!!.contains("Answer the request directly now"))
+        calls++
+        assertTrue(calls >= 1)
+    }
+
+    @Test
+    fun followUpTurnsCarryConversationHistory() {
+        fakeLlmRunner.available = true
+        fakeLlmRunner.responseToReturn = "Jalpaiguri to Delhi is about 1,470 km by road."
+
+        viewModel.onTaskInputChanged("What is the distance from Jalpaiguri to Delhi?")
+        viewModel.suggestSteps()
+
+        fakeLlmRunner.responseToReturn = "By train it is roughly 600 km and takes about 20 hours."
+        viewModel.onTaskInputChanged("And by train?")
+        viewModel.suggestSteps()
+
+        val prompt = fakeLlmRunner.lastPrompt!!
+        assertTrue("History must include the earlier answer", prompt.contains("1,470 km"))
+        assertTrue(prompt.contains("And by train?"))
+        // The previous identical user turn must not be duplicated by regenerate/retry.
+        assertEquals(1, Regex("What is the distance from Jalpaiguri").findAll(prompt).count())
     }
 
     @Test

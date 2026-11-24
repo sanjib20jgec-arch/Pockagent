@@ -134,16 +134,28 @@ object LocalCalculatorTool {
      * Evaluates an arithmetic expression using Shunting-Yard and RPN evaluation.
      */
     fun evaluateMathExpression(expression: String): CalculationResult {
-        val sanitized = expression
-            .replace("×", "*")
-            .replace("÷", "/")
-            .replace("π", Math.PI.toString())
+        // Substitute constants only as whole words. A blind replace("e", ...) rewrote the letter
+        // "e" inside ordinary words ("hello world" -> "h2.718...llo"), which made the tool
+        // "evaluate" prose and inject a bogus verification line into the prompt.
+        val sanitized = wholeWordConstants(
+            expression
+                .replace("×", "*")
+                .replace("÷", "/"),
+        )
 
         val tokens = tokenize(sanitized)
         require(tokens.isNotEmpty()) { "No valid math tokens found." }
         require(tokens.any { it in listOf("+", "-", "*", "/", "%", "^") || isFunction(it) }) {
             "Expression must contain an operator or math function."
         }
+
+        // If the text still contains a non-function word, it is prose, not an expression.
+        val hasProse = tokens.any { token ->
+            token.toDoubleOrNull() == null &&
+                !isFunction(token) &&
+                token !in listOf("+", "-", "*", "/", "%", "^", "(", ")", ",")
+        }
+        require(!hasProse) { "Not a math expression." }
 
         val rpn = shuntingYard(tokens)
         val result = evaluateRpn(rpn)
@@ -155,6 +167,15 @@ object LocalCalculatorTool {
             numericValue = result,
             formattedResult = numberFormat.format(result),
         )
+    }
+
+    /** Replaces pi/π/e with their values only when they stand alone as words. */
+    private fun wholeWordConstants(expr: String): String {
+        var out = expr
+        out = Regex("(?<![A-Za-z])pi(?![A-Za-z])", RegexOption.IGNORE_CASE).replace(out, Math.PI.toString())
+        out = out.replace("π", Math.PI.toString())
+        out = Regex("(?<![A-Za-z])e(?![A-Za-z])").replace(out, Math.E.toString())
+        return out
     }
 
     private fun tokenize(expr: String): List<String> {

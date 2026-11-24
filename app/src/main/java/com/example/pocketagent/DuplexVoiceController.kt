@@ -62,7 +62,18 @@ class DuplexVoiceController(
     private val ttsSpeaker: TtsSpeaker,
     private val workerExecutor: Executor,
     private val mainDispatcher: (Runnable) -> Unit = { it.run() },
+    /**
+     * Builds the system instruction for a spoken turn. Voice answers go through the same
+     * intent-aware directive as typed ones, so the assistant states the answer instead of
+     * telling the user how to look it up themselves.
+     */
+    private val instructionFor: (String, String) -> String = { _, base -> base },
 ) {
+    private companion object {
+        /** Longest answer spoken aloud in one turn; anything longer is cut at a sentence end. */
+        const val MAX_SPOKEN_ANSWER_CHARS = 600
+    }
+
     enum class DuplexState {
         IDLE,
         LISTENING,
@@ -236,24 +247,40 @@ class DuplexVoiceController(
 
         workerExecutor.execute {
             val responseAccumulator = StringBuilder()
+            // The same runaway guard used for typed turns: voice must also stop instead of
+            // looping the same lines forever.
+            val guard = GuardedGeneration { partial ->
+                val listener = activeListener
+                mainDispatcher(Runnable {
+                    listener?.onAssistantChunk(partial)
+                })
+            }
             try {
-                val fullResult = llmRunner.runInference(
+                val instruction = instructionFor(userPrompt, activeSystemInstruction)
+                llmRunner.runInference(
                     prompt = userPrompt,
-                    systemInstruction = activeSystemInstruction,
+                    systemInstruction = instruction,
                     maxTokens = MainUiState.MAX_RESPONSE_TOKENS,
                     onChunk = { chunk ->
-                        if (!isSessionActive.get() || isInterrupted.get()) return@runInference
-                        responseAccumulator.append(chunk)
-                        val listener = activeListener
-                        mainDispatcher(Runnable {
-                            listener?.onAssistantChunk(chunk)
-                        })
+                        if (!isSessionActive.get() || isInterrupted.get()) {
+                            guard.cancel()
+                        }
+                        guard.accept(responseAccumulator, chunk)
                     }
-                ).trim()
+                )
 
                 if (!isSessionActive.get() || isInterrupted.get()) return@execute
 
-                val speakableText = MarkdownFormatter.stripToPlainText(fullResult).ifBlank { fullResult }
+                val rawResult = guard.text(responseAccumulator).trim()
+                // Collapse any repeating tail the guard let through, so the spoken answer
+                // ends once rather than echoing itself.
+                val fullResult = AnswerFinalizer.finalize(rawResult).text
+                val spoken = if (fullResult.isBlank()) {
+                    "I couldn't finish that answer."
+                } else {
+                    MarkdownFormatter.stripToPlainText(fullResult).ifBlank { fullResult }
+                }
+                val speakableText = nextSpeakableSentence(spoken)
                 speakAndLoop(userPrompt, speakableText)
             } catch (e: Exception) {
                 if (isSessionActive.get()) {
@@ -262,6 +289,17 @@ class DuplexVoiceController(
                 }
             }
         }
+    }
+
+    /**
+     * Keeps the spoken turn to the first sentence or two: a runaway answer must not be read
+     * aloud for minutes even after the guard clamped it.
+     */
+    private fun nextSpeakableSentence(text: String): String {
+        if (text.length <= MAX_SPOKEN_ANSWER_CHARS) return text
+        val window = text.take(MAX_SPOKEN_ANSWER_CHARS)
+        val boundary = window.lastIndexOfAny(charArrayOf('.', '!', '?'))
+        return if (boundary > 0) window.take(boundary + 1) else window.trimEnd()
     }
 
     private fun speakAndLoop(userPrompt: String, assistantText: String) {

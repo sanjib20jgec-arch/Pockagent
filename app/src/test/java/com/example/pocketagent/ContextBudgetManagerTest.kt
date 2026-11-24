@@ -101,9 +101,9 @@ class ContextBudgetManagerTest {
     fun compactsHistoricalAttachmentsToSummariesToPreserveContextTokens() {
         val manager = ContextBudgetManager(
             ContextBudgetManager.TokenBudget(
-                maxContextTokens = 2000,
-                maxResponseTokens = 256,
-                reservedSystemTokens = 200,
+                maxContextTokens = 4096,
+                maxResponseTokens = 1024,
+                reservedSystemTokens = 400,
             )
         )
 

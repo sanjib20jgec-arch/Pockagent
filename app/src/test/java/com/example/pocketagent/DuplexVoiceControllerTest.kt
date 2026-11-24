@@ -2,6 +2,7 @@ package com.example.pocketagent
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -41,6 +42,10 @@ class DuplexVoiceControllerTest {
 
         override fun stop() {
             isStopped = true
+        }
+
+        override fun close() {
+            stop()
         }
     }
 
@@ -153,5 +158,108 @@ class DuplexVoiceControllerTest {
         assertTrue(fakeTts.isStopped)
         assertTrue(controller.isActive)
         assertEquals(DuplexVoiceController.DuplexState.LISTENING, controller.state)
+    }
+
+    /** Builds a controller whose spoken turns use [instructionFor]. */
+    private fun controllerWithInstruction(instructionFor: (String, String) -> String): DuplexVoiceController =
+        DuplexVoiceController(
+            audioRecorder = fakeRecorder,
+            whisperTranscriber = fakeWhisper,
+            llmRunner = fakeLlm,
+            ttsSpeaker = fakeTts,
+            workerExecutor = Executor { it.run() },
+            mainDispatcher = { it.run() },
+            instructionFor = instructionFor,
+        )
+
+    private fun runOneVoiceTurn(controller: DuplexVoiceController): String? {
+        var spoken: String? = null
+        controller.startSession(
+            whisperContext = 100L,
+            listener = object : DuplexVoiceController.Listener {
+                override fun onStateChanged(state: DuplexVoiceController.DuplexState, statusMessage: String) {}
+                override fun onAmplitude(rms: Float) {}
+                override fun onUserTranscribed(text: String) {}
+                override fun onAssistantChunk(chunk: String) {}
+                override fun onTurnComplete(userText: String, assistantText: String) { spoken = assistantText }
+                override fun onError(error: Throwable) {}
+            }
+        )
+        // Let the recorder thread deliver its synthetic speech turn.
+        val deadline = System.currentTimeMillis() + 5_000
+        while (spoken == null && System.currentTimeMillis() < deadline) {
+            Thread.sleep(10)
+        }
+        controller.stopSession()
+        return spoken
+    }
+
+    @Test
+    fun `spoken turns use the intent-aware instruction from the view model`() {
+        var receivedSpokenPrompt: String? = null
+        val voiceController = controllerWithInstruction { spokenPrompt, _ ->
+            receivedSpokenPrompt = spokenPrompt
+            "INTENT-AWARE DIRECTIVE"
+        }
+
+        assertEquals("The weather is sunny and pleasant.", runOneVoiceTurn(voiceController))
+
+        // The directive built for the spoken turn is what the model actually sees.
+        assertEquals("INTENT-AWARE DIRECTIVE", fakeLlm.lastSystemInstruction)
+        assertEquals("What is the weather today?", receivedSpokenPrompt)
+    }
+
+    @Test
+    fun `spoken answer is clamped once instead of looping forever`() {
+        // A degenerate model repeating the same line far past the answer budget: exactly the
+        // reported failure mode, where the same two lines are printed forever.
+        val loopingLine = "Checking the weather.\n"
+        fakeLlm.chunksToStream = List(2_000) { loopingLine }
+        val voiceController = controllerWithInstruction { _, _ -> "BASE" }
+
+        var largestPartial = 0
+        var spoken: String? = null
+        voiceController.startSession(
+            whisperContext = 100L,
+            listener = object : DuplexVoiceController.Listener {
+                override fun onStateChanged(state: DuplexVoiceController.DuplexState, statusMessage: String) {}
+                override fun onAmplitude(rms: Float) {}
+                override fun onUserTranscribed(text: String) {}
+                override fun onAssistantChunk(chunk: String) {
+                    largestPartial = maxOf(largestPartial, chunk.length)
+                }
+                override fun onTurnComplete(userText: String, assistantText: String) { spoken = assistantText }
+                override fun onError(error: Throwable) {}
+            }
+        )
+        val deadline = System.currentTimeMillis() + 5_000
+        while (spoken == null && System.currentTimeMillis() < deadline) {
+            Thread.sleep(10)
+        }
+        voiceController.stopSession()
+
+        // The model produced 44,000 characters of the same line.
+        assertEquals(44_000, loopingLine.length * 2_000)
+
+        // The runaway guard stops feeding the UI long before that.
+        assertTrue(
+            "streamed text must stay under the answer budget, got $largestPartial",
+            largestPartial <= RunawayGuard.MAX_ANSWER_CHARS
+        )
+
+        assertNotNull(spoken)
+        val answer = spoken!!
+        assertTrue("spoken answer must not be empty", answer.isNotBlank())
+        assertTrue("spoken answer must be clamped, was ${answer.length} chars", answer.length <= 600)
+        assertTrue(
+            "the looped line must appear a handful of times, not hundreds (count=${answer.split("Checking the weather.").size - 1}, answer=<<<$answer>>>)",
+            answer.split("Checking the weather.").size - 1 <= 3
+        )
+    }
+
+    @Test
+    fun `voice turn with no instruction hook still answers`() {
+        // Defensive: the default instructionFor must not break normal spoken turns.
+        assertEquals("The weather is sunny and pleasant.", runOneVoiceTurn(controller))
     }
 }

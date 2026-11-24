@@ -20,12 +20,13 @@ This is the persistent task ledger for the current product direction. It is grou
 
 ## Current baseline
 
-- Audit baseline: `b86f420`; M0 implementation commit: `ab12ad9`; M1 UI commit: `eb0668b`; PDF implementation commit: `5ad1201` with CI compile-fix follow-up `d9e5c83` on `arena/85d065bd-pockagent`; base `main` is `f579f52`.
-- GitHub Actions run `45351718497` passed source-archive verification, `testDebugUnitTest`, `assembleDebug`, and APK artifact upload for `d9e5c83`.
-- Twelve unit tests cover bounded text reading, PDF staging size/cleanup, and model import success/failure/rollback. No Android UI/instrumented tests, lint, or device/emulator tests exist. Local build remains unavailable (no Java/Gradle executable or wrapper).
-- User-reported: app launches and loads the Gemma 3 1B INT4 model; generated output/UI need improvement.
-- Current app supports typed prompts, live system speech-to-text, bounded text/Markdown/CSV/PDF attachments, local CPU inference, and answer copy/share/TTS. The PDF slice passed CI; device/runtime validation remains open. Image input, imported audio transcription, chat history and tool execution are not implemented.
-- The stale source ZIP has been regenerated. The guard verifies current files and rejects active AccessibilityService/control code; local and CI archive checks passed.
+- Audit baseline: `b86f420`; M0 implementation commit: `ab12ad9`; M1 UI commit: `eb0668b`; base `main` is `f579f52`. The remote active branch tip is `4b4537b` (`Align malformed WAV test with parser errors`).
+- GitHub Actions run [`45356278351`](https://github.com/sanjib20jgec-arch/Pockagent/actions/runs/45356278351) passed source-archive verification, `testDebugUnitTest`, `assembleDebug`, and APK artifact upload for `4b4537b`.
+- The passing suite contains 24 unit tests across six test files, covering bounded text/model/PDF/WAV staging, WAV parsing/resampling, and model import/rollback. No Android UI/instrumented tests or lint run are present. This workspace has no `java`, `gradle`, `adb`, or Gradle wrapper, and no emulator/device is attached.
+- User-reported: app launches and loads the Gemma 3 1B INT4 model; generated output/UI need improvement. This is not QA evidence for the current APK.
+- Current app supports typed prompts, live system speech-to-text, bounded text/Markdown/CSV/PDF attachments, the approved local WAV prototype, local CPU inference, and answer copy/share/TTS. PDF and WAV source/build tests pass in CI; runtime/device validation remains open. Image input, chat history and tool execution are not implemented.
+- The source ZIP matches the current manual-only source. `python3 scripts/package_source.py --check` passed locally and in CI; no AccessibilityService-based control code is present in the app source.
+- Workspace note: the initial checkout `HEAD` was at base `f579f52` while its files matched all 30 paths at remote tip `4b4537b`. After verifying no missing or mismatched remote files, `git reset --mixed origin/arena/85d065bd-pockagent` safely aligned the current branch/index without changing working files. Only this ledger and regenerated `PocketAgent.zip` are now modified.
 
 ## Task ledger
 
@@ -34,18 +35,41 @@ This is the persistent task ledger for the current product direction. It is grou
 | AUD-001 | Repository, feature, privacy, build and architecture audit | Repository Auditor + QA + Security | **COMPLETED** | None | Low; report in `PROJECT_AUDIT.md` |
 | ARC-001 | Confirm incremental architecture and dependency boundaries | System Architect | **COMPLETED (M0 scope)** | AUD-001 | Narrow pure helpers; no broad rewrite |
 | SAFE-001 | Regenerate stale source ZIP; verify no legacy service/control remains | Security + Release | **COMPLETED** | AUD-001; M0 approved | Current archive checker and CI pass; no legacy implementation files in bundle |
-| TEST-001 | Add focused unit tests for bounded text extraction and import rollback | QA + Implementation | **COMPLETED** | ARC-001; small testable seam | Nine JUnit cases passed in CI run 45346913699 |
-| AI-001 | Harden model import (bounds, free space, atomic replace/rollback, retry/error states) | AI Engine + Implementation | **COMPLETED (CI/unit scope)** | ARC-001, TEST-001 | Size/free-space guard; atomic replace; previous model retained on tested failures; no device validation |
-| UX-001 | Accessibility, responsive layout, and accurate speech-privacy disclosure review | UI/UX + Security + QA | **IN PROGRESS** | AUD-001 | Native button semantics, explicit labels, 48dp minimum controls, live status regions, stronger muted-text contrast implemented; CI passes; device review remains unverified |
-| QA-DEVICE-001 | Verify permission, missing/corrupt model, speech, inference and UI flows on Android | QA | **BLOCKED** | M0 app build available; physical device/emulator needed | No device/emulator is available in workspace; user-device checks requested after APK install |
+| TEST-001 | Add focused unit tests for bounded text extraction and import rollback | QA + Implementation | **COMPLETED (CI/unit scope)** | ARC-001; small testable seam | 24 unit tests passed in run `45356278351`; no Android UI/instrumented tests |
+| AI-001 | Harden model import (bounds, free space, atomic replace/rollback, retry/error states) | AI Engine + Implementation | **COMPLETED (CI/unit scope)** | ARC-001, TEST-001 | Size/free-space guard and rollback tests pass; device/runtime failure behavior remains unverified |
+| UX-001 | Accessibility, responsive layout, and accurate speech-privacy disclosure review | UI/UX + Security + QA | **IN PROGRESS** | AUD-001 | Semantic buttons, labels, 48dp minimum targets, polite live regions, and stronger muted-text contrast implemented; CI passed; Android accessibility/layout review remains outstanding |
+| QA-DEVICE-001 | Verify permission, missing/corrupt model, speech, inference and UI flows on Android | QA | **BLOCKED** | CI-built debug APK; physical device/emulator needed | No `adb`, emulator, or device is available here. Detailed manual checklist below; do not mark complete until evidence is recorded |
 | AI-002 | Model status/capability metadata and inference progress/cancel feasibility | AI Engine + QA | **PROPOSED** | AI-001; LiteRT-LM API review | Medium; no unsupported capability promises |
-| DOC-001 | Bounded PDF text extraction with user preview/source attribution | Document/Knowledge + Security | **IN PROGRESS (CI verified; device/runtime validation pending)** | M0 device QA remains open; PDF input/staging and TEST-001 | Medium-high; parser attack surface, decompression, dependency and device testing |
-| VOICE-001 | User-selected local WAV transcription using whisper.cpp | Voice + Security + QA | **IN PROGRESS (approved prototype; CI/device verification pending)** | Model weights remain unselected/unbundled; audio format bounds and privacy disclosure | High; native parser/runtime, memory use, model terms, language and device performance |
+| DOC-001 | Bounded PDF text extraction with user preview/source attribution | Document/Knowledge + Security | **IN PROGRESS (CI/unit verified; device/runtime validation pending)** | M0 device QA remains open; PDF input/staging and TEST-001 | Medium-high; parser attack surface, decompression, dependency and device testing |
+| VOICE-001 | User-selected local WAV transcription using whisper.cpp | Voice + Security + QA | **IN PROGRESS (prototype CI/build/unit verified; device/model validation pending)** | Model weights remain unselected/unbundled; audio format bounds and privacy disclosure | High; native parser/runtime, memory use, model terms, language and device performance |
 | VOICE-FEAS-001 | Research offline imported-audio ASR options | Voice + Security + QA | **COMPLETED (research only; no integration)** | No code/dependency integration | Candidate comparison documented; model-specific choice and device benchmark remain open |
 | VIS-001 | Image input with a compatible multimodal model/runtime | AI Engine + UI/UX + QA + Security | **PROPOSED** | M0 gates, AI-002, model/API/hardware compatibility review | High; memory, preprocessing, model license/size |
 | STATE-001 | Optional local conversation history with user deletion controls | Memory/Knowledge + Security + QA | **PROPOSED** | M0 gates; explicit retention approval | Medium-high; data lifecycle and migrations |
 | TOOL-001 | Safe local utilities (e.g. calculator) | Tooling + Security + QA | **OUT OF SCOPE** | Requires separate product approval | High if expanded into action/execution |
 | AUTO-001 | Accessibility-driven screen inspection/control or autonomous phone actions | Tooling + Security | **OUT OF SCOPE** | Explicitly rejected direction | Prohibited by product constraint |
+
+## M0/M1 device verification checklist — NOT RUN
+
+Use the debug APK artifact from successful CI run `45356278351` on an Android device or emulator. These checks are not satisfied by CI compilation or by the prior user-reported launch. Record device/API level, APK hash, model source/version, results, and any failures before changing QA-DEVICE-001 or UX-001 status.
+
+**M0 functional and privacy checks**
+
+- [ ] Fresh install and launch with no model: verify the ready/missing-model status is understandable, Suggest does not crash or infer without a model, and typing remains available.
+- [ ] Select a valid, supported `.litertlm` model from local storage: verify import progress, ready state, one short local prompt, a non-empty response, retry after a transient inference error, and no stale output after failure.
+- [ ] Cancel model selection; select a non-`.litertlm` file; then test a corrupt `.litertlm` only on a disposable install or after backing up the known-good model. Verify user-visible failure/retry and record whether a previous valid model remains usable. Do not risk the only copy of a user model.
+- [ ] With a plain-text fixture, attach, inspect the preview, remove it, and verify its text is not used after removal. Test empty input and a fixture that reaches the 12,000-character combined limit; verify the app stays responsive and explains the limit.
+- [ ] Tap Dictate before granting microphone permission: verify Android asks only at that point. Deny permission and verify the fallback status plus typing/attachment still work. Revoke permission in Android settings and repeat.
+- [ ] Grant permission and test speech results, no-speech/empty results, recognizer errors, and an unavailable-recognizer case where the device can provide one. Verify the recognized text is reviewable/editable, failures are visible, and the user can type instead.
+- [ ] Test model initialization/inference errors and empty model output where safely reproducible. Verify there is no crash, stale answer, automatic action, or loss of a retry path; capture logs with private prompt content redacted.
+- [ ] Verify ordinary text/model handling does not ask for unrelated permissions. Confirm there are no Accessibility settings/service prompts and no screen-reading, app-launch, tap, typing, or gesture behavior.
+
+**M1 accessibility and layout checks**
+
+- [ ] With TalkBack on, navigate the whole screen in order. Confirm every action has a concise, unique spoken label; enabled/disabled state is conveyed; transcript confirmation and attachment removal are discoverable; status updates for import, listening, generating, ready, and errors are announced without repetitive noise.
+- [ ] Verify every interactive control has at least a 48dp effective touch target (56dp for the main suggestion action) and remains usable with TalkBack focus and switch/keyboard navigation if available.
+- [ ] Set Android font/display size to the largest practical values, then repeat at narrow portrait and landscape widths. Scroll through the screen and verify labels, status messages, privacy disclosure, preview controls, and primary actions do not overlap or become unreachable.
+- [ ] Check foreground/background contrast for primary, muted, disabled, and status text in the shipped theme. Verify status is communicated by text/state, not color alone.
+- [ ] Confirm the disclosure distinguishes local model inference from device-configured speech recognition, whose provider/network behavior may vary. Confirm imported file transcription does not request microphone permission.
 
 ## Dependency map
 
@@ -70,7 +94,7 @@ M0 quality gate
 
 ### M0 — Safe, verifiable baseline (P0/P1) — IN PROGRESS (user approved)
 
-**Objective:** correct release/source integrity, add first regression evidence, protect model and user data before adding more formats. Archive safety, nine unit tests, import hardening, and CI assembly pass; device-level permission/speech/inference/accessibility checks remain unverified and block full M0 closure.
+**Objective:** correct release/source integrity, add regression evidence, and protect model and user data. Archive safety, 24 unit tests, import hardening, CI unit tests, and debug APK assembly pass in run `45356278351`; device-level permission/speech/inference/accessibility checks remain unverified and block full M0 closure.
 
 **Tasks:** SAFE-001, TEST-001, AI-001, UX-001. Confirm architecture recommendations through ARC-001.
 
@@ -98,7 +122,7 @@ M0 quality gate
 
 **Risks:** platform/provider differences; no device QA can be claimed without a device.
 
-### M2 — Documents and audio input (P2) — IN PROGRESS (PDF CI verified; approved WAV prototype under implementation)
+### M2 — Documents and audio input (P2) — IN PROGRESS (PDF and approved WAV prototype CI/unit verified; device validation pending)
 
 **Objective:** accept user-selected material only through a bounded, inspectable representation the current text model can use.
 
@@ -110,13 +134,13 @@ M0 quality gate
 - [whisper.cpp](https://github.com/ggml-org/whisper.cpp) declares MIT and includes an [Android example](https://github.com/ggml-org/whisper.cpp/tree/master/examples/whisper.android) that transcribes local WAV samples with a locally loaded model. Its published ggml model table lists approximate weights of 75 MiB for tiny, 142 MiB for base, 466 MiB for small, and 1.5 GiB for medium. The Android sample's WAV helper reads the entire file into memory and assumes a simple WAV layout; it is a feasibility example, not safe production import code. Runtime license does not replace review of model terms. Multilingual variants exist, but accuracy for target languages and resource use on PocketAgent devices remain untested.
 - Android `SpeechRecognizer` remains suitable for the existing live-dictation flow, not a dependable imported-file/offline contract; API support for audio-source input is recognizer-dependent.
 
-**Implementation decision:** the user explicitly approved a WAV-only whisper.cpp prototype, with model selection kept separate. The build fetches pinned whisper.cpp v1.9.5 source at build time (SHA-256 checked); the app includes no model weights and has no runtime download or cloud path. UI requires the user to select a compatible `.bin` model from local storage. The prototype has not yet passed CI/device testing.
+**Implementation decision:** the user explicitly approved a WAV-only whisper.cpp prototype, with model selection kept separate. The build fetches pinned whisper.cpp v1.9.5 source at build time (SHA-256 checked); the app includes no model weights and has no runtime download or cloud path. UI requires the user to select a compatible `.bin` model from local storage. CI build/unit tests pass in run `45356278351`; device/runtime testing and model-specific review remain pending.
 
 **Acceptance criteria:** supported PDF constraints are visible; selected files are staged with a hard byte cap; page count and extracted context are bounded; users can inspect/expand/remove extracted text before inference; source page labels are retained; corrupt, empty, encrypted, oversized, over-page-limit, no-selectable-text, and extracted-text-limit cases fail or truncate clearly; extracted text remains untrusted prompt context. For audio, the format parser rejects non-RIFF, compressed, malformed, over-size, over-duration, or unsupported PCM layouts; resampling and stereo downmix are unit tested; audio remains temporary; the transcript is previewed and explicitly confirmed before model inference. CI and device checks are reported separately, and language accuracy/memory/speed must be tested using a separately selected model.
 
-**Implementation limits currently set:** PDFs: 20 MiB, at most 100 pages, 12,000 combined attachment characters, and PDFBox temporary scratch storage capped at 40 MiB. Audio: RIFF WAV PCM16, mono or stereo, 8–48 kHz, at most 25 MiB and 60 seconds, resampled to 16 kHz mono; transcript shares the 12,000-character attachment cap. The user-selected whisper.cpp ggml `.bin` file is capped at 512 MiB and stored privately/removable. Native runtime is built for arm64-v8a and x86_64; no weights are bundled. PDFBox-Android is Apache-2.0 per its published metadata but adds Bouncy Castle 1.73 and Kotlin stdlib 2.0.21 transitives. whisper.cpp v1.9.5 is MIT; the specific weights' terms remain model-specific and unreviewed. These bounds and native paths still require CI plus adversarial/runtime/device testing.
+**Implementation limits currently set:** PDFs: 20 MiB, at most 100 pages, 12,000 combined attachment characters, and PDFBox temporary scratch storage capped at 40 MiB. Audio: RIFF WAV PCM16, mono or stereo, 8–48 kHz, at most 25 MiB and 60 seconds, resampled to 16 kHz mono; transcript shares the 12,000-character attachment cap. The user-selected whisper.cpp ggml `.bin` file is capped at 512 MiB and stored privately/removable. Native runtime is built for arm64-v8a and x86_64; no weights are bundled. PDFBox-Android is Apache-2.0 per its published metadata but adds Bouncy Castle 1.73 and Kotlin stdlib 2.0.21 transitives. whisper.cpp v1.9.5 is MIT; the specific weights' terms remain model-specific and unreviewed. The bounds, parsers, and native build pass the CI/unit gates in run `45356278351`; adversarial/runtime/device testing remains outstanding.
 
-**Gate note:** M0/M1 device QA remains outstanding. PDF CI passed, but PDF and WAV runtime/device behavior remain unverified; this work does not mark M0/M1 complete. Imported-audio model choice is still user-supplied and no specific weights are endorsed.
+**Gate note:** M0/M1 device QA remains outstanding. Run `45356278351` passed the source archive check, all 24 unit tests, and debug APK assembly; this does not verify PDF/WAV runtime, visual accessibility, or device behavior. This work does not mark M0/M1 complete. Imported-audio model choice is still user-supplied and no specific weights are endorsed.
 
 **Risks:** PDF parser attack surface/decompression and dependency maintenance; C++ JNI/native-build compatibility, model parser/runtime crashes, peak RAM and CPU time, model license/quality per language, ABI coverage, and audio decoder limits.
 
@@ -152,4 +176,4 @@ For each approved task: inspect relevant code and dependencies; document a narro
 
 ## Current decision and next gate
 
-**M0's code and CI gates pass; physical-device verification remains blocked.** M1's accessibility implementation and CI pass, but device verification remains explicitly pending. The user approved M2 PDF extraction and a separate WAV-only whisper.cpp prototype; the offline-ASR research is documented, and the prototype is under implementation without bundled model weights or cloud support. PDF code and CI are verified; the new native/audio code is pending CI/device checks. M1/M0 device verification remains open. Scanned OCR, other audio formats, image input, persistent memory, and tools remain out of scope or unapproved.
+**Current in-progress task: QA-DEVICE-001, blocked on Android device/emulator access; UX-001 is also open pending M1 device accessibility/layout review.** M0 code, 24 unit tests, source-archive verification, and CI debug APK build pass in run `45356278351`; no device behavior is claimed. The M2 PDF and approved WAV prototype are already present in the branch and pass the latest CI build/unit gates, but remain outside the current execution focus and still require runtime/device/model validation. No M2 changes were made during this M0/M1 review. Scanned OCR, other audio formats, image input, persistent memory, and tools remain out of scope or unapproved.

@@ -24,6 +24,10 @@ data class ChatMessage(
     val attachmentContent: String? = null,
     val estimatedTokens: Int = estimateTokens(content, attachmentSummary, attachmentContent),
 ) {
+    val isUser: Boolean get() = role == Role.USER
+    val isAssistant: Boolean get() = role == Role.ASSISTANT
+    val isSystem: Boolean get() = role == Role.SYSTEM
+
     enum class Role {
         USER,
         ASSISTANT,
@@ -45,6 +49,33 @@ data class ChatMessage(
     }
 
     companion object {
+        fun user(
+            content: String,
+            attachmentContent: String? = null,
+            attachmentSummary: String? = null,
+            attachmentReferences: List<String> = emptyList(),
+        ): ChatMessage = ChatMessage(
+            role = Role.USER,
+            content = content,
+            attachmentContent = attachmentContent,
+            attachmentSummary = attachmentSummary,
+            attachmentReferences = attachmentReferences,
+        )
+
+        fun assistant(
+            content: String,
+        ): ChatMessage = ChatMessage(
+            role = Role.ASSISTANT,
+            content = content,
+        )
+
+        fun system(
+            content: String,
+        ): ChatMessage = ChatMessage(
+            role = Role.SYSTEM,
+            content = content,
+        )
+
         private val WHITESPACE_REGEX = "\\s+".toRegex()
 
         /**

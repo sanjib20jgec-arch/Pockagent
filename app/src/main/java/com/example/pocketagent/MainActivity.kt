@@ -1050,7 +1050,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val searchBox = EditText(this).apply {
             hint = "Search conversations…"
             textSize = 14f
-            background = shape(WHITE, 12, LINE)
+            background = shape(WHITE, 12, BORDER)
             setPadding(dp(12), dp(10), dp(12), dp(10))
             setTextColor(INK)
             setHintTextColor(MUTED)
@@ -1084,7 +1084,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
                     setPadding(dp(10), dp(10), dp(10), dp(10))
-                    background = shape(WHITE, 12, LINE)
+                    background = shape(WHITE, 12, BORDER)
                     isClickable = true
                     isFocusable = true
                     setOnClickListener {

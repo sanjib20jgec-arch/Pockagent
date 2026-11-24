@@ -19,6 +19,7 @@ data class SessionSummary(
     val updatedAt: Long,
     val messageCount: Int,
     val totalEstimatedTokens: Int,
+    val isPinned: Boolean = false,
 )
 
 /**
@@ -145,8 +146,37 @@ class SessionStore(
                 updatedAt = it.updatedAt,
                 messageCount = it.messageCount,
                 totalEstimatedTokens = it.totalEstimatedTokens,
+                isPinned = it.isPinned,
             )
+        }.sortedWith(compareByDescending<SessionSummary> { it.isPinned }.thenByDescending { it.updatedAt })
+    }
+
+    fun pinSession(sessionId: String, pinned: Boolean): ConversationSession? {
+        val session = getSession(sessionId) ?: return null
+        val updated = session.withPinned(pinned)
+        saveSession(updated)
+        return updated
+    }
+
+    fun renameSession(sessionId: String, newTitle: String): ConversationSession? {
+        val session = getSession(sessionId) ?: return null
+        val updated = session.withTitle(newTitle)
+        saveSession(updated)
+        return updated
+    }
+
+    fun searchSessions(query: String): List<ConversationSession> {
+        val trimmed = query.trim().lowercase()
+        if (trimmed.isEmpty()) return listSessions()
+        return listSessions().filter { session ->
+            session.title.lowercase().contains(trimmed) ||
+                session.messages.any { it.content.lowercase().contains(trimmed) }
         }
+    }
+
+    fun exportSessionAsMarkdown(sessionId: String): String? {
+        val session = getSession(sessionId) ?: return null
+        return session.exportToMarkdown()
     }
 
     fun deleteSession(sessionId: String): Boolean {
@@ -274,6 +304,7 @@ internal object SessionJsonCodec {
         sb.append("  \"title\": \"").append(escapeJson(session.title)).append("\",\n")
         sb.append("  \"createdAt\": ").append(session.createdAt).append(",\n")
         sb.append("  \"updatedAt\": ").append(session.updatedAt).append(",\n")
+        sb.append("  \"isPinned\": ").append(session.isPinned).append(",\n")
         sb.append("  \"messages\": [\n")
         for ((index, msg) in session.messages.withIndex()) {
             sb.append("    {\n")
@@ -350,12 +381,15 @@ internal object SessionJsonCodec {
             )
         }
 
+        val isPinned = (parsed["isPinned"] as? Boolean) ?: false
+
         return ConversationSession(
             id = id,
             title = title,
             createdAt = createdAt,
             updatedAt = updatedAt,
             messages = messages,
+            isPinned = isPinned,
         )
     }
 

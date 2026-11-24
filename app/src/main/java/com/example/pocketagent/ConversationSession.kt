@@ -20,6 +20,7 @@ data class ConversationSession(
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = createdAt,
     val messages: List<ChatMessage> = emptyList(),
+    val isPinned: Boolean = false,
 ) {
     init {
         require(id.isNotBlank()) { "Session ID cannot be blank." }
@@ -49,6 +50,68 @@ data class ConversationSession(
             updatedAt = stamp,
             messages = messages + message,
         )
+    }
+
+    /**
+     * Returns an updated session instance with the pin status changed.
+     */
+    fun withPinned(pinned: Boolean): ConversationSession = copy(isPinned = pinned)
+
+    /**
+     * Returns an updated session instance with a new title.
+     */
+    fun withTitle(newTitle: String): ConversationSession {
+        val trimmed = newTitle.trim()
+        require(trimmed.isNotBlank()) { "Session title cannot be blank." }
+        return copy(title = trimmed.take(MAX_TITLE_CHARS))
+    }
+
+    /**
+     * Exports the session turns into formatted Markdown text.
+     */
+    fun exportToMarkdown(): String {
+        val sb = StringBuilder()
+        sb.append("# ").append(title).append("\n\n")
+        sb.append("*Session ID:* `").append(id).append("`  \n")
+        sb.append("*Last updated:* ").append(java.time.Instant.ofEpochMilli(updatedAt)).append("\n\n")
+        sb.append("---\n\n")
+        for (msg in messages) {
+            val roleHeader = when (msg.role) {
+                ChatMessage.Role.USER -> "### 👤 User"
+                ChatMessage.Role.ASSISTANT -> "### 🤖 Assistant"
+                ChatMessage.Role.SYSTEM -> "### ⚙️ System"
+            }
+            sb.append(roleHeader).append("\n\n")
+            sb.append(msg.content.trim()).append("\n\n")
+            if (!msg.attachmentContent.isNullOrBlank()) {
+                sb.append("> **Attached Context:**\n> ")
+                sb.append(msg.attachmentContent.replace("\n", "\n> ")).append("\n\n")
+            }
+            sb.append("---\n\n")
+        }
+        return sb.toString().trimEnd() + "\n"
+    }
+
+    /**
+     * Exports the session turns into plain text.
+     */
+    fun exportToPlainText(): String {
+        val sb = StringBuilder()
+        sb.append("PocketAgent Conversation Export\n")
+        sb.append("Title: ").append(title).append("\n")
+        sb.append("Session ID: ").append(id).append("\n")
+        sb.append("Messages: ").append(messageCount).append("\n")
+        sb.append("========================================\n\n")
+        for (msg in messages) {
+            val roleName = when (msg.role) {
+                ChatMessage.Role.USER -> "[USER]"
+                ChatMessage.Role.ASSISTANT -> "[ASSISTANT]"
+                ChatMessage.Role.SYSTEM -> "[SYSTEM]"
+            }
+            sb.append(roleName).append(":\n")
+            sb.append(msg.content.trim()).append("\n\n")
+        }
+        return sb.toString().trimEnd() + "\n"
     }
 
     /**

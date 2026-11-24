@@ -96,6 +96,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var attachmentPreviewExpanded = false
     private var answerIsComplete = false
     private var pendingAnswerToSave: String? = null
+    private val sessionStore by lazy { SessionStore(SessionStore.defaultDir(filesDir)) }
+    private var currentSession: ConversationSession? = null
+    private var lastPrompt: String = ""
+    private val isGeneratingCancelled = AtomicBoolean(false)
+    private lateinit var stopGeneratingButton: Button
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -149,9 +154,15 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             addView(text("LOCAL MODEL INFERENCE", 10f, MUTED, true).apply { letterSpacing = .12f })
         }
         brandRow.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))
-        brandRow.addView(text("MANUAL ASSISTANT", 10f, TEAL, true).apply {
-            setPadding(dp(11), dp(8), dp(11), dp(8))
-            background = shape(MINT, 30)
+        brandRow.addView(pillButton("☰ Chats", accessibilityLabel = "View saved conversations") {
+            showHistoryDialog()
+        }.apply {
+            layoutParams = LinearLayout.LayoutParams(-2, dp(34)).apply { marginEnd = dp(6) }
+        })
+        brandRow.addView(pillButton("+ New", accessibilityLabel = "Start a fresh conversation") {
+            startNewConversation()
+        }.apply {
+            layoutParams = LinearLayout.LayoutParams(-2, dp(34))
         })
         page.addView(brandRow)
 
@@ -307,20 +318,39 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             systemActionContainer.visibility = View.GONE
         })
         outputCard.addView(outputHeader)
+        stopGeneratingButton = pillButton("■ Stop Generating", accessibilityLabel = "Stop in-progress generation") {
+            isGeneratingCancelled.set(true)
+            updateStatus("Stopping generation…")
+        }.apply {
+            visibility = View.GONE
+            background = shape(0xFFC62828.toInt(), 18)
+            setTextColor(WHITE)
+            layoutParams = LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6); bottomMargin = dp(6) }
+        }
+        outputCard.addView(stopGeneratingButton)
+
         answerText = text("", 15f, INK).apply {
             setPadding(0, dp(15), 0, dp(15))
             setTextIsSelectable(true)
             setLineSpacing(dp(4).toFloat(), 1.0f)
         }
         outputCard.addView(answerText)
+
         val outputActions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        outputActions.addView(pillButton("Copy", accessibilityLabel = "Copy suggestion") { copyAnswer() }, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(5) })
-        outputActions.addView(pillButton("Share", accessibilityLabel = "Share suggestion") { shareAnswer() }, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(5); marginEnd = dp(5) })
-        outputActions.addView(pillButton("Read aloud", accessibilityLabel = "Read suggestion aloud") { speakAnswer() }, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(5) })
+        outputActions.addView(pillButton("Copy", accessibilityLabel = "Copy suggestion") { copyAnswer() }, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(4) })
+        outputActions.addView(pillButton("Share", accessibilityLabel = "Share suggestion") { shareAnswer() }, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(3); marginEnd = dp(3) })
+        outputActions.addView(pillButton("Regenerate", accessibilityLabel = "Regenerate suggestion") { regenerateAnswer() }, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(3); marginEnd = dp(3) })
+        outputActions.addView(pillButton("Read aloud", accessibilityLabel = "Read suggestion aloud") { speakAnswer() }, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(4) })
         outputCard.addView(outputActions)
-        outputCard.addView(pillButton("Save as text file", accessibilityLabel = "Save the completed answer to a text file you choose") {
+
+        val exportActions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(6), 0, 0) }
+        exportActions.addView(pillButton("Save text file", accessibilityLabel = "Save the completed answer to a text file") {
             saveAnswerToFile()
-        }.apply { layoutParams = LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(7) } })
+        }, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(4) })
+        exportActions.addView(pillButton("Export Markdown", accessibilityLabel = "Share or export conversation as Markdown") {
+            exportCurrentAsMarkdown()
+        }, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(4) })
+        outputCard.addView(exportActions)
         systemActionContainer = column().apply {
             visibility = View.GONE
             setPadding(0, dp(6), 0, 0)
@@ -838,9 +868,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             updateStatus("Choose a compatible .litertlm model first.")
             return
         }
+        lastPrompt = task
+        isGeneratingCancelled.set(false)
         suggestButton.isEnabled = false
         answerIsComplete = false
         outputCard.visibility = View.VISIBLE
+        stopGeneratingButton.visibility = View.VISIBLE
         answerText.text = "Thinking through the steps…"
         val backendLabel = engineManager.activeBackend?.name ?: "accelerated"
         updateStatus("Generating suggestions on this device ($backendLabel)…")
@@ -871,6 +904,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                         prompt,
                         object : MessageCallback {
                             override fun onMessage(message: Message) {
+                                if (isGeneratingCancelled.get()) return
                                 val partial = synchronized(generated) {
                                     generated.append(message.toString())
                                     generated.toString()
@@ -898,11 +932,34 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 }
                 val result = synchronized(generated) { generated.toString().trim() }
                 mainHandler.post {
+                    stopGeneratingButton.visibility = View.GONE
+                    suggestButton.isEnabled = true
+                    if (isGeneratingCancelled.get()) {
+                        answerIsComplete = result.isNotBlank()
+                        val formatted = MarkdownFormatter.formatForDisplay(result)
+                        answerText.text = if (formatted.isNotBlank()) formatted else "Generation stopped."
+                        updateStatus("Generation stopped by user.")
+                        return@post
+                    }
                     answerIsComplete = result.isNotBlank()
                     val formatted = MarkdownFormatter.formatForDisplay(result)
                     answerText.text = if (formatted.isNotBlank()) formatted else "No suggestion was returned. Try rephrasing the task."
                     updateStatus(if (answerIsComplete) "Suggestions ready. Review each step and do them yourself." else "No answer was returned. Try rephrasing the task.")
-                    suggestButton.isEnabled = true
+
+                    // Auto-save turn to local conversation session
+                    if (result.isNotBlank()) {
+                        try {
+                            val sess = currentSession ?: ConversationSession.createWithInitialPrompt(task.ifBlank { "Conversation" })
+                            val userMsg = ChatMessage.user(
+                                content = task,
+                                attachmentContent = if (attachedContext.isNotBlank()) attachedContext else null
+                            )
+                            val assistantMsg = ChatMessage.assistant(result)
+                            val updated = sess.withMessage(userMsg).withMessage(assistantMsg)
+                            sessionStore.saveSession(updated)
+                            currentSession = updated
+                        } catch (_: Exception) {}
+                    }
 
                     // Safe actionable system intents review
                     val parsedActions = SystemActionTools.parseActions(result)
@@ -925,14 +982,233 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 }
             } catch (e: Exception) {
                 mainHandler.post {
-                    answerIsComplete = false
-                    answerText.text = ""
-                    outputCard.visibility = View.GONE
-                    systemActionContainer.removeAllViews()
-                    systemActionContainer.visibility = View.GONE
-                    updateStatus("Could not generate suggestions: ${e.message ?: "unknown error"}")
+                    stopGeneratingButton.visibility = View.GONE
                     suggestButton.isEnabled = true
+                    if (isGeneratingCancelled.get()) {
+                        updateStatus("Generation stopped by user.")
+                    } else {
+                        answerIsComplete = false
+                        answerText.text = ""
+                        outputCard.visibility = View.GONE
+                        systemActionContainer.removeAllViews()
+                        systemActionContainer.visibility = View.GONE
+                        updateStatus("Could not generate suggestions: ${e.message ?: "unknown error"}")
+                    }
                 }
+            }
+        }
+    }
+
+    private fun regenerateAnswer() {
+        if (lastPrompt.isNotBlank() && suggestButton.isEnabled) {
+            taskInput.setText(lastPrompt)
+            suggestSteps()
+        }
+    }
+
+    private fun startNewConversation() {
+        val newSession = ConversationSession.createWithInitialPrompt("New Conversation")
+        try {
+            sessionStore.saveSession(newSession)
+        } catch (_: Exception) {}
+        currentSession = newSession
+        taskInput.setText("")
+        answerText.text = ""
+        outputCard.visibility = View.GONE
+        systemActionContainer.removeAllViews()
+        systemActionContainer.visibility = View.GONE
+        updateStatus("Started a new conversation.")
+    }
+
+    private fun loadSession(id: String) {
+        val s = sessionStore.getSession(id) ?: return
+        currentSession = s
+        val lastUserMsg = s.messages.lastOrNull { it.isUser }
+        val lastAssistantMsg = s.messages.lastOrNull { it.isAssistant }
+        if (lastUserMsg != null) {
+            taskInput.setText(lastUserMsg.content)
+            lastPrompt = lastUserMsg.content
+        }
+        if (lastAssistantMsg != null) {
+            outputCard.visibility = View.VISIBLE
+            answerText.text = MarkdownFormatter.formatForDisplay(lastAssistantMsg.content)
+            answerIsComplete = true
+        } else {
+            outputCard.visibility = View.GONE
+            answerText.text = ""
+            answerIsComplete = false
+        }
+        updateStatus("Loaded: ${s.title}")
+    }
+
+    private fun showHistoryDialog() {
+        val summaries = sessionStore.listSessionSummaries()
+        val dialogView = column().apply {
+            setPadding(dp(18), dp(12), dp(18), dp(18))
+        }
+
+        val searchBox = EditText(this).apply {
+            hint = "Search conversations…"
+            textSize = 14f
+            background = shape(WHITE, 12, LINE)
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            setTextColor(INK)
+            setHintTextColor(MUTED)
+        }
+        dialogView.addView(searchBox, marginBottom(12))
+
+        val listContainer = column()
+        val scroll = ScrollView(this).apply {
+            addView(listContainer)
+            layoutParams = LinearLayout.LayoutParams(-1, dp(340))
+        }
+        dialogView.addView(scroll)
+
+        lateinit var dialog: AlertDialog
+
+        fun populateList(query: String = "") {
+            listContainer.removeAllViews()
+            val filtered = if (query.isBlank()) summaries else summaries.filter {
+                it.title.contains(query, ignoreCase = true)
+            }
+            if (filtered.isEmpty()) {
+                listContainer.addView(text("No conversations found.", 13f, MUTED).apply {
+                    setPadding(0, dp(20), 0, dp(20))
+                    gravity = Gravity.CENTER
+                })
+                return
+            }
+
+            for (s in filtered) {
+                val row = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(dp(10), dp(10), dp(10), dp(10))
+                    background = shape(WHITE, 12, LINE)
+                    isClickable = true
+                    isFocusable = true
+                    setOnClickListener {
+                        loadSession(s.id)
+                        dialog.dismiss()
+                    }
+                }
+                val info = column().apply {
+                    val titlePrefix = if (s.isPinned) "📌 " else ""
+                    addView(text("$titlePrefix${s.title}", 14f, INK, true))
+                    val dateStr = java.text.SimpleDateFormat("MMM dd, yyyy · HH:mm", java.util.Locale.getDefault()).format(java.util.Date(s.updatedAt))
+                    addView(text("$dateStr · ${s.messageCount} turns", 11f, MUTED))
+                }
+                row.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
+
+                val menuBtn = text("⋮", 18f, MUTED, true).apply {
+                    setPadding(dp(10), dp(4), dp(10), dp(4))
+                    setOnClickListener {
+                        showSessionOptionsMenu(s) {
+                            populateList(searchBox.text.toString())
+                        }
+                    }
+                }
+                row.addView(menuBtn)
+                listContainer.addView(row, marginBottom(8))
+            }
+        }
+
+        searchBox.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                populateList(s?.toString() ?: "")
+            }
+            override fun afterTextChanged(s: android.text.Editable?) {}
+        })
+
+        populateList()
+
+        dialog = AlertDialog.Builder(this)
+            .setTitle("Conversations (${summaries.size})")
+            .setView(dialogView)
+            .setPositiveButton("+ New Chat") { _, _ ->
+                startNewConversation()
+            }
+            .setNegativeButton("Close", null)
+            .create()
+        dialog.show()
+    }
+
+    private fun showSessionOptionsMenu(s: SessionSummary, onUpdated: () -> Unit) {
+        val pinLabel = if (s.isPinned) "Unpin" else "Pin to top"
+        val options = arrayOf(pinLabel, "Rename", "Export as Markdown", "Export as Text", "Delete")
+        AlertDialog.Builder(this)
+            .setTitle(s.title)
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> {
+                        sessionStore.pinSession(s.id, !s.isPinned)
+                        onUpdated()
+                    }
+                    1 -> promptRenameSession(s, onUpdated)
+                    2 -> exportSessionToShare(s.id, asMarkdown = true)
+                    3 -> exportSessionToShare(s.id, asMarkdown = false)
+                    4 -> {
+                        sessionStore.deleteSession(s.id)
+                        if (currentSession?.id == s.id) {
+                            startNewConversation()
+                        }
+                        onUpdated()
+                    }
+                }
+            }
+            .show()
+    }
+
+    private fun promptRenameSession(s: SessionSummary, onUpdated: () -> Unit) {
+        val input = EditText(this).apply {
+            setText(s.title)
+            setSelection(text.length)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Rename Conversation")
+            .setView(input)
+            .setPositiveButton("Save") { _, _ ->
+                val newTitle = input.text.toString().trim()
+                if (newTitle.isNotBlank()) {
+                    sessionStore.renameSession(s.id, newTitle)
+                    if (currentSession?.id == s.id) {
+                        currentSession = currentSession?.withTitle(newTitle)
+                    }
+                    onUpdated()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun exportSessionToShare(id: String, asMarkdown: Boolean) {
+        val text = if (asMarkdown) sessionStore.exportSessionAsMarkdown(id) else sessionStore.exportSessionAsText(id)
+        if (text.isNullOrBlank()) return
+        val mime = if (asMarkdown) "text/markdown" else "text/plain"
+        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+            type = mime
+            putExtra(Intent.EXTRA_TEXT, text)
+            putExtra(Intent.EXTRA_SUBJECT, "PocketAgent Conversation Export")
+        }
+        startActivity(Intent.createChooser(shareIntent, "Export Conversation"))
+    }
+
+    private fun exportCurrentAsMarkdown() {
+        val sess = currentSession
+        if (sess != null) {
+            exportSessionToShare(sess.id, asMarkdown = true)
+        } else {
+            val text = answerText.text.toString()
+            if (text.isNotBlank()) {
+                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                    type = "text/markdown"
+                    putExtra(Intent.EXTRA_TEXT, text)
+                    putExtra(Intent.EXTRA_SUBJECT, "PocketAgent Answer Export")
+                }
+                startActivity(Intent.createChooser(shareIntent, "Export Answer"))
+            } else {
+                updateStatus("No conversation to export yet.")
             }
         }
     }

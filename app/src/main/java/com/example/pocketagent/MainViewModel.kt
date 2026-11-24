@@ -168,6 +168,7 @@ class MainViewModel internal constructor(
     private val cacheDir: File,
     private val modelFileStore: ModelFileStore = ModelFileStore(filesDir),
     private val whisperModelStore: WhisperModelStore = WhisperModelStore(filesDir),
+    private val sessionStore: SessionStore = SessionStore(SessionStore.defaultDir(filesDir)),
     private val llmRunner: LlmInferenceRunner = DefaultLlmInferenceRunner(filesDir, cacheDir),
     private val whisperTranscriber: WhisperTranscriber = DefaultWhisperTranscriber(),
     private val workerExecutor: Executor = Executors.newSingleThreadExecutor(),
@@ -179,6 +180,7 @@ class MainViewModel internal constructor(
         cacheDir = cacheDir,
         modelFileStore = ModelFileStore(filesDir),
         whisperModelStore = WhisperModelStore(filesDir),
+        sessionStore = SessionStore(SessionStore.defaultDir(filesDir)),
     )
 
     private val _uiState = MutableStateFlow(MainUiState())
@@ -186,6 +188,8 @@ class MainViewModel internal constructor(
 
     private val observers = CopyOnWriteArrayList<(MainUiState) -> Unit>()
     @Volatile private var whisperContext: Long = 0L
+    private val isGenerationCancelled = AtomicBoolean(false)
+    @Volatile private var activeSession: ConversationSession? = null
 
     /**
      * Subscribes a listener to UI state changes. Dispatches the current state immediately.
@@ -209,6 +213,7 @@ class MainViewModel internal constructor(
      * Checks for already stored models on startup and restores ready states.
      */
     fun initModels() {
+        refreshSessions()
         val model = modelFileStore.modelFile
         if (model.exists() && model.length() > 0) {
             updateState { it.withModelReady(model.length()) }
@@ -504,9 +509,14 @@ class MainViewModel internal constructor(
             return
         }
 
-        updateState { it.withThinking() }
+        isGenerationCancelled.set(false)
+        updateState {
+            it.withLastUserPrompt(task).withThinking()
+        }
 
         workerExecutor.execute {
+            val accumulated = StringBuilder()
+            val firstChunk = AtomicBoolean(true)
             try {
                 val prompt = buildString {
                     if (task.isNotBlank()) append("User task or question:\n").append(task)
@@ -514,14 +524,12 @@ class MainViewModel internal constructor(
                     append("\n\nGive practical, concise steps and mention only essential assumptions or risks. Finish the answer completely; do not stop mid-sentence or mid-step.")
                 }
 
-                val accumulated = StringBuilder()
-                val firstChunk = AtomicBoolean(true)
-
                 val result = llmRunner.runInference(
                     prompt = prompt,
                     systemInstruction = MainUiState.SYSTEM_INSTRUCTION,
                     maxTokens = MainUiState.MAX_RESPONSE_TOKENS,
                     onChunk = { chunk ->
+                        if (isGenerationCancelled.get()) return@runInference
                         val currentText = synchronized(accumulated) {
                             accumulated.append(chunk)
                             accumulated.toString()
@@ -535,17 +543,197 @@ class MainViewModel internal constructor(
                     },
                 ).trim()
 
+                if (isGenerationCancelled.get()) {
+                    val currentText = synchronized(accumulated) { accumulated.toString().trim() }
+                    val formatted = MarkdownFormatter.formatForDisplay(currentText)
+                    val plain = MarkdownFormatter.stripToPlainText(currentText)
+                    updateState { it.withGenerationStopped(currentText, formatted, plain) }
+                    return@execute
+                }
+
                 val finalFormatted = MarkdownFormatter.formatForDisplay(result)
                 val finalPlain = MarkdownFormatter.stripToPlainText(result)
                 updateState {
                     it.withGenerationCompleted(result, finalFormatted, finalPlain)
                 }
+
+                // Persist turns to the active session
+                saveTurnToSession(task, attached, result)
             } catch (e: Exception) {
-                updateState {
-                    it.withGenerationError(e.message ?: "unknown error")
+                if (isGenerationCancelled.get()) {
+                    val currentText = synchronized(accumulated) { accumulated.toString().trim() }
+                    val formatted = MarkdownFormatter.formatForDisplay(currentText)
+                    val plain = MarkdownFormatter.stripToPlainText(currentText)
+                    updateState { it.withGenerationStopped(currentText, formatted, plain) }
+                } else {
+                    updateState {
+                        it.withGenerationError(e.message ?: "unknown error")
+                    }
                 }
             }
         }
+    }
+
+    /**
+     * Halts an in-progress token generation loop cleanly.
+     */
+    fun stopGeneration() {
+        if (_uiState.value.isGenerating) {
+            isGenerationCancelled.set(true)
+        }
+    }
+
+    /**
+     * Re-runs inference using the previous user prompt.
+     */
+    fun regenerateLastResponse() {
+        val lastPrompt = _uiState.value.lastUserPrompt
+        if (lastPrompt.isNotBlank() && !_uiState.value.isGenerating) {
+            updateTaskInput(lastPrompt)
+            suggestSteps()
+        }
+    }
+
+    /**
+     * Refreshes the cached session summaries from local storage.
+     */
+    fun refreshSessions() {
+        try {
+            val summaries = sessionStore.listSessionSummaries()
+            val currentId = _uiState.value.currentSessionId
+            val active = if (currentId != null) sessionStore.getSession(currentId) else null
+            activeSession = active
+            updateState {
+                it.withSessions(
+                    summaries = summaries,
+                    activeId = active?.id,
+                    activeTitle = active?.title ?: "New Conversation",
+                    isPinned = active?.isPinned ?: false,
+                )
+            }
+        } catch (_: Exception) {}
+    }
+
+    /**
+     * Resets current active conversation and starts a clean session.
+     */
+    fun createNewSession() {
+        stopGeneration()
+        val session = ConversationSession.createWithInitialPrompt("New Conversation")
+        try {
+            sessionStore.saveSession(session)
+        } catch (_: Exception) {}
+        activeSession = session
+        updateState {
+            it.withOutputCleared()
+                .withTaskInput("")
+                .withSessions(
+                    summaries = sessionStore.listSessionSummaries(),
+                    activeId = session.id,
+                    activeTitle = session.title,
+                    isPinned = false,
+                )
+        }
+    }
+
+    /**
+     * Switches the active UI state to an existing saved conversation session.
+     */
+    fun switchSession(sessionId: String) {
+        stopGeneration()
+        val session = sessionStore.getSession(sessionId) ?: return
+        activeSession = session
+        val lastAssistantMsg = session.messages.lastOrNull { it.isAssistant }
+        val lastUserMsg = session.messages.lastOrNull { it.isUser }
+        val answer = lastAssistantMsg?.content ?: ""
+        val formatted = if (answer.isNotBlank()) MarkdownFormatter.formatForDisplay(answer) else ""
+        val plain = if (answer.isNotBlank()) MarkdownFormatter.stripToPlainText(answer) else ""
+
+        updateState {
+            it.copy(
+                taskInput = lastUserMsg?.content ?: "",
+                generatedAnswer = answer,
+                formattedAnswer = formatted,
+                plainTextAnswer = plain,
+                isOutputVisible = answer.isNotBlank(),
+                answerIsComplete = answer.isNotBlank(),
+                generationStatus = MainUiState.GenerationStatus.IDLE,
+                lastUserPrompt = lastUserMsg?.content ?: "",
+                canRegenerate = !lastUserMsg?.content.isNullOrBlank(),
+            ).withSessions(
+                summaries = sessionStore.listSessionSummaries(),
+                activeId = session.id,
+                activeTitle = session.title,
+                isPinned = session.isPinned,
+            )
+        }
+    }
+
+    /**
+     * Renames an existing session title.
+     */
+    fun renameSession(sessionId: String, newTitle: String) {
+        val updated = sessionStore.renameSession(sessionId, newTitle) ?: return
+        if (activeSession?.id == sessionId) {
+            activeSession = updated
+        }
+        refreshSessions()
+    }
+
+    /**
+     * Toggles pin status for a conversation session.
+     */
+    fun pinSession(sessionId: String, pinned: Boolean) {
+        val updated = sessionStore.pinSession(sessionId, pinned) ?: return
+        if (activeSession?.id == sessionId) {
+            activeSession = updated
+        }
+        refreshSessions()
+    }
+
+    /**
+     * Deletes a conversation session from private storage.
+     */
+    fun deleteSession(sessionId: String) {
+        sessionStore.deleteSession(sessionId)
+        if (activeSession?.id == sessionId) {
+            createNewSession()
+        } else {
+            refreshSessions()
+        }
+    }
+
+    /**
+     * Filters session summaries by search query.
+     */
+    fun searchSessions(query: String) {
+        updateState { it.withSessionSearch(query) }
+    }
+
+    /**
+     * Exports a session as Markdown or plain text.
+     */
+    fun exportSession(sessionId: String, asMarkdown: Boolean = true): String? {
+        return if (asMarkdown) {
+            sessionStore.exportSessionAsMarkdown(sessionId)
+        } else {
+            sessionStore.exportSessionAsText(sessionId)
+        }
+    }
+
+    private fun saveTurnToSession(task: String, attachedContext: String, answer: String) {
+        try {
+            val current = activeSession ?: ConversationSession.createWithInitialPrompt(task.ifBlank { "Conversation" })
+            val userMsg = ChatMessage.user(
+                content = task,
+                attachmentContent = if (attachedContext.isNotBlank()) attachedContext else null
+            )
+            val assistantMsg = ChatMessage.assistant(answer)
+            val updated = current.withMessage(userMsg).withMessage(assistantMsg)
+            sessionStore.saveSession(updated)
+            activeSession = updated
+            refreshSessions()
+        } catch (_: Exception) {}
     }
 
     fun clearOutput() {

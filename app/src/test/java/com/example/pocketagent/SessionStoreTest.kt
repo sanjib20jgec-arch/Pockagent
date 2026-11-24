@@ -232,4 +232,109 @@ class SessionStoreTest {
             store.saveSession(bigSession)
         }
     }
+
+    @Test
+    fun pinSessionUpdatesStatusAndSortsToTop() {
+        val storeDir = tempDir.newFolder("sessions_pin")
+        val store = SessionStore(storeDir)
+
+        val sess1 = ConversationSession(id = "sess-1", title = "First", createdAt = 1000L, updatedAt = 1000L)
+        val sess2 = ConversationSession(id = "sess-2", title = "Second (Newer)", createdAt = 2000L, updatedAt = 2000L)
+        store.saveSession(sess1)
+        store.saveSession(sess2)
+
+        // Initially sess-2 is first because updatedAt is 2000 > 1000
+        val summariesInitial = store.listSessionSummaries()
+        assertEquals("sess-2", summariesInitial[0].id)
+
+        // Pin sess-1
+        val pinned = store.pinSession("sess-1", true)
+        assertNotNull(pinned)
+        assertTrue(pinned!!.isPinned)
+
+        // Now sess-1 must be first despite older updatedAt
+        val summariesAfter = store.listSessionSummaries()
+        assertEquals("sess-1", summariesAfter[0].id)
+        assertTrue(summariesAfter[0].isPinned)
+        assertEquals("sess-2", summariesAfter[1].id)
+        assertFalse(summariesAfter[1].isPinned)
+    }
+
+    @Test
+    fun renameSessionUpdatesTitleCorrectly() {
+        val storeDir = tempDir.newFolder("sessions_rename")
+        val store = SessionStore(storeDir)
+
+        val session = ConversationSession(id = "sess-rename", title = "Original Title", createdAt = 1000L)
+        store.saveSession(session)
+
+        val renamed = store.renameSession("sess-rename", "Updated Beautiful Title")
+        assertNotNull(renamed)
+        assertEquals("Updated Beautiful Title", renamed!!.title)
+
+        val reloaded = store.getSession("sess-rename")
+        assertEquals("Updated Beautiful Title", reloaded?.title)
+    }
+
+    @Test
+    fun searchSessionsFiltersByTitleAndContent() {
+        val storeDir = tempDir.newFolder("sessions_search")
+        val store = SessionStore(storeDir)
+
+        val s1 = ConversationSession(
+            id = "s-kotlin",
+            title = "Learn Kotlin Coroutines",
+            createdAt = 1000L,
+            messages = listOf(ChatMessage.user("Explain StateFlow and SharedFlow")),
+        )
+        val s2 = ConversationSession(
+            id = "s-recipe",
+            title = "Pasta Carbonara Recipe",
+            createdAt = 2000L,
+            messages = listOf(ChatMessage.user("How much parmesan cheese do I need?")),
+        )
+        store.saveSession(s1)
+        store.saveSession(s2)
+
+        val searchByTitle = store.searchSessions("coroutines")
+        assertEquals(1, searchByTitle.size)
+        assertEquals("s-kotlin", searchByTitle[0].id)
+
+        val searchByContent = store.searchSessions("parmesan")
+        assertEquals(1, searchByContent.size)
+        assertEquals("s-recipe", searchByContent[0].id)
+
+        val searchEmpty = store.searchSessions("")
+        assertEquals(2, searchEmpty.size)
+    }
+
+    @Test
+    fun exportsSessionToMarkdownAndPlainText() {
+        val storeDir = tempDir.newFolder("sessions_export")
+        val store = SessionStore(storeDir)
+
+        val session = ConversationSession(
+            id = "sess-export",
+            title = "Export Test Session",
+            createdAt = 1000L,
+            messages = listOf(
+                ChatMessage.user("What is offline AI?"),
+                ChatMessage.assistant("Offline AI executes local neural models directly on the user's device without cloud calls."),
+            )
+        )
+        store.saveSession(session)
+
+        val md = store.exportSessionAsMarkdown("sess-export")
+        assertNotNull(md)
+        assertTrue(md!!.contains("# Export Test Session"))
+        assertTrue(md.contains("### 👤 User"))
+        assertTrue(md.contains("### 🤖 Assistant"))
+        assertTrue(md.contains("Offline AI executes local neural models"))
+
+        val txt = store.exportSessionAsText("sess-export")
+        assertNotNull(txt)
+        assertTrue(txt!!.contains("Export Test Session"))
+        assertTrue(txt.contains("[USER]"))
+        assertTrue(txt.contains("[ASSISTANT]"))
+    }
 }

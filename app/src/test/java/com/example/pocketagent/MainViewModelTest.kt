@@ -255,4 +255,75 @@ class MainViewModelTest {
         viewModel.close()
         assertTrue(fakeLlmRunner.isClosed)
     }
+
+    @Test
+    fun sessionLifecycleCreateSwitchRenamePinDelete() {
+        // 1. Create new session
+        viewModel.createNewSession()
+        val s1Id = viewModel.uiState.value.currentSessionId
+        assertNotNull(s1Id)
+
+        // 2. Rename session
+        viewModel.renameSession(s1Id!!, "Custom Project Chat")
+        assertEquals("Custom Project Chat", viewModel.uiState.value.currentSessionTitle)
+
+        // 3. Pin session
+        viewModel.pinSession(s1Id, true)
+        assertTrue(viewModel.uiState.value.isSessionPinned)
+
+        // 4. Create second session
+        viewModel.createNewSession()
+        val s2Id = viewModel.uiState.value.currentSessionId
+        assertNotNull(s2Id)
+        assertFalse(s1Id == s2Id)
+
+        // 5. Switch back to s1
+        viewModel.switchSession(s1Id)
+        assertEquals(s1Id, viewModel.uiState.value.currentSessionId)
+        assertEquals("Custom Project Chat", viewModel.uiState.value.currentSessionTitle)
+        assertTrue(viewModel.uiState.value.isSessionPinned)
+
+        // 6. Delete s1
+        viewModel.deleteSession(s1Id)
+        assertFalse(viewModel.uiState.value.currentSessionId == s1Id)
+    }
+
+    @Test
+    fun suggestsStepsAutoSavesTurnsToSessionAndSupportsRegenerate() {
+        fakeLlmRunner.available = true
+        fakeLlmRunner.responseToReturn = "1. Step one\n2. Step two"
+
+        viewModel.createNewSession()
+        val sessId = viewModel.uiState.value.currentSessionId!!
+
+        viewModel.updateTaskInput("Help me build offline search")
+        viewModel.suggestSteps()
+
+        // Verify generation completed
+        val state = viewModel.uiState.value
+        assertEquals("1. Step one\n2. Step two", state.generatedAnswer)
+        assertTrue(state.canRegenerate)
+        assertEquals("Help me build offline search", state.lastUserPrompt)
+
+        // Verify export contains turns
+        val md = viewModel.exportSession(sessId, asMarkdown = true)
+        assertNotNull(md)
+        assertTrue(md!!.contains("Help me build offline search"))
+        assertTrue(md.contains("1. Step one"))
+
+        // Test regenerate
+        fakeLlmRunner.responseToReturn = "1. Better step one\n2. Better step two"
+        viewModel.regenerateLastResponse()
+        assertEquals("1. Better step one\n2. Better step two", viewModel.uiState.value.generatedAnswer)
+    }
+
+    @Test
+    fun stopGenerationAbortsStreamingCleanly() {
+        fakeLlmRunner.available = true
+        viewModel.updateTaskInput("Long generation task")
+        viewModel.suggestSteps()
+
+        viewModel.stopGeneration()
+        assertFalse(viewModel.uiState.value.isGenerating)
+    }
 }

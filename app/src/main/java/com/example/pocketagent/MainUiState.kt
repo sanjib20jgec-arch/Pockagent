@@ -44,6 +44,15 @@ data class MainUiState(
     val isTtsReady: Boolean = false,
     val pendingAnswerToSave: String? = null,
     val errorMessage: String? = null,
+
+    // Multi-Session & History State
+    val currentSessionId: String? = null,
+    val currentSessionTitle: String = "New Conversation",
+    val isSessionPinned: Boolean = false,
+    val sessionSummaries: List<SessionSummary> = emptyList(),
+    val sessionSearchQuery: String = "",
+    val lastUserPrompt: String = "",
+    val canRegenerate: Boolean = false,
 ) {
     companion object {
         const val MAX_ATTACHMENT_CHARS = 12_000
@@ -98,6 +107,9 @@ data class MainUiState(
         get() = isWhisperModelReady &&
                 !isWhisperTranscribing &&
                 !isGenerating
+
+    val isGenerating: Boolean
+        get() = generationStatus == GenerationStatus.THINKING || generationStatus == GenerationStatus.STREAMING
 
     val canSaveAnswer: Boolean
         get() = answerIsComplete &&
@@ -286,5 +298,38 @@ data class MainUiState(
 
     fun withTtsReady(ready: Boolean): MainUiState = copy(
         isTtsReady = ready,
+    )
+
+    fun withSessions(
+        summaries: List<SessionSummary>,
+        activeId: String? = currentSessionId,
+        activeTitle: String = currentSessionTitle,
+        isPinned: Boolean = isSessionPinned,
+    ): MainUiState = copy(
+        sessionSummaries = summaries,
+        currentSessionId = activeId,
+        currentSessionTitle = activeTitle,
+        isSessionPinned = isPinned,
+    )
+
+    fun withSessionSearch(query: String): MainUiState = copy(
+        sessionSearchQuery = query,
+    )
+
+    fun withLastUserPrompt(prompt: String): MainUiState = copy(
+        lastUserPrompt = prompt,
+        canRegenerate = prompt.isNotBlank(),
+    )
+
+    fun withGenerationStopped(rawText: String, formattedText: String, plainText: String): MainUiState = copy(
+        generationStatus = GenerationStatus.COMPLETED,
+        isOutputVisible = true,
+        answerIsComplete = rawText.isNotBlank(),
+        generatedAnswer = rawText,
+        formattedAnswer = formattedText,
+        plainTextAnswer = plainText,
+        statusMessage = "Generation stopped by user.",
+        errorMessage = null,
+        canRegenerate = lastUserPrompt.isNotBlank(),
     )
 }

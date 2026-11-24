@@ -4,15 +4,15 @@ package com.example.pocketagent
  * High-level offline RAG (Retrieval-Augmented Generation) coordinator for PocketAgent.
  *
  * Coordinates [DocumentChunker] and [OfflineKeywordIndex] to handle large user attachments
- * exceeding the model's 12,000 character prompt budget.
+ * exceeding the configured attachment/prompt budget.
  *
  * Invariants:
  * - 100% offline, purely local CPU execution.
- * - Strict 12,000 character prompt bound is never exceeded.
+ * - Strict configured character prompt bound is never exceeded.
  * - Semantic chunks retain document source and position attribution.
  */
 object LocalDocumentRetriever {
-    const val MAX_ATTACHMENT_BUDGET = 12_000
+    const val MAX_ATTACHMENT_BUDGET = 32_000
 
     /**
      * Prepares prompt-ready reference context for prompt injection.

@@ -211,7 +211,7 @@ class DefaultWhisperTranscriber : WhisperTranscriber {
  * - 100% offline, zero network access, zero analytics.
  * - Answers the user's request directly, using numbered steps only for genuine procedures.
  * - Never controls other apps, inspects screen, or automates user actions.
- * - Enforces safety bounds (12,000 char attachment limits, model rollback).
+ * - Enforces safety bounds (32,000 char attachment limits, model rollback).
  */
 class MainViewModel internal constructor(
     private val filesDir: File,
@@ -426,7 +426,7 @@ class MainViewModel internal constructor(
                 val newNames = _uiState.value.attachedNames + "$name (${extraction.pageCount} pages)"
 
                 val status = if (extraction.limitReached) {
-                    "PDF text attached with the 12,000-character limit applied. Review it, then ask your question."
+                    "PDF text attached with the ${"%,d".format(MainUiState.MAX_ATTACHMENT_CHARS)}-character limit applied. Review it, then ask your question."
                 } else {
                     "PDF text attached. Review the document name and page count, then add a question."
                 }
@@ -775,7 +775,7 @@ class MainViewModel internal constructor(
         isRetry: Boolean,
         history: List<ChatMessage>,
         calculation: LocalCalculatorTool.CalculationResult? = null,
-    ): String = promptContext.answerPrompt(task, attachment, intent, isRetry, history, calculation)
+    ): AnswerPromptComposer.PromptBuildResult = promptContext.answerPrompt(task, attachment, intent, isRetry, history, calculation)
 
     /**
      * Halts an in-progress token generation loop cleanly.

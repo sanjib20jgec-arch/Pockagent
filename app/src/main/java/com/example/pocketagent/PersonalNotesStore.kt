@@ -280,6 +280,43 @@ class PersonalNotesStore(
         return results
     }
 
+    private fun escapeJson(value: String): String = value
+        .replace("\\", "\\\\")
+        .replace("\"", "\\\"")
+        .replace("\b", "\\b")
+        .replace("\u000C", "\\f")
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+        .replace("\t", "\\t")
+
+    private fun unescapeJson(value: String): String {
+        val sb = StringBuilder()
+        var i = 0
+        while (i < value.length) {
+            val ch = value[i]
+            if (ch == '\\' && i + 1 < value.length) {
+                when (val esc = value[i + 1]) {
+                    '"', '\\', '/' -> { sb.append(esc); i += 2 }
+                    'b' -> { sb.append('\b'); i += 2 }
+                    'f' -> { sb.append('\u000C'); i += 2 }
+                    'n' -> { sb.append('\n'); i += 2 }
+                    'r' -> { sb.append('\r'); i += 2 }
+                    't' -> { sb.append('\t'); i += 2 }
+                    'u' -> if (i + 5 < value.length) {
+                        val hex = value.substring(i + 2, i + 6)
+                        val cp = hex.toIntOrNull(16)
+                        if (cp != null) { sb.append(cp.toChar()); i += 6 } else { sb.append(esc); i += 2 }
+                    } else { sb.append(esc); i += 2 }
+                    else -> { sb.append(esc); i += 2 }
+                }
+            } else {
+                sb.append(ch)
+                i++
+            }
+        }
+        return sb.toString()
+    }
+>>>>>>> 32b1732 (Harden privacy, increase model limits, and improve UI baseline)
     private fun extractJsonField(jsonBody: String, field: String): String? {
         val regex = Regex(""""$field"\s*:\s*"((?:\\.|[^"\\])*)"""")
         val match = regex.find(jsonBody) ?: return null

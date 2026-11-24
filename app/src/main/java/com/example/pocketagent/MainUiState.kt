@@ -5,7 +5,7 @@ package com.example.pocketagent
  *
  * Invariants:
  * - 100% offline, zero cloud, zero telemetry.
- * - Bounded inputs: attachment character limit of 12,000 characters.
+ * - Bounded inputs: attachment character limit is configurable by build constant (default 32,000 characters).
  * - Safe rollback: previous model retained on failure.
  * - Manual-guidance only: no automated phone/screen control.
  */
@@ -63,8 +63,8 @@ data class MainUiState(
     val duplexStatusMessage: String = "",
 ) {
     companion object {
-        const val MAX_ATTACHMENT_CHARS = 12_000
-        const val MAX_RESPONSE_TOKENS = 1024
+        const val MAX_ATTACHMENT_CHARS = 32_000
+        const val MAX_RESPONSE_TOKENS = 2048
         /** Intent-aware instruction (answers the request instead of returning steps to the user). */
         val SYSTEM_INSTRUCTION: String get() = AnswerDirective.SYSTEM_INSTRUCTION
 
@@ -126,7 +126,7 @@ data class MainUiState(
             ""
         } else {
             attachedNames.joinToString(" · ") +
-                    "\nAttached content limited to 12,000 characters."
+                    "\nAttached content limited to ${\"%,d\".format(MAX_ATTACHMENT_CHARS)} characters."
         }
 
     // State Transition Reducers

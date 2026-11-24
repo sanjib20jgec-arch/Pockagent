@@ -35,11 +35,11 @@ class ContextBudgetManager(
             get() = (maxInputTokens - reservedSystemTokens).coerceAtLeast(0)
 
         companion object {
-            // Gemma 3 1B on-device: 4096 total context, 1024 reserved for the answer,
-            // 400 for the intent-aware system instruction which is longer than the old one.
-            const val DEFAULT_MAX_CONTEXT_TOKENS = 4096
-            const val DEFAULT_MAX_RESPONSE_TOKENS = 1024
-            const val DEFAULT_SYSTEM_TOKENS = 400
+            // Increased defaults to better utilize larger on-device models (e.g. 2B class).
+            // Actual usable context still depends on the loaded model/runtime.
+            const val DEFAULT_MAX_CONTEXT_TOKENS = 8192
+            const val DEFAULT_MAX_RESPONSE_TOKENS = 2048
+            const val DEFAULT_SYSTEM_TOKENS = 512
         }
     }
 

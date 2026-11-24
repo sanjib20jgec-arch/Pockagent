@@ -3,5 +3,4 @@
     <exclude domain="file" path="." />
     <exclude domain="cache" path="." />
     <exclude domain="sharedpref" path="pocketagent_security.xml" />
-    <exclude domain="sharedpref" path="pocketagent_settings.xml" />
 </full-backup-content>

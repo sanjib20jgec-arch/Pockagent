@@ -40,7 +40,7 @@ object RunawayGuard {
     const val MAX_CONSECUTIVE_BLANK_LINES = 24
 
     /** Absolute backstop on answer size, independent of repetition. */
-    const val MAX_ANSWER_CHARS = 12000
+    const val MAX_ANSWER_CHARS = 24000
 
 
     /**

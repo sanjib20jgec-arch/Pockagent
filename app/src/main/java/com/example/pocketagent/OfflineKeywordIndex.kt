@@ -7,7 +7,7 @@ import kotlin.math.ln
  * Offline BM25 (Best Matching 25) keyword search index for local document chunks.
  *
  * Provides fast, purely offline, deterministic relevance ranking of user document chunks
- * against a query, fitting selected context strictly within the 12,000 character prompt cap.
+ * against a query, fitting selected context strictly within the configured prompt cap.
  */
 class OfflineKeywordIndex(
     val chunks: List<DocumentChunker.DocumentChunk>,
@@ -18,7 +18,7 @@ class OfflineKeywordIndex(
     companion object {
         const val DEFAULT_K1 = 1.2
         const val DEFAULT_B = 0.75
-        const val DEFAULT_MAX_CHARS = 12_000
+        const val DEFAULT_MAX_CHARS = 32_000
 
         val STOP_WORDS: Set<String> = setOf(
             "a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are",
@@ -157,7 +157,7 @@ class OfflineKeywordIndex(
 
     /**
      * Retrieves the most relevant chunks whose combined character length fits strictly
-     * within [maxChars] (default 12,000 characters).
+     * within [maxChars] (default configured by caller).
      */
     fun retrieveWithinBudget(
         query: String,

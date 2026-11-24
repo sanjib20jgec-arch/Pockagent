@@ -44,6 +44,10 @@ data class ChatMessage(
         require(estimatedTokens >= 0) { "Estimated tokens must not be negative." }
     }
 
+    val isUser: Boolean get() = role == Role.USER
+    val isAssistant: Boolean get() = role == Role.ASSISTANT
+    val isSystem: Boolean get() = role == Role.SYSTEM
+
     companion object {
         private val WHITESPACE_REGEX = "\\s+".toRegex()
 
@@ -67,6 +71,25 @@ data class ChatMessage(
             return total.coerceAtLeast(1)
         }
 
+        fun user(
+            content: String,
+            attachmentSummary: String? = null,
+            attachmentReferences: List<String> = emptyList(),
+            attachmentContent: String? = null,
+        ): ChatMessage = ChatMessage(
+            role = Role.USER,
+            content = content,
+            attachmentSummary = attachmentSummary,
+            attachmentReferences = attachmentReferences,
+            attachmentContent = attachmentContent,
+        )
+
+        fun assistant(content: String): ChatMessage =
+            ChatMessage(role = Role.ASSISTANT, content = content)
+
+        fun system(content: String): ChatMessage =
+            ChatMessage(role = Role.SYSTEM, content = content)
+
         fun estimateTextTokens(text: String): Int {
             if (text.isBlank()) return 0
             val trimmed = text.trim()
@@ -78,3 +101,35 @@ data class ChatMessage(
 }
 
 typealias ChatRole = ChatMessage.Role
+
+/**
+ * Decides which prior turns belong in the next prompt.
+ *
+ * The turn currently being answered is always passed to the model separately, so including it in
+ * history would send the same question twice. A regenerate also drops the answer being replaced.
+ */
+object HistoryPolicy {
+
+    fun forPrompt(messages: List<ChatMessage>, pendingTask: String): List<ChatMessage> {
+        val task = pendingTask.trim()
+
+        // Regenerating a completed turn: drop the old answer and its identical prompt.
+        if (messages.size >= 2) {
+            val last = messages[messages.size - 1]
+            val previous = messages[messages.size - 2]
+            if (last.isAssistant && previous.isUser && previous.content.trim() == task) {
+                return messages.dropLast(2)
+            }
+        }
+
+        // The in-progress prompt may already be persisted as the trailing user turn.
+        if (messages.isNotEmpty()) {
+            val last = messages[messages.size - 1]
+            if (last.isUser && last.content.trim() == task) {
+                return messages.dropLast(1)
+            }
+        }
+
+        return messages.toList()
+    }
+}

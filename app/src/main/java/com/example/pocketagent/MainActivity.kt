@@ -1321,12 +1321,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                         streamFinished.countDown()
                     }
                 },
-                // Attachments need more room to summarise; plain questions stay lean.
-                maxOutputTokens = if (attachedContext.isNotBlank()) {
-                    MainUiState.MAX_RESPONSE_TOKENS_WITH_CONTEXT
-                } else {
-                    MAX_RESPONSE_TOKENS
-                },
+                maxOutputTokens = MAX_RESPONSE_TOKENS,
             )
 
             // Bounded wait: a stalled engine must not wedge the inference thread, which would

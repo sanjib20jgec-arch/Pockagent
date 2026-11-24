@@ -614,7 +614,12 @@ object SystemActionTools {
         val mapMatcher = CONV_MAP.matcher(text)
         if (mapMatcher.find()) {
             val query = (mapMatcher.group(1) ?: mapMatcher.group(2) ?: "").trim()
-            val isWebUrl = query.contains(Regex("""\.(com|org|net|edu|gov|io|app|html?)\b""", RegexOption.IGNORE_CASE)) ||
+            val matchEnd = mapMatcher.end()
+            val remainingAfterDot = if (matchEnd < text.length && text[matchEnd] == '.') {
+                text.substring(matchEnd).takeWhile { !it.isWhitespace() }
+            } else ""
+            val fullCandidate = (query + remainingAfterDot).trim()
+            val isWebUrl = fullCandidate.contains(Regex("""\.(com|org|net|edu|gov|io|app|html?)\b""", RegexOption.IGNORE_CASE)) ||
                 query.startsWith("http://", ignoreCase = true) ||
                 query.startsWith("https://", ignoreCase = true) ||
                 query.startsWith("www.", ignoreCase = true)

@@ -156,13 +156,13 @@ class InAppAudioRecorder(
                 }
 
                 // If cancelled while recording, don't trigger completion
-                if (!isCancelled.get() && isRecording.getAndSet(false)) {
+                if (!isCancelled.get()) {
                     val samples = buffer.toNormalizedFloats()
                     listener.onRecordingComplete(samples)
                 }
             } catch (error: Throwable) {
                 if (error is InterruptedException) {
-                    if (!isCancelled.get() && isRecording.getAndSet(false)) {
+                    if (!isCancelled.get()) {
                         val samples = buffer.toNormalizedFloats()
                         listener.onRecordingComplete(samples)
                     }

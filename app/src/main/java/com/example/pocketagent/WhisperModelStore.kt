@@ -112,12 +112,11 @@ internal class WhisperModelStore(
                 if (count == 0) continue
                 offset += count
             }
-            (bytes[0].toInt() and 0xff) or
-                ((bytes[1].toInt() and 0xff) shl 8) or
-                ((bytes[2].toInt() and 0xff) shl 16) or
-                ((bytes[3].toInt() and 0xff) shl 24)
+            String(bytes, java.nio.charset.StandardCharsets.US_ASCII)
         }
-        if (magic != GGML_FILE_MAGIC) throw IOException("Selected file does not have the whisper.cpp ggml model signature.")
+        if (magic != "ggml" && magic != "lmgg") {
+            throw IOException("Selected file does not have the whisper.cpp ggml model signature.")
+        }
     }
 
     private fun limitMessage() = "Whisper model exceeds the 512 MB limit or available storage."

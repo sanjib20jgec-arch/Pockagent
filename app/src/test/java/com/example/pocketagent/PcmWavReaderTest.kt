@@ -2,7 +2,6 @@ package com.example.pocketagent
 
 import java.io.ByteArrayOutputStream
 import java.io.File
-import java.io.IOException
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Rule
@@ -71,7 +70,7 @@ class PcmWavReaderTest {
             ))
         }
 
-        assertThrows(IOException::class.java) { PcmWavReader.read(file) }
+        assertThrows(IllegalArgumentException::class.java) { PcmWavReader.read(file) }
     }
 
     private fun wavFile(

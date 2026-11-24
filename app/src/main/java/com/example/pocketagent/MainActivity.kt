@@ -159,7 +159,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         attachmentCard = column().apply { visibility = View.GONE; setPadding(0, dp(9), 0, 0) }
         attachmentText = text("", 12f, MUTED)
         attachmentCard.addView(attachmentText)
-        attachmentCard.addView(textButton("Remove attachment", TEAL) { clearAttachments() })
+        attachmentCard.addView(textButton("Remove attachment") { clearAttachments() })
         promptCard.addView(attachmentCard)
         page.addView(promptCard, marginBottom(12))
 

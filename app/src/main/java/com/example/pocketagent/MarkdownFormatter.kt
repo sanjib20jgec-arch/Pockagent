@@ -156,11 +156,47 @@ object MarkdownFormatter {
     }
 
     /**
+     * True when [markdown] contains any character that could start a Markdown construct.
+     *
+     * Deliberately cheap and allocation-free apart from the scan itself: it exists so plain prose
+     * can bypass the element pipeline entirely, which matters when it runs on every token.
+     */
+    fun containsMarkdownSyntax(markdown: String): Boolean {
+        for (ch in markdown) {
+            when (ch) {
+                '#', '*', '_', '`', '>', '[' -> return true
+                '-' -> return true
+            }
+        }
+        // Numbered list markers ("1. ") are checked separately since a bare digit is not enough.
+        var index = 0
+        while (index < markdown.length) {
+            val ch = markdown[index]
+            if (ch.isDigit()) {
+                var cursor = index
+                while (cursor < markdown.length && markdown[cursor].isDigit()) cursor++
+                if (cursor < markdown.length && markdown[cursor] == '.' &&
+                    cursor + 1 < markdown.length && markdown[cursor + 1] == ' '
+                ) {
+                    return true
+                }
+                index = cursor
+            } else {
+                index++
+            }
+        }
+        return false
+    }
+
+    /**
      * Formats markdown text into clean, readable text suitable for display in mobile TextView.
      * Enhances readability with structured bullet points, clear code blocks, and normalized spacing.
      */
     fun formatForDisplay(markdown: String): String {
         if (markdown.isBlank()) return ""
+        // Streaming-friendly fast path: plain prose needs no parsing at all, so skip the whole
+        // element pipeline. This is the common case for partial output during generation.
+        if (!containsMarkdownSyntax(markdown)) return markdown.trim()
 
         val elements = parseElements(markdown)
         val sb = StringBuilder()

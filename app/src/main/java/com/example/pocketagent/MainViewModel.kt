@@ -1,11 +1,7 @@
 package com.example.pocketagent
 
 import android.content.Context
-import com.google.ai.edge.litertlm.Backend
-import com.google.ai.edge.litertlm.Contents
-import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
-import com.google.ai.edge.litertlm.EngineConfig
 import com.google.ai.edge.litertlm.Message
 import com.google.ai.edge.litertlm.MessageCallback
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -20,6 +16,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
@@ -43,27 +40,36 @@ interface LlmInferenceRunner : Closeable {
 class DefaultLlmInferenceRunner(
     private val filesDir: File,
     private val cacheDir: File,
+    /** Shared engine manager, so voice mode reuses the one GPU-capable engine instead of a
+     *  second CPU-only copy of the same weights in RAM. */
+    private val engineManager: InferenceEngineManager<Engine> = InferenceEngineManager(),
+    /** Upper bound for one turn's streaming, so a stalled engine cannot wedge the caller. */
+    private val timeoutSeconds: Long = DEFAULT_TIMEOUT_SECONDS,
 ) : LlmInferenceRunner {
-    @Volatile private var engine: Engine? = null
+
+    private companion object {
+        /**
+         * Hard ceiling for a single voice turn. Short enough that a wedged engine fails visibly
+         * instead of hanging the worker thread, long enough for a full answer on CPU.
+         */
+        const val DEFAULT_TIMEOUT_SECONDS = 90L
+    }
+
+    @Volatile private var isClosed = false
 
     override fun initialize() {
-        val modelFile = File(filesDir, "model.litertlm")
-        if (modelFile.exists() && modelFile.length() > 0 && engine == null) {
+        val modelFile = modelFile()
+        if (modelFile.exists() && modelFile.length() > 0) {
+            // GPU-first with automatic CPU fallback, handled inside the manager.
             try {
-                engine = Engine(
-                    EngineConfig(
-                        modelPath = modelFile.absolutePath,
-                        backend = Backend.CPU(),
-                        cacheDir = cacheDir.absolutePath,
-                    )
-                ).also { it.initialize() }
+                engineManager.getOrInitializeEngine(modelFile, cacheDir)
             } catch (_: Exception) {
-                engine = null
+                // Availability is reported separately; a failed warm-up is not fatal.
             }
         }
     }
 
-    override fun isAvailable(): Boolean = File(filesDir, "model.litertlm").exists()
+    override fun isAvailable(): Boolean = modelFile().exists()
 
     override fun runInference(
         prompt: String,
@@ -71,35 +77,32 @@ class DefaultLlmInferenceRunner(
         maxTokens: Int,
         onChunk: (String) -> Unit,
     ): String {
-        val modelFile = File(filesDir, "model.litertlm")
+        val modelFile = modelFile()
         require(modelFile.exists()) { "Choose a compatible .litertlm model first." }
-
-        val localEngine = engine ?: Engine(
-            EngineConfig(
-                modelPath = modelFile.absolutePath,
-                backend = Backend.CPU(),
-                cacheDir = cacheDir.absolutePath,
-            )
-        ).also {
-            it.initialize()
-            engine = it
-        }
+        check(!isClosed) { "Inference runner is closed." }
 
         val generated = StringBuilder()
         val streamFinished = CountDownLatch(1)
         val streamError = AtomicReference<Throwable?>(null)
 
-        localEngine.createConversation(
-            ConversationConfig(systemInstruction = Contents.of(systemInstruction))
-        ).use { conversation ->
-            conversation.sendMessageAsync(
+        val manager = engineManager
+        manager.getOrInitializeEngine(modelFile, cacheDir)
+        val key = manager.conversationKey(
+            sessionId = "voice",
+            modelPath = modelFile.absolutePath,
+            systemInstruction = systemInstruction,
+            attachmentHash = 0,
+        )
+        val conversation = manager.getOrCreateConversation(key, systemInstruction)
+
+        manager.beginGeneration()
+        try {
+            conversation.sendMessage(
                 prompt,
                 object : MessageCallback {
                     override fun onMessage(message: Message) {
                         val chunk = message.toString()
-                        synchronized(generated) {
-                            generated.append(chunk)
-                        }
+                        synchronized(generated) { generated.append(chunk) }
                         onChunk(chunk)
                     }
 
@@ -112,18 +115,33 @@ class DefaultLlmInferenceRunner(
                         streamFinished.countDown()
                     }
                 },
-                maxOutputToken = maxTokens,
+                maxOutputTokens = maxTokens,
             )
-            streamFinished.await()
+
+            // Bounded: never block a worker thread forever on a stalled engine.
+            val finished = streamFinished.await(timeoutSeconds, TimeUnit.SECONDS)
+            if (!finished) {
+                throw IllegalStateException(
+                    "Voice inference timed out after ${timeoutSeconds}s. Try a shorter request."
+                )
+            }
             streamError.get()?.let { throw IllegalStateException("Streaming inference failed.", it) }
+        } catch (e: Exception) {
+            // Any failure leaves the cached conversation in an unknown state; drop it.
+            manager.invalidateConversation(e.message ?: "voice inference failed")
+            throw e
+        } finally {
+            manager.endGeneration()
         }
 
         return synchronized(generated) { generated.toString() }
     }
 
+    private fun modelFile(): File = File(filesDir, "model.litertlm")
+
     override fun close() {
-        engine?.close()
-        engine = null
+        isClosed = true
+        engineManager.close()
     }
 }
 

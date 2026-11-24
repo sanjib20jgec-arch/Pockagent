@@ -20,11 +20,11 @@ This is the persistent task ledger for the current product direction. It is grou
 
 ## Current baseline
 
-- Audit baseline: `b86f420`; M0 implementation commit: `ab12ad9`; latest M1 UI commit: `eb0668b` on `arena/85d065bd-pockagent`; base `main` is `f579f52`.
-- GitHub Actions run `45348638198` passed source-archive verification, `testDebugUnitTest`, `assembleDebug`, and APK artifact upload for the M1 UI update.
+- Audit baseline: `b86f420`; M0 implementation commit: `ab12ad9`; M1 UI commit: `eb0668b`; latest pre-PDF roadmap commit: `d4ecea9` on `arena/85d065bd-pockagent`; base `main` is `f579f52`.
+- GitHub Actions run `45348835447` passed source-archive verification, `testDebugUnitTest`, `assembleDebug`, and APK artifact upload for the M1 roadmap update. The current PDF implementation changes are pending CI.
 - Nine unit tests now cover bounded text reading and model import success/failure/rollback. No Android UI/instrumented tests, lint, or device/emulator tests exist. Local build remains unavailable (no Java/Gradle executable or wrapper).
 - User-reported: app launches and loads the Gemma 3 1B INT4 model; generated output/UI need improvement.
-- Current app supports typed prompts, live system speech-to-text, bounded text/Markdown/CSV attachments, local CPU inference, and answer copy/share/TTS. Image input, imported audio transcription, PDF extraction, chat history and tool execution are not implemented.
+- Current app supports typed prompts, live system speech-to-text, bounded text/Markdown/CSV attachments, local CPU inference, and answer copy/share/TTS. The approved PDF-only slice is implemented locally but awaits CI/device verification. Image input, imported audio transcription, chat history and tool execution are not implemented.
 - The stale source ZIP has been regenerated. The guard verifies current files and rejects active AccessibilityService/control code; local and CI archive checks passed.
 
 ## Task ledger
@@ -39,8 +39,9 @@ This is the persistent task ledger for the current product direction. It is grou
 | UX-001 | Accessibility, responsive layout, and accurate speech-privacy disclosure review | UI/UX + Security + QA | **IN PROGRESS** | AUD-001 | Native button semantics, explicit labels, 48dp minimum controls, live status regions, stronger muted-text contrast implemented; CI passes; device review remains unverified |
 | QA-DEVICE-001 | Verify permission, missing/corrupt model, speech, inference and UI flows on Android | QA | **BLOCKED** | M0 app build available; physical device/emulator needed | No device/emulator is available in workspace; user-device checks requested after APK install |
 | AI-002 | Model status/capability metadata and inference progress/cancel feasibility | AI Engine + QA | **PROPOSED** | AI-001; LiteRT-LM API review | Medium; no unsupported capability promises |
-| DOC-001 | Safe PDF/document text extraction and source display | Document/Knowledge + Security | **PROPOSED** | M0 gates, input abstraction, TEST-001 | Medium-high; size/context limits and prompt injection |
-| VOICE-001 | Imported audio transcription | Voice + Security + QA | **PROPOSED** | M0 gates; choose ASR/provider and privacy policy | High; offline/network and language availability |
+| DOC-001 | Bounded PDF text extraction with user preview/source attribution | Document/Knowledge + Security | **IN PROGRESS (user-approved PDF-only slice)** | M0 device QA remains open; PDF input/staging and TEST-001 | Medium-high; PDF parser attack surface, decompression, page/context bounds |
+| VOICE-001 | Imported audio transcription | Voice + Security + QA | **PROPOSED (implementation not approved)** | Separate ASR/provider and privacy decision | High; offline/network, model size, language and hardware availability |
+| VOICE-FEAS-001 | Research offline imported-audio ASR options | Voice + Security + QA | **IN PROGRESS (research only, user-approved)** | No code/dependency integration | Medium; native binaries, model licensing/size and language coverage |
 | VIS-001 | Image input with a compatible multimodal model/runtime | AI Engine + UI/UX + QA + Security | **PROPOSED** | M0 gates, AI-002, model/API/hardware compatibility review | High; memory, preprocessing, model license/size |
 | STATE-001 | Optional local conversation history with user deletion controls | Memory/Knowledge + Security + QA | **PROPOSED** | M0 gates; explicit retention approval | Medium-high; data lifecycle and migrations |
 | TOOL-001 | Safe local utilities (e.g. calculator) | Tooling + Security + QA | **OUT OF SCOPE** | Requires separate product approval | High if expanded into action/execution |
@@ -97,15 +98,19 @@ M0 quality gate
 
 **Risks:** platform/provider differences; no device QA can be claimed without a device.
 
-### M2 — Documents and audio input (P2) — PROPOSED
+### M2 — Documents and audio input (P2) — IN PROGRESS (narrow approved slice)
 
-**Objective:** accept more user-selected material while converting it to a bounded, inspectable representation the current text model can use.
+**Objective:** accept user-selected material only through a bounded, inspectable representation the current text model can use. This work is user-approved for selectable-text PDFs only; imported-audio transcription is not approved for implementation.
 
-**Tasks:** DOC-001 and VOICE-001 after M0.
+**Approved scope:** DOC-001 adds local PDF extraction with explicit byte/page/context bounds, page labels, preview/expand/remove controls, and recoverable failures. Scanned-page OCR, other document formats, audio ingestion, and cloud ASR are excluded. VOICE-FEAS-001 may research offline ASR options only; do not add audio dependencies or claim support. Initial candidate: [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) describes offline speech processing, has Android example apps, and the repo declares Apache-2.0. This is not an engine selection: model licenses, per-language models, model sizes, Android native/ONNX Runtime footprint, playback/import pipeline, and target-device performance still require review.
 
-**Acceptance criteria:** supported types are explicit; file size/page/duration and extracted context are bounded; user can preview/remove before inference; extraction failures are recoverable; document sources/pages are attributable where possible; imported audio uses a documented ASR path and disclosure; no audio bytes are silently sent to a text-only model. Test corrupt, empty, oversized and multilingual files/audio, plus offline behavior if promised.
+**Acceptance criteria:** supported PDF constraints are visible; selected files are staged with a hard byte cap; page count and extracted context are bounded; users can inspect/expand/remove extracted text before inference; source page labels are retained; corrupt, empty, encrypted, oversized, over-page-limit, no-selectable-text, and extracted-text-limit cases fail or truncate clearly; extracted text remains untrusted prompt context. CI and device checks are reported separately. Offline-ASR research reports candidate engine, license, Android integration requirements, model size/language coverage, privacy boundary, and device cost without integrating it.
 
-**Risks:** licensing/dependencies, scanned-document OCR quality, memory and offline ASR availability.
+**Implementation limits currently set:** 20 MiB per PDF; at most 100 pages; at most 12,000 combined attachment characters; PDFBox temporary scratch storage capped at 40 MiB. Extraction is on-device and text-only; scanned-page OCR is not included. These limits still require adversarial/runtime testing on device. The PDFBox-Android fork is Apache-2.0 per its published metadata, but adds Bouncy Castle 1.73 and Kotlin stdlib 2.0.21 transitives; CI resolution/build and dependency/security review remain required.
+
+**Gate note:** M0/M1 device QA remains outstanding. This user-approved PDF slice does not mark those gates or M1 complete.
+
+**Risks:** PDF parser attack surface/decompression, dependency maintenance and APK size, scanned-document OCR quality, and (for future audio) native library/model size, licensing, language coverage, and offline hardware performance.
 
 ### M3 — True multimodal vision (P3 / feasibility gate) — PROPOSED
 
@@ -139,4 +144,4 @@ For each approved task: inspect relevant code and dependencies; document a narro
 
 ## Current decision and next gate
 
-**M0's code and CI gates pass; physical-device verification remains blocked.** The user approved M1 by saying “ok move on.” M1 is now focused on semantic controls, touch targets, status announcements, and accessible labels without a broad redesign. Device verification remains explicitly pending. M2 (PDF/audio input), M3 (vision), persistent memory, and tools remain unapproved.
+**M0's code and CI gates pass; physical-device verification remains blocked.** M1's accessibility implementation and CI pass, but device verification remains explicitly pending. The user has now approved a narrow M2 PDF-only implementation and research-only feasibility work for offline imported-audio transcription. PDF changes remain pending CI/device verification; audio implementation, OCR, image input, persistent memory, and tools remain unapproved.

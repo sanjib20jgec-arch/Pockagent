@@ -15,5 +15,6 @@ kotlin {
 }
 dependencies {
     implementation("com.google.ai.edge.litertlm:litertlm-android:0.19.1")
+    implementation("com.dineshdev:pdfbox-android:2.0.27.1")
     testImplementation("junit:junit:4.13.2")
 }

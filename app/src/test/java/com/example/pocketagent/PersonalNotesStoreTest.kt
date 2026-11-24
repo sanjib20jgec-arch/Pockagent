@@ -127,4 +127,17 @@ class PersonalNotesStoreTest {
         assertEquals(1, list.size)
         assertEquals("Persistent Note", list[0].title)
     }
+
+    @Test
+    fun `round trips escaped quotes backslashes and control characters`() {
+        val trickyTitle = "Quote \"A\" & literal \\n slash"
+        val trickyBody = "Line1\nLine2\tTabbed\u0007Bell & backslash \\"
+        val trickyTags = listOf("tag\"1", "path\\2")
+        store.createNote(trickyTitle, trickyBody, tags = trickyTags)
+
+        val reloaded = PersonalNotesStore(store.baseDir, maxNotes = 5).listNotes().single()
+        assertEquals(trickyTitle, reloaded.title)
+        assertEquals(trickyBody, reloaded.content)
+        assertEquals(trickyTags, reloaded.tags)
+    }
 }

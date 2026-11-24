@@ -113,4 +113,13 @@ class UserMemoryStoreTest {
         assertEquals("Memory persistent across restarts", memories[0].content)
         assertEquals(UserMemoryStore.MemoryCategory.CONSTRAINT, memories[0].category)
     }
+
+    @Test
+    fun `round trips escaped sequences and control chars in memory content`() {
+        val trickyContent = "Uses \"JSON\" with literal \\n, tab\t, and bell\u0007"
+        store.addFact(trickyContent, UserMemoryStore.MemoryCategory.CUSTOM)
+
+        val reloaded = UserMemoryStore(store.baseDir, maxMemories = 5).listMemories().single()
+        assertEquals(trickyContent, reloaded.content)
+    }
 }

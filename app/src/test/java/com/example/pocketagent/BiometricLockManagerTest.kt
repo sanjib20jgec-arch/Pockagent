@@ -9,45 +9,32 @@ import org.junit.Test
 class BiometricLockManagerTest {
 
     private lateinit var fakePrefs: FakeSharedPreferences
-    private lateinit var fakeAuth: FakeBiometricAuthenticator
+    private var now = 1_000L
     private lateinit var lockManager: BiometricLockManager
-
-    class FakeBiometricAuthenticator : BiometricAuthenticator {
-        var hardwareAvailable = true
-        var authenticated = false
-
-        override fun isBiometricHardwareAvailable(): Boolean = hardwareAvailable
-
-        override fun authenticate(onSuccess: () -> Unit, onError: (String) -> Unit) {
-            authenticated = true
-            onSuccess()
-        }
-    }
 
     class FakeSharedPreferences : SharedPreferences {
         private val data = mutableMapOf<String, Any>()
 
-        override fun getAll(): MutableMap<String, *> = data
+        override fun getAll(): MutableMap<String, *> = data.toMutableMap()
         override fun getString(key: String?, defValue: String?): String? = data[key] as? String ?: defValue
-        override fun getStringSet(key: String?, defValues: MutableSet<String>?): MutableSet<String>? = null
+        override fun getStringSet(key: String?, defValues: MutableSet<String>?): MutableSet<String>? = defValues
         override fun getInt(key: String?, defValue: Int): Int = data[key] as? Int ?: defValue
         override fun getLong(key: String?, defValue: Long): Long = data[key] as? Long ?: defValue
         override fun getFloat(key: String?, defValue: Float): Float = data[key] as? Float ?: defValue
         override fun getBoolean(key: String?, defValue: Boolean): Boolean = data[key] as? Boolean ?: defValue
         override fun contains(key: String?): Boolean = data.containsKey(key)
-        override fun edit(): SharedPreferences.Editor = FakeEditor(data)
         override fun registerOnSharedPreferenceChangeListener(listener: SharedPreferences.OnSharedPreferenceChangeListener?) {}
         override fun unregisterOnSharedPreferenceChangeListener(listener: SharedPreferences.OnSharedPreferenceChangeListener?) {}
 
-        class FakeEditor(private val map: MutableMap<String, Any>) : SharedPreferences.Editor {
-            override fun putString(key: String?, value: String?): SharedPreferences.Editor { value?.let { map[key!!] = it }; return this }
-            override fun putStringSet(key: String?, values: MutableSet<String>?): SharedPreferences.Editor = this
-            override fun putInt(key: String?, value: Int): SharedPreferences.Editor { map[key!!] = value; return this }
-            override fun putLong(key: String?, value: Long): SharedPreferences.Editor { map[key!!] = value; return this }
-            override fun putFloat(key: String?, value: Float): SharedPreferences.Editor { map[key!!] = value; return this }
-            override fun putBoolean(key: String?, value: Boolean): SharedPreferences.Editor { map[key!!] = value; return this }
-            override fun remove(key: String?): SharedPreferences.Editor { map.remove(key); return this }
-            override fun clear(): SharedPreferences.Editor { map.clear(); return this }
+        override fun edit(): SharedPreferences.Editor = object : SharedPreferences.Editor {
+            override fun putString(key: String?, value: String?) = apply { if (key != null && value != null) data[key] = value }
+            override fun putStringSet(key: String?, values: MutableSet<String>?) = apply { }
+            override fun putInt(key: String?, value: Int) = apply { if (key != null) data[key] = value }
+            override fun putLong(key: String?, value: Long) = apply { if (key != null) data[key] = value }
+            override fun putFloat(key: String?, value: Float) = apply { if (key != null) data[key] = value }
+            override fun putBoolean(key: String?, value: Boolean) = apply { if (key != null) data[key] = value }
+            override fun remove(key: String?) = apply { if (key != null) data.remove(key) }
+            override fun clear() = apply { data.clear() }
             override fun commit(): Boolean = true
             override fun apply() {}
         }
@@ -56,23 +43,20 @@ class BiometricLockManagerTest {
     @Before
     fun setUp() {
         fakePrefs = FakeSharedPreferences()
-        fakeAuth = FakeBiometricAuthenticator()
-        lockManager = BiometricLockManager(fakePrefs, fakeAuth)
+        now = 1_000L
+        lockManager = BiometricLockManager(fakePrefs, nowMs = { now }, canAuthenticate = { true })
     }
 
     @Test
     fun `default lock state is disabled and unlocked`() {
         assertFalse(lockManager.isLockEnabled)
         assertFalse(lockManager.isAppLocked)
-        assertTrue(lockManager.canUseBiometrics())
     }
 
     @Test
-    fun `enabling lock sets lock active when locked`() {
+    fun `enabling lock locks app until unlocked`() {
         lockManager.setLockEnabled(true)
         assertTrue(lockManager.isLockEnabled)
-
-        lockManager.lock()
         assertTrue(lockManager.isAppLocked)
 
         lockManager.unlock()
@@ -82,10 +66,26 @@ class BiometricLockManagerTest {
     @Test
     fun `disabling lock immediately unlocks app`() {
         lockManager.setLockEnabled(true)
-        lockManager.lock()
         assertTrue(lockManager.isAppLocked)
 
         lockManager.setLockEnabled(false)
+        assertFalse(lockManager.isLockEnabled)
         assertFalse(lockManager.isAppLocked)
+    }
+
+    @Test
+    fun `background timeout locks app on resume`() {
+        lockManager.setLockEnabled(true)
+        lockManager.unlock()
+        assertFalse(lockManager.isAppLocked)
+
+        lockManager.markBackgrounded()
+        now += 59_000L
+        assertFalse(lockManager.shouldLockOnResume())
+
+        now += 2_000L
+        assertTrue(lockManager.shouldLockOnResume())
+        lockManager.lock()
+        assertTrue(lockManager.isAppLocked)
     }
 }

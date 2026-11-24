@@ -106,7 +106,7 @@ object PrivacyAuditCenter {
 
     /**
      * Emergency sovereign panic wipe: deletes all private conversations,
-     * memories, notes, and cache from the device immediately.
+     * memories, notes, cache, and staged/backup artifacts from the device immediately.
      */
     fun wipeAllUserData(filesDir: File, cacheDir: File, purgeModels: Boolean = false): Boolean {
         var success = true
@@ -114,11 +114,26 @@ object PrivacyAuditCenter {
             File(filesDir, "sessions").deleteRecursively()
             File(filesDir, "memories").deleteRecursively()
             File(filesDir, "notes").deleteRecursively()
-            cacheDir.listFiles()?.forEach { it.deleteRecursively() }
+            cacheDir.listFiles()?.forEach { file ->
+                if (!file.deleteRecursively()) success = false
+            }
+
+            val artifactNames = listOf(
+                "model.litertlm.part",
+                "model.litertlm.backup",
+                "whisper-model.bin.part",
+                "whisper-model.bin.backup",
+            )
+            artifactNames.forEach { name ->
+                val file = File(filesDir, name)
+                if (file.exists() && !file.delete()) success = false
+            }
 
             if (purgeModels) {
-                File(filesDir, "model.litertlm").delete()
-                File(filesDir, "whisper-model.bin").delete()
+                listOf("model.litertlm", "whisper-model.bin").forEach { name ->
+                    val file = File(filesDir, name)
+                    if (file.exists() && !file.delete()) success = false
+                }
             }
         } catch (_: Exception) {
             success = false

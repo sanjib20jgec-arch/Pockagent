@@ -14,6 +14,15 @@ android {
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
     }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
+        }
+    }
     externalNativeBuild {
         cmake { path = file("src/main/cpp/CMakeLists.txt"); version = "3.22.1" }
     }
@@ -25,6 +34,7 @@ kotlin {
     }
 }
 dependencies {
+    implementation("androidx.biometric:biometric:1.1.0")
     implementation("com.google.ai.edge.litertlm:litertlm-android:0.19.1")
     implementation("com.dineshdev:pdfbox-android:2.0.27.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")

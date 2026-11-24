@@ -222,11 +222,11 @@ class PersonalNotesStore(
         for (i in notes.indices) {
             val n = notes[i]
             sb.append("  {\n")
-            sb.append("    \"id\": \"").append(escapeJson(n.id)).append("\",\n")
-            sb.append("    \"title\": \"").append(escapeJson(n.title)).append("\",\n")
-            sb.append("    \"content\": \"").append(escapeJson(n.content)).append("\",\n")
+            sb.append("    \"id\": \"").append(LocalJsonCodec.escape(n.id)).append("\",\n")
+            sb.append("    \"title\": \"").append(LocalJsonCodec.escape(n.title)).append("\",\n")
+            sb.append("    \"content\": \"").append(LocalJsonCodec.escape(n.content)).append("\",\n")
             sb.append("    \"tags\": [")
-            sb.append(n.tags.joinToString(", ") { "\"${escapeJson(it)}\"" })
+            sb.append(n.tags.joinToString(", ") { "\"${LocalJsonCodec.escape(it)}\"" })
             sb.append("],\n")
             sb.append("    \"createdAt\": ").append(n.createdAt).append(",\n")
             sb.append("    \"updatedAt\": ").append(n.updatedAt).append(",\n")
@@ -258,9 +258,9 @@ class PersonalNotesStore(
                 val tags = mutableListOf<String>()
                 val tagsBlock = Regex(""""tags"\s*:\s*\[(.*?)\]""").find(body)?.groupValues?.get(1)
                 if (!tagsBlock.isNullOrBlank()) {
-                    val tagItems = Regex(""""([^"]+)"""").findAll(tagsBlock)
+                    val tagItems = Regex(""""((?:\\.|[^"\\])*)"""").findAll(tagsBlock)
                     for (t in tagItems) {
-                        tags.add(t.groupValues[1])
+                        tags.add(LocalJsonCodec.unescape(t.groupValues[1]))
                     }
                 }
 
@@ -280,26 +280,10 @@ class PersonalNotesStore(
         return results
     }
 
-    private fun escapeJson(value: String): String = value
-        .replace("\\", "\\\\")
-        .replace("\"", "\\\"")
-        .replace("\b", "\\b")
-        .replace("\u000C", "\\f")
-        .replace("\n", "\\n")
-        .replace("\r", "\\r")
-        .replace("\t", "\\t")
-
-    private fun unescapeJson(value: String): String = value
-        .replace("\\n", "\n")
-        .replace("\\r", "\r")
-        .replace("\\t", "\t")
-        .replace("\\\"", "\"")
-        .replace("\\\\", "\\")
-
     private fun extractJsonField(jsonBody: String, field: String): String? {
         val regex = Regex(""""$field"\s*:\s*"((?:\\.|[^"\\])*)"""")
         val match = regex.find(jsonBody) ?: return null
-        return unescapeJson(match.groupValues[1])
+        return LocalJsonCodec.unescape(match.groupValues[1])
     }
 
     private fun extractJsonLong(jsonBody: String, field: String): Long? {

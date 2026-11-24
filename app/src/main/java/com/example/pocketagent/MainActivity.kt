@@ -1,15 +1,16 @@
 package com.example.pocketagent
 
 import android.Manifest
-import android.app.Activity
 import android.app.ActivityManager
 import android.app.AlertDialog
+import androidx.fragment.app.FragmentActivity
 import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.res.ColorStateList
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -27,6 +28,7 @@ import android.view.Gravity
 import android.view.View
 import android.widget.Button
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -43,7 +45,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
-class MainActivity : Activity(), TextToSpeech.OnInitListener {
+class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     companion object {
         private const val PICK_MODEL = 1
         private const val PICK_TEXT_FILES = 2
@@ -67,14 +69,39 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         /** Reset stateful KV cache before cumulative turns approach the 4096-token EngineConfig cap. */
         private const val WARM_CONTEXT_RESET_THRESHOLD = 3400
         private val SYSTEM_INSTRUCTION: String get() = AnswerDirective.SYSTEM_INSTRUCTION
-        private const val BG = 0xFFF4F7F6.toInt()
-        private const val INK = 0xFF162D2A.toInt()
-        private const val MUTED = 0xFF5F6F6A.toInt()
-        private const val TEAL = 0xFF126B60.toInt()
-        private const val MINT = 0xFFE2F3ED.toInt()
-        private const val BORDER = 0xFFE3EBE8.toInt()
+        private var BG = 0xFFF4F7F6.toInt()
+        private var INK = 0xFF162D2A.toInt()
+        private var MUTED = 0xFF5F6F6A.toInt()
+        private var TEAL = 0xFF126B60.toInt()
+        private var MINT = 0xFFE2F3ED.toInt()
+        private var BORDER = 0xFFE3EBE8.toInt()
+        private var SURFACE = Color.WHITE
         private const val WHITE = Color.WHITE
-        private const val STOP_CRIMSON = 0xFFB91C1C.toInt()
+        private var STOP_CRIMSON = 0xFFB91C1C.toInt()
+        private var isDarkTheme = false
+
+        private fun applyTheme(dark: Boolean) {
+            isDarkTheme = dark
+            if (dark) {
+                BG = 0xFF121816.toInt()
+                INK = 0xFFE8F0EE.toInt()
+                MUTED = 0xFF9FB0AB.toInt()
+                TEAL = 0xFF4DB6A6.toInt()
+                MINT = 0xFF1E332F.toInt()
+                BORDER = 0xFF2A3D39.toInt()
+                SURFACE = 0xFF1A2421.toInt()
+                STOP_CRIMSON = 0xFFEF5350.toInt()
+            } else {
+                BG = 0xFFF4F7F6.toInt()
+                INK = 0xFF162D2A.toInt()
+                MUTED = 0xFF5F6F6A.toInt()
+                TEAL = 0xFF126B60.toInt()
+                MINT = 0xFFE2F3ED.toInt()
+                BORDER = 0xFFE3EBE8.toInt()
+                SURFACE = Color.WHITE
+                STOP_CRIMSON = 0xFFB91C1C.toInt()
+            }
+        }
     }
 
     /** Serial executor for LiteRT-LM load and inference: engine access must never overlap. */
@@ -177,9 +204,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private val biometricLockManager by lazy {
         BiometricLockManager(
             preferences = getSharedPreferences("pocketagent_security", MODE_PRIVATE),
-            authenticator = AndroidBiometricAuthenticator(this)
         )
     }
+    private lateinit var lockOverlay: LinearLayout
+    private var isAuthenticating = false
     private var isMemoryEnabled = true
     private var currentSession: ConversationSession? = null
     private var lastPrompt: String = ""
@@ -198,11 +226,19 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     @Volatile private var activeStreamLatch: CountDownLatch? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        val nightMode = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
+        applyTheme(nightMode == Configuration.UI_MODE_NIGHT_YES)
         super.onCreate(savedInstanceState)
         pendingAnswerToSave = savedInstanceState?.getString(STATE_PENDING_ANSWER_SAVE)
         window.statusBarColor = BG
         window.navigationBarColor = BG
-        window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        var flags = window.decorView.systemUiVisibility
+        flags = if (isDarkTheme) {
+            flags and View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR.inv() and View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR.inv()
+        } else {
+            flags or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        }
+        window.decorView.systemUiVisibility = flags
         tts = TextToSpeech(this, this)
 
         var savedBackend = BackendPreference.fromString(settingsPrefs.getString(PREF_BACKEND_MODE, null))
@@ -398,7 +434,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
         outputCard = column().apply {
             visibility = View.GONE
-            background = shape(WHITE, 20, BORDER)
+            background = shape(SURFACE, 20, BORDER)
             setPadding(dp(16), dp(14), dp(16), dp(16))
         }
         val outputHeader = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
@@ -510,7 +546,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             }
         }
         composerCard = column().apply {
-            background = shape(WHITE, 20, BORDER)
+            background = shape(SURFACE, 20, BORDER)
             elevation = dp(6).toFloat()
             setPadding(dp(12), dp(10), dp(12), dp(10))
         }
@@ -724,7 +760,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
         rootLayout.addView(composerDock, LinearLayout.LayoutParams(-1, -2))
 
-        setContentView(rootLayout)
+        lockOverlay = buildLockOverlay()
+        val container = FrameLayout(this).apply {
+            addView(rootLayout, FrameLayout.LayoutParams(-1, -1))
+            addView(lockOverlay, FrameLayout.LayoutParams(-1, -1))
+        }
+        setContentView(container)
+        updateLockOverlay()
         syncComposerState()
     }
 
@@ -1967,7 +2009,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val searchBox = EditText(this).apply {
             hint = "Search conversations…"
             textSize = 14f
-            background = shape(WHITE, 12, BORDER)
+            background = shape(SURFACE, 12, BORDER)
             setPadding(dp(12), dp(10), dp(12), dp(10))
             setTextColor(INK)
             setHintTextColor(MUTED)
@@ -2001,7 +2043,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
                     setPadding(dp(10), dp(10), dp(10), dp(10))
-                    background = shape(WHITE, 12, BORDER)
+                    background = shape(SURFACE, 12, BORDER)
                     isClickable = true
                     isFocusable = true
                     setOnClickListener {
@@ -2182,7 +2224,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
                     setPadding(dp(12), dp(10), dp(12), dp(10))
-                    background = shape(WHITE, 12, BORDER)
+                    background = shape(SURFACE, 12, BORDER)
                 }
 
                 val info = column().apply {
@@ -2241,7 +2283,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val input = EditText(this).apply {
             hint = "e.g., Prefers Kotlin, Speaks Bengali, Offline only…"
             textSize = 14f
-            background = shape(WHITE, 12, BORDER)
+            background = shape(SURFACE, 12, BORDER)
             setPadding(dp(12), dp(10), dp(12), dp(10))
             setTextColor(INK)
             setHintTextColor(MUTED)
@@ -2286,7 +2328,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val searchBox = EditText(this).apply {
             hint = "Search personal notes…"
             textSize = 14f
-            background = shape(WHITE, 12, BORDER)
+            background = shape(SURFACE, 12, BORDER)
             setPadding(dp(12), dp(10), dp(12), dp(10))
             setTextColor(INK)
             setHintTextColor(MUTED)
@@ -2316,7 +2358,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
                     setPadding(dp(12), dp(10), dp(12), dp(10))
-                    background = shape(WHITE, 12, BORDER)
+                    background = shape(SURFACE, 12, BORDER)
                 }
 
                 val info = column().apply {
@@ -2394,7 +2436,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val titleInput = EditText(this).apply {
             hint = "Note Title"
             textSize = 14f
-            background = shape(WHITE, 12, BORDER)
+            background = shape(SURFACE, 12, BORDER)
             setPadding(dp(12), dp(10), dp(12), dp(10))
             setTextColor(INK)
             setHintTextColor(MUTED)
@@ -2405,7 +2447,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val contentInput = EditText(this).apply {
             hint = "Note Content…"
             textSize = 13f
-            background = shape(WHITE, 12, BORDER)
+            background = shape(SURFACE, 12, BORDER)
             setPadding(dp(12), dp(10), dp(12), dp(10))
             setTextColor(INK)
             setHintTextColor(MUTED)
@@ -2565,10 +2607,17 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
         // 1. Zero-Cloud Telemetry Guarantee Badge
         val auditCard = column().apply {
-            background = shape(0xFFE8F5E9.toInt(), 12, 0xFFC8E6C9.toInt())
+            val bg = if (isDarkTheme) 0xFF1B3A2F.toInt() else 0xFFE8F5E9.toInt()
+            val border = if (isDarkTheme) 0xFF2E5A4A.toInt() else 0xFFC8E6C9.toInt()
+            background = shape(bg, 12, border)
             setPadding(dp(14), dp(12), dp(14), dp(12))
         }
-        val auditTitle = text("🛡️ 100% Zero-Cloud Guarantee", 14f, 0xFF1B5E20.toInt(), true)
+        val auditTitle = text(
+            "🛡️ 100% Zero-Cloud Guarantee",
+            14f,
+            if (isDarkTheme) 0xFFB9F6CA.toInt() else 0xFF1B5E20.toInt(),
+            true,
+        )
         auditCard.addView(auditTitle)
         val auditDesc = text(
             if (permAudit.isZeroCloudCompliant)
@@ -2576,14 +2625,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             else
                 "Warning: Non-standard permissions detected.",
             12f,
-            0xFF2E7D32.toInt()
+            if (isDarkTheme) 0xFFA5D6A7.toInt() else 0xFF2E7D32.toInt(),
         ).apply { setPadding(0, dp(4), 0, 0) }
         auditCard.addView(auditDesc)
         dialogView.addView(auditCard, marginBottom(12))
 
         // 2. Storage Audit Card
         val storageCard = column().apply {
-            background = shape(WHITE, 12, BORDER)
+            background = shape(SURFACE, 12, BORDER)
             setPadding(dp(14), dp(12), dp(14), dp(12))
         }
         storageCard.addView(text("💾 Local Storage Breakdown", 14f, INK, true), marginBottom(8))
@@ -2611,15 +2660,16 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val lockCard = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            background = shape(WHITE, 12, BORDER)
+            background = shape(SURFACE, 12, BORDER)
             setPadding(dp(14), dp(12), dp(14), dp(12))
         }
         val lockInfo = column().apply {
             addView(text("🔒 Biometric App Lock", 14f, INK, true))
-            addView(text("Require fingerprint or device PIN on launch", 11f, MUTED))
+            addView(text("Require device credential or biometric on resume", 11f, MUTED))
         }
         lockCard.addView(lockInfo, LinearLayout.LayoutParams(0, -2, 1f))
 
+        var privacyDialog: AlertDialog? = null
         val lockToggleBtn = pillButton(
             if (biometricLockManager.isLockEnabled) "Enabled" else "Disabled",
             accessibilityLabel = "Toggle biometric app lock"
@@ -2627,10 +2677,24 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             layoutParams = LinearLayout.LayoutParams(-2, dp(32))
         }
         lockToggleBtn.setOnClickListener {
-            val newState = !biometricLockManager.isLockEnabled
-            biometricLockManager.setLockEnabled(newState)
-            lockToggleBtn.text = if (newState) "Enabled" else "Disabled"
-            Toast.makeText(this, if (newState) "Biometric lock enabled" else "Biometric lock disabled", Toast.LENGTH_SHORT).show()
+            val enabling = !biometricLockManager.isLockEnabled
+            if (enabling) {
+                if (!biometricLockManager.canUseBiometrics(this)) {
+                    Toast.makeText(this, "Set a device screen lock or biometric first.", Toast.LENGTH_LONG).show()
+                    return@setOnClickListener
+                }
+                biometricLockManager.setLockEnabled(true)
+                lockToggleBtn.text = "Enabled"
+                privacyDialog?.dismiss()
+                updateLockOverlay()
+                promptBiometricUnlock()
+                Toast.makeText(this, "App lock enabled. Authenticate to continue.", Toast.LENGTH_SHORT).show()
+            } else {
+                biometricLockManager.setLockEnabled(false)
+                lockToggleBtn.text = "Disabled"
+                updateLockOverlay()
+                Toast.makeText(this, "App lock disabled", Toast.LENGTH_SHORT).show()
+            }
         }
         lockCard.addView(lockToggleBtn)
         dialogView.addView(lockCard, marginBottom(12))
@@ -2648,21 +2712,106 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 .setNegativeButton("Cancel", null)
                 .show()
         }.apply {
-            background = shape(0xFFFFEBEE.toInt(), 12, 0xFFFFCDD2.toInt())
-            setTextColor(0xFFC62828.toInt())
+            val bg = if (isDarkTheme) 0xFF3A1F1F.toInt() else 0xFFFFEBEE.toInt()
+            val border = if (isDarkTheme) 0xFF5C2A2A.toInt() else 0xFFFFCDD2.toInt()
+            background = shape(bg, 12, border)
+            setTextColor(if (isDarkTheme) 0xFFFF8A80.toInt() else 0xFFC62828.toInt())
         }
         dialogView.addView(panicBtn)
 
-        AlertDialog.Builder(this)
+        privacyDialog = AlertDialog.Builder(this)
             .setTitle("🛡️ Privacy & Sovereign Security")
             .setView(dialogView)
             .setPositiveButton("Close", null)
             .show()
     }
 
+    override fun onResume() {
+        super.onResume()
+        if (biometricLockManager.shouldLockOnResume()) {
+            biometricLockManager.lock()
+        }
+        updateLockOverlay()
+        if (biometricLockManager.isAppLocked) {
+            promptBiometricUnlock()
+        }
+    }
+
+    override fun onStop() {
+        if (!isChangingConfigurations && !isAuthenticating) {
+            biometricLockManager.markBackgrounded()
+        }
+        super.onStop()
+    }
+
+    private fun buildLockOverlay(): LinearLayout {
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setBackgroundColor(if (isDarkTheme) 0xF2121816.toInt() else 0xF2F4F7F6.toInt())
+            isClickable = true
+            isFocusable = true
+            visibility = View.GONE
+            setPadding(dp(24), dp(24), dp(24), dp(24))
+
+            val card = LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                background = shape(SURFACE, 20, BORDER)
+                setPadding(dp(24), dp(24), dp(24), dp(24))
+            }
+            card.addView(text("PocketAgent is locked", 22f, INK).apply {
+                typeface = Typeface.DEFAULT_BOLD
+            })
+            card.addView(text("Authenticate to access your local conversations, memories, and notes.", 14f, MUTED).apply {
+                setPadding(0, dp(10), 0, dp(18))
+            })
+            card.addView(pillButton("Unlock", accessibilityLabel = "Unlock PocketAgent") {
+                promptBiometricUnlock()
+            }, LinearLayout.LayoutParams(-1, -2))
+            addView(card, LinearLayout.LayoutParams(-1, -2))
+        }
+    }
+
+    private fun updateLockOverlay() {
+        if (!::lockOverlay.isInitialized) return
+        lockOverlay.visibility = if (biometricLockManager.isAppLocked) View.VISIBLE else View.GONE
+    }
+
     private fun promptBiometricUnlock() {
-        if (!biometricLockManager.isAppLocked) return
-        biometricLockManager.unlock()
+        if (!::lockOverlay.isInitialized) return
+        if (!biometricLockManager.isLockEnabled) {
+            biometricLockManager.unlock()
+            updateLockOverlay()
+            return
+        }
+        if (!biometricLockManager.isAppLocked) {
+            updateLockOverlay()
+            return
+        }
+        if (isAuthenticating) return
+        if (!biometricLockManager.canUseBiometrics(this)) {
+            updateStatus("Set a device screen lock or biometric to use app lock.")
+            return
+        }
+        isAuthenticating = true
+        biometricLockManager.authenticate(
+            activity = this,
+            onSuccess = {
+                isAuthenticating = false
+                updateLockOverlay()
+                updateStatus("PocketAgent unlocked.")
+            },
+            onError = { msg ->
+                isAuthenticating = false
+                updateLockOverlay()
+                updateStatus("Unlock failed: $msg")
+            },
+            onCancel = {
+                isAuthenticating = false
+                updateLockOverlay()
+                updateStatus("Authentication required to unlock PocketAgent.")
+            },
+        )
     }
 
     private fun showActionReviewDialog(reviewUi: SystemActionTools.ActionReviewUi) {

@@ -205,14 +205,14 @@ class UserMemoryStore(
         val sb = StringBuilder("[\n")
         for ((index, m) in memories.withIndex()) {
             sb.append("  {\n")
-            sb.append("    \"id\": \"").append(escapeJson(m.id)).append("\",\n")
-            sb.append("    \"content\": \"").append(escapeJson(m.content)).append("\",\n")
+            sb.append("    \"id\": \"").append(LocalJsonCodec.escape(m.id)).append("\",\n")
+            sb.append("    \"content\": \"").append(LocalJsonCodec.escape(m.content)).append("\",\n")
             sb.append("    \"category\": \"").append(m.category.name).append("\",\n")
             sb.append("    \"createdAt\": ").append(m.createdAt).append(",\n")
             sb.append("    \"confidence\": ").append(m.confidence).append(",\n")
             sb.append("    \"sourceSessionId\": ")
             if (m.sourceSessionId != null) {
-                sb.append("\"").append(escapeJson(m.sourceSessionId)).append("\"\n")
+                sb.append("\"").append(LocalJsonCodec.escape(m.sourceSessionId)).append("\"\n")
             } else {
                 sb.append("null\n")
             }
@@ -244,12 +244,12 @@ class UserMemoryStore(
                 if (content.isNotBlank()) {
                     results.add(
                         UserMemory(
-                            id = id,
-                            content = unescapeJson(content),
+                            id = LocalJsonCodec.unescape(id),
+                            content = LocalJsonCodec.unescape(content),
                             category = category,
                             createdAt = createdAt,
                             confidence = confidence,
-                            sourceSessionId = sourceSessionId?.let(::unescapeJson),
+                            sourceSessionId = sourceSessionId?.let(LocalJsonCodec::unescape),
                         )
                     )
                 }
@@ -268,28 +268,5 @@ class UserMemoryStore(
         } else {
             raw
         }
-    }
-
-    private fun escapeJson(value: String): String {
-        val sb = StringBuilder()
-        for (ch in value) {
-            when (ch) {
-                '"' -> sb.append("\\\"")
-                '\\' -> sb.append("\\\\")
-                '\n' -> sb.append("\\n")
-                '\r' -> sb.append("\\r")
-                '\t' -> sb.append("\\t")
-                else -> sb.append(ch)
-            }
-        }
-        return sb.toString()
-    }
-
-    private fun unescapeJson(value: String): String {
-        return value.replace("\\\"", "\"")
-            .replace("\\\\", "\\")
-            .replace("\\n", "\n")
-            .replace("\\r", "\r")
-            .replace("\\t", "\t")
     }
 }

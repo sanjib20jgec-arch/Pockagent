@@ -20,12 +20,12 @@ This is the persistent task ledger for the current product direction. It is grou
 
 ## Current baseline
 
-- Audit commit: `b86f420` on `arena/85d065bd-pockagent`; base `main` is `f579f52`.
-- GitHub Actions run `45342681795` built and uploaded the debug APK successfully.
-- No automated tests/lint or device/emulator tests exist. Local build unavailable (no Java/Gradle executable or wrapper).
+- Audit baseline: `b86f420`; M0 implementation commit: `ab12ad9` on `arena/85d065bd-pockagent`; base `main` is `f579f52`.
+- GitHub Actions run `45346913699` passed source-archive verification, `testDebugUnitTest`, `assembleDebug`, and APK artifact upload.
+- Nine unit tests now cover bounded text reading and model import success/failure/rollback. No Android UI/instrumented tests, lint, or device/emulator tests exist. Local build remains unavailable (no Java/Gradle executable or wrapper).
 - User-reported: app launches and loads the Gemma 3 1B INT4 model; generated output/UI need improvement.
 - Current app supports typed prompts, live system speech-to-text, bounded text/Markdown/CSV attachments, local CPU inference, and answer copy/share/TTS. Image input, imported audio transcription, PDF extraction, chat history and tool execution are not implemented.
-- The original `PocketAgent.zip` was confirmed stale and contained removed AccessibilityService/control code. M0 is regenerating it from current source with a guard/check script; archive verification passed locally, and CI verification is pending.
+- The stale source ZIP has been regenerated. The guard verifies current files and rejects active AccessibilityService/control code; local and CI archive checks passed.
 
 ## Task ledger
 
@@ -33,10 +33,11 @@ This is the persistent task ledger for the current product direction. It is grou
 | --- | --- | --- | --- | --- | --- |
 | AUD-001 | Repository, feature, privacy, build and architecture audit | Repository Auditor + QA + Security | **COMPLETED** | None | Low; report in `PROJECT_AUDIT.md` |
 | ARC-001 | Confirm incremental architecture and dependency boundaries | System Architect | **COMPLETED (M0 scope)** | AUD-001 | Narrow pure helpers; no broad rewrite |
-| SAFE-001 | Regenerate stale source ZIP; verify no legacy service/control remains | Security + Release | **IN PROGRESS** | AUD-001; M0 approved | Script and archive check pass locally; CI pending |
-| TEST-001 | Add focused unit tests for bounded text extraction and import rollback | QA + Implementation | **IN PROGRESS** | ARC-001; small testable seam | Tests added; CI execution pending |
-| AI-001 | Harden model import (bounds, free space, atomic replace/rollback, retry/error states) | AI Engine + Implementation | **IN PROGRESS** | ARC-001, TEST-001 | Preserve existing model; CI pending |
-| UX-001 | Accessibility, responsive layout, and accurate speech-privacy disclosure review | UI/UX + Security + QA | **IN PROGRESS** | AUD-001 | Privacy wording updated; device/emulator review remains blocked |
+| SAFE-001 | Regenerate stale source ZIP; verify no legacy service/control remains | Security + Release | **COMPLETED** | AUD-001; M0 approved | Current archive checker and CI pass; no legacy implementation files in bundle |
+| TEST-001 | Add focused unit tests for bounded text extraction and import rollback | QA + Implementation | **COMPLETED** | ARC-001; small testable seam | Nine JUnit cases passed in CI run 45346913699 |
+| AI-001 | Harden model import (bounds, free space, atomic replace/rollback, retry/error states) | AI Engine + Implementation | **COMPLETED (CI/unit scope)** | ARC-001, TEST-001 | Size/free-space guard; atomic replace; previous model retained on tested failures; no device validation |
+| UX-001 | Accessibility, responsive layout, and accurate speech-privacy disclosure review | UI/UX + Security + QA | **IN PROGRESS** | AUD-001 | Speech-provider disclosure updated; TalkBack/layout/device checks remain unverified |
+| QA-DEVICE-001 | Verify permission, missing/corrupt model, speech, inference and UI flows on Android | QA | **BLOCKED** | M0 app build available; physical device/emulator needed | No device/emulator is available in workspace; user-device checks requested after APK install |
 | AI-002 | Model status/capability metadata and inference progress/cancel feasibility | AI Engine + QA | **PROPOSED** | AI-001; LiteRT-LM API review | Medium; no unsupported capability promises |
 | DOC-001 | Safe PDF/document text extraction and source display | Document/Knowledge + Security | **PROPOSED** | M0 gates, input abstraction, TEST-001 | Medium-high; size/context limits and prompt injection |
 | VOICE-001 | Imported audio transcription | Voice + Security + QA | **PROPOSED** | M0 gates; choose ASR/provider and privacy policy | High; offline/network and language availability |
@@ -68,7 +69,7 @@ M0 quality gate
 
 ### M0 — Safe, verifiable baseline (P0/P1) — IN PROGRESS (user approved)
 
-**Objective:** correct release/source integrity, add first regression evidence, protect model and user data before adding more formats.
+**Objective:** correct release/source integrity, add first regression evidence, protect model and user data before adding more formats. Archive safety, nine unit tests, import hardening, and CI assembly pass; device-level permission/speech/inference/accessibility checks remain unverified and block full M0 closure.
 
 **Tasks:** SAFE-001, TEST-001, AI-001, UX-001. Confirm architecture recommendations through ARC-001.
 

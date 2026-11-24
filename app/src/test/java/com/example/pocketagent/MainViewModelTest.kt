@@ -28,6 +28,9 @@ class MainViewModelTest {
     class FakeLlmInferenceRunner : LlmInferenceRunner {
         var available: Boolean = false
         var chunksToStream: List<String> = listOf("1. Step one\n", "2. Step two")
+        var responseToReturn: String
+            get() = chunksToStream.joinToString("")
+            set(value) { chunksToStream = listOf(value) }
         var shouldThrow: Boolean = false
         var lastPrompt: String? = null
         var lastSystemInstruction: String? = null

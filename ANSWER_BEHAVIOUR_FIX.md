@@ -202,3 +202,40 @@ This is now bounded at the app level. It does not change the model's tendency to
 degenerate on the 1B INT4 build — it makes the app survive it. Loops are most
 likely on long, open-ended requests; regenerating a shorter, more specific
 question is the best workaround.
+
+---
+
+## Update after rebasing onto main (Stages 2-4)
+
+`main` advanced four times while this was open. Each merge kept both sides:
+
+| Feature from main | How it composes with the fix |
+| --- | --- |
+| Stage 2: PDF page citations | Retrieval output flows through the shared answer composer; citations still render. |
+| Stage 3: long-term memory vault | The memory block **enriches** the intent-aware instruction instead of replacing it, so answer shaping and the runaway guard still apply. |
+| Stage 4: offline calculator + notes | The verified calculation is passed into the composer and placed ahead of the question, on the first attempt and the corrective retry. |
+
+### Two bugs found during those merges
+
+1. **Corrupted auto-merge of `MainActivity.kt`.** Git silently produced a
+   structurally broken file - dropped braces, the class closing early, and the
+   tail of the file (dictation, `onDestroy`, UI helpers) outside the class. It
+   surfaced as cascading `Unresolved reference MINT / recognizer / tts` errors.
+   Rebuilt from the last CI-verified commit and re-applied main's citation
+   feature by hand, then verified brace depth and member scope programmatically
+   rather than trusting a diff read.
+
+2. **`LocalCalculatorTool` evaluated prose as maths.** A blind
+   `replace("e", Math.E)` rewrote the letter `e` inside ordinary words -
+   `"hello world"` became `"h2.718...llo"` - so the tool claimed to have verified
+   a calculation and injected a bogus line into the prompt. `main` fixed this
+   independently; the merge keeps both layers (whole-word constant substitution
+   plus strict token validation).
+
+### Final state
+
+```
+171 passed, 0 failed
+```
+
+`Build APK` CI green, PR mergeable.

@@ -63,8 +63,9 @@ data class MainUiState(
     val duplexStatusMessage: String = "",
 ) {
     companion object {
-        const val MAX_ATTACHMENT_CHARS = 32_000
-        const val MAX_RESPONSE_TOKENS = 2048
+        // Conservative for 4K-context models: ~1700 tokens, leaving room for system/history/response.
+        const val MAX_ATTACHMENT_CHARS = 6_000
+        const val MAX_RESPONSE_TOKENS = 1024
         /** Intent-aware instruction (answers the request instead of returning steps to the user). */
         val SYSTEM_INSTRUCTION: String get() = AnswerDirective.SYSTEM_INSTRUCTION
 

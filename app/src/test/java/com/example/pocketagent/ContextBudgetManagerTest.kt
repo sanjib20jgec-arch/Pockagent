@@ -199,4 +199,43 @@ class ContextBudgetManagerTest {
             ContextBudgetManager.TokenBudget(maxContextTokens = 500, maxResponseTokens = 400, reservedSystemTokens = 200)
         }
     }
+
+    @Test
+    fun reservesSystemBudgetEvenWhenSystemInstructionPassedOutOfBand() {
+        val manager = ContextBudgetManager(
+            ContextBudgetManager.TokenBudget(
+                maxContextTokens = 512,
+                maxResponseTokens = 128,
+                reservedSystemTokens = 200,
+            )
+        )
+        val messages = listOf(
+            ChatMessage(role = ChatMessage.Role.USER, content = "Hello"),
+        )
+        val outOfBand = manager.buildConversationalPrompt("", messages)
+        val inBand = manager.buildConversationalPrompt("System: be helpful.", messages)
+        // Out-of-band must not give more history room than an explicit system instruction reservation.
+        assertTrue(outOfBand.estimatedTotalTokens <= inBand.estimatedTotalTokens + 40)
+    }
+
+    @Test
+    fun trimsNewestTurnAttachmentWhenItExceedsAvailableBudget() {
+        val manager = ContextBudgetManager(
+            ContextBudgetManager.TokenBudget(
+                maxContextTokens = 256,
+                maxResponseTokens = 64,
+                reservedSystemTokens = 32,
+            )
+        )
+        val hugeAttachment = "A".repeat(4000)
+        val messages = listOf(
+            ChatMessage(role = ChatMessage.Role.USER, content = "Summarize this", attachmentContent = hugeAttachment),
+        )
+        val result = manager.buildConversationalPrompt("", messages)
+        assertEquals(1, result.retainedMessages.size)
+        val retained = result.retainedMessages.first()
+        assertNotNull(retained.attachmentContent)
+        assertTrue("Latest attachment should be trimmed to fit budget", retained.attachmentContent!!.length < hugeAttachment.length)
+        assertTrue(result.estimatedTotalTokens <= 256)
+    }
 }

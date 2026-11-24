@@ -53,7 +53,7 @@ class DefaultLlmInferenceRunner(
          * instead of hanging the worker thread, long enough for larger 2B INT8 models on CPU.
          */
         const val DEFAULT_TIMEOUT_SECONDS = 180L
-        const val WARM_CONTEXT_RESET_THRESHOLD = 3400
+        const val WARM_CONTEXT_RESET_THRESHOLD = 2800
     }
 
     @Volatile private var isClosed = false

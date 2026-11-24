@@ -12,7 +12,7 @@ package com.example.pocketagent
  * - Semantic chunks retain document source and position attribution.
  */
 object LocalDocumentRetriever {
-    const val MAX_ATTACHMENT_BUDGET = 32_000
+    const val MAX_ATTACHMENT_BUDGET = 6_000
 
     /**
      * Prepares prompt-ready reference context for prompt injection.

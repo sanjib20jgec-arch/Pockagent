@@ -75,7 +75,8 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         /** Skip eager startup preload above 1.5 GB so multi-GB models (e.g. LFM3-Omni 3.5 GB) don't OOM idle launches. */
         private const val EAGER_WARMUP_MAX_BYTES = 1_500_000_000L
         /** Reset stateful KV cache before cumulative turns approach the 4096-token EngineConfig cap. */
-        private const val WARM_CONTEXT_RESET_THRESHOLD = 3400
+        private const val WARM_CONTEXT_RESET_THRESHOLD = 2800
+        private const val IDLE_ENGINE_UNLOAD_MS = 120_000L
         private val SYSTEM_INSTRUCTION: String get() = AnswerDirective.SYSTEM_INSTRUCTION
         private var BG = 0xFFF4F7F6.toInt()
         private var INK = 0xFF162D2A.toInt()
@@ -192,6 +193,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     private val recordingPulseAnimator = PulseAnimator()
     private var generationStartElapsedMs: Long = 0L
     private var generationTimerRunnable: Runnable? = null
+    private var idleUnloadRunnable: Runnable? = null
     private var pendingAnswerToSave: String? = null
     private val sessionStore by lazy { SessionStore(SessionStore.defaultDir(filesDir)) }
     private val userMemoryStore by lazy { UserMemoryStore(UserMemoryStore.defaultDir(filesDir)) }
@@ -1820,6 +1822,8 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
 
     /** Switches the primary composer action from Ask to Stop while a generation is running. */
     private fun enterGeneratingState() {
+        idleUnloadRunnable?.let { mainHandler.removeCallbacks(it) }
+        idleUnloadRunnable = null
         isGeneratingUi = true
         isStoppingUi = false
         suggestButton.isEnabled = true
@@ -1847,6 +1851,21 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         suggestButton.setTextColor(Color.WHITE)
         suggestButton.setOnClickListener { suggestSteps() }
         syncComposerState()
+        scheduleIdleEngineUnload()
+    }
+
+    private fun scheduleIdleEngineUnload() {
+        idleUnloadRunnable?.let { mainHandler.removeCallbacks(it) }
+        val runnable = Runnable {
+            if (!isGeneratingUi && engineManager.engine != null) {
+                engineManager.invalidateConversation("idle unload")
+                inferenceExecutor.execute { engineManager.close() }
+                updateStatus("Model unloaded after inactivity to free memory. It will reload on next request.")
+                refreshModelStatus()
+            }
+        }
+        idleUnloadRunnable = runnable
+        mainHandler.postDelayed(runnable, IDLE_ENGINE_UNLOAD_MS)
     }
 
     /**
@@ -4027,11 +4046,36 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     private fun ripple(content: GradientDrawable, color: Int) =
         rippleDrawable(content, color)
 
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+            // Under memory pressure, drop warm conversation state; keep engine loaded if possible.
+            engineManager.invalidateConversation("trim memory level $level")
+        }
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_COMPLETE ||
+            level == android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL) {
+            if (!isGeneratingUi) {
+                inferenceExecutor.execute { engineManager.close() }
+                updateStatus("Model unloaded to free memory. It will reload on next request.")
+            }
+        }
+    }
+
+    override fun onLowMemory() {
+        super.onLowMemory()
+        engineManager.invalidateConversation("low memory")
+        if (!isGeneratingUi) {
+            inferenceExecutor.execute { engineManager.close() }
+        }
+    }
+
     override fun onDestroy() {
         thinkingPulseAnimator.stop()
         recordingPulseAnimator.stop()
         generationTimerRunnable?.let { mainHandler.removeCallbacks(it) }
         generationTimerRunnable = null
+        idleUnloadRunnable?.let { mainHandler.removeCallbacks(it) }
+        idleUnloadRunnable = null
         recognizer?.destroy()
         tts?.stop()
         tts?.shutdown()

@@ -8,9 +8,9 @@ android {
     defaultConfig {
         applicationId = "com.example.pocketagent"
         minSdk = 28
-        targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        targetSdk = 35
+        versionCode = 2
+        versionName = "1.1.0-dev"
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
     }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
@@ -35,7 +35,7 @@ kotlin {
 }
 dependencies {
     implementation("androidx.biometric:biometric:1.1.0")
-    implementation("com.google.ai.edge.litertlm:litertlm-android:0.19.1")
+    implementation("com.google.ai.edge.litertlm:litertlm-android:0.20.0")
     implementation("com.dineshdev:pdfbox-android:2.0.27.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     testImplementation("junit:junit:4.13.2")

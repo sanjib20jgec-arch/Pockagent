@@ -35,11 +35,11 @@ class ContextBudgetManager(
             get() = (maxInputTokens - reservedSystemTokens).coerceAtLeast(0)
 
         companion object {
-            // Increased defaults to better utilize larger on-device models (e.g. 2B class).
-            // Actual usable context still depends on the loaded model/runtime.
-            const val DEFAULT_MAX_CONTEXT_TOKENS = 8192
-            const val DEFAULT_MAX_RESPONSE_TOKENS = 2048
-            const val DEFAULT_SYSTEM_TOKENS = 512
+            // Honest defaults for common 4K-context on-device .litertlm models (e.g. LFM3-Omni 2B).
+            // Actual usable context depends on the loaded model/runtime; callers may override per model.
+            const val DEFAULT_MAX_CONTEXT_TOKENS = 4096
+            const val DEFAULT_MAX_RESPONSE_TOKENS = 1024
+            const val DEFAULT_SYSTEM_TOKENS = 384
         }
     }
 
@@ -143,17 +143,44 @@ class ContextBudgetManager(
         }
 
         val latest = messages.last()
-        val latestCost = estimateMessageTokens(latest, isHistorical = false)
+        var latestCost = estimateMessageTokens(latest, isHistorical = false)
+        var effectiveLatest = latest
+
+        // If the newest turn alone exceeds budget, trim its attachment/content so we never
+        // overrun a small-context model. The newest turn is still kept (never dropped).
+        if (latestCost > availableTokens && availableTokens > 0) {
+            val overhead = 4 // turn header overhead
+            val contentTokens = estimateTokens(latest.content)
+            val allowedForAttachment = (availableTokens - overhead - contentTokens).coerceAtLeast(0)
+            val allowedAttachmentChars = (allowedForAttachment * 3).coerceAtLeast(0)
+            val trimmedAttachment = latest.attachmentContent?.take(allowedAttachmentChars)
+            val trimmedContent = if (allowedForAttachment <= 0 && contentTokens > availableTokens - overhead) {
+                latest.content.take(((availableTokens - overhead).coerceAtLeast(1)) * 3)
+            } else {
+                latest.content
+            }
+            effectiveLatest = latest.copy(
+                content = trimmedContent,
+                attachmentContent = trimmedAttachment,
+                attachmentSummary = if (trimmedAttachment != latest.attachmentContent) {
+                    (latest.attachmentSummary ?: "Attachment trimmed to fit model context.")
+                } else {
+                    latest.attachmentSummary
+                },
+                estimatedTokens = ChatMessage.estimateTokens(trimmedContent, latest.attachmentSummary, trimmedAttachment),
+            )
+            latestCost = estimateMessageTokens(effectiveLatest, isHistorical = false)
+        }
 
         if (messages.size == 1) {
             return PrunedHistoryResult(
-                retainedMessages = listOf(latest),
+                retainedMessages = listOf(effectiveLatest),
                 truncatedCount = 0,
                 estimatedTokens = latestCost,
             )
         }
 
-        var remainingTokens = availableTokens - latestCost
+        var remainingTokens = (availableTokens - latestCost).coerceAtLeast(0)
         val retainedPrior = mutableListOf<ChatMessage>()
         var truncatedCount = 0
 
@@ -189,8 +216,8 @@ class ContextBudgetManager(
             truncatedCount++
         }
 
-        val finalRetained = retainedPrior + latest
-        val totalEstimated = finalRetained.sumOf { estimateMessageTokens(it, isHistorical = it != latest) }
+        val finalRetained = retainedPrior + effectiveLatest
+        val totalEstimated = finalRetained.sumOf { estimateMessageTokens(it, isHistorical = it != effectiveLatest) }
 
         return PrunedHistoryResult(
             retainedMessages = finalRetained,
@@ -207,7 +234,10 @@ class ContextBudgetManager(
         messages: List<ChatMessage>,
         closingInstruction: String = DEFAULT_INSTRUCTION_NOTE,
     ): FormattedPromptResult {
-        val sysTokens = estimateTokens(systemInstruction)
+        // Reserve at least the configured system budget even when the system instruction is
+        // passed out-of-band (e.g. ConversationConfig.systemInstruction), so we never over-promise
+        // input space to history on small-context models.
+        val sysTokens = maxOf(estimateTokens(systemInstruction), budget.reservedSystemTokens)
         val availableHistoryTokens = (budget.maxInputTokens - sysTokens - estimateTokens(closingInstruction)).coerceAtLeast(0)
 
         val pruned = pruneHistory(messages, availableTokens = availableHistoryTokens)
@@ -256,7 +286,7 @@ class ContextBudgetManager(
         systemInstruction: String,
         messages: List<ChatMessage>,
     ): FormattedPromptResult {
-        val sysTokens = estimateTokens(systemInstruction)
+        val sysTokens = maxOf(estimateTokens(systemInstruction), budget.reservedSystemTokens)
         val availableHistoryTokens = (budget.maxInputTokens - sysTokens - 20).coerceAtLeast(0)
 
         val pruned = pruneHistory(messages, availableTokens = availableHistoryTokens)

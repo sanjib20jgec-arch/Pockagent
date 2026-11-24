@@ -14,6 +14,7 @@ internal class ModelFileStore(
     private val directory: File,
     private val maxBytes: Long = DEFAULT_MAX_MODEL_BYTES,
     private val reservedFreeSpaceBytes: Long = DEFAULT_RESERVED_FREE_SPACE_BYTES,
+    private val minBytes: Long = MIN_MODEL_BYTES,
 ) {
     val modelFile: File
         get() = File(directory, MODEL_FILE_NAME)
@@ -45,6 +46,8 @@ internal class ModelFileStore(
         var committed = false
         try {
             var copied = 0L
+            val magic = ByteArray(4)
+            var magicRead = 0
             FileOutputStream(temporary).use { output ->
                 val buffer = ByteArray(COPY_BUFFER_SIZE)
                 while (true) {
@@ -55,14 +58,27 @@ internal class ModelFileStore(
                         if (singleByte < 0) break
                         if (copied >= copyLimit) throw IOException(sizeLimitMessage(copied, copyLimit, maxBytes))
                         output.write(singleByte)
+                        if (magicRead < magic.size) magic[magicRead] = singleByte.toByte()
+                        magicRead++
                         copied++
                         continue
                     }
                     if (count.toLong() > copyLimit - copied) throw IOException(sizeLimitMessage(copied, copyLimit, maxBytes))
                     output.write(buffer, 0, count)
+                    if (magicRead < magic.size) {
+                        val toCopy = minOf(count, magic.size - magicRead)
+                        System.arraycopy(buffer, 0, magic, magicRead, toCopy)
+                        magicRead += toCopy
+                    }
                     copied += count
                 }
                 if (copied == 0L) throw IOException("The selected model file is empty.")
+                if (copied < minBytes) {
+                    throw IOException("The selected file is too small to be a valid .litertlm model.")
+                }
+                if (minBytes >= MIN_MODEL_BYTES && !looksLikeLitertLm(magic, magicRead)) {
+                    throw IOException("The selected file does not look like a valid .litertlm model.")
+                }
                 output.fd.sync()
             }
 
@@ -116,6 +132,29 @@ internal class ModelFileStore(
         const val MODEL_FILE_NAME = "model.litertlm"
         const val DEFAULT_MAX_MODEL_BYTES = 5L * 1024 * 1024 * 1024
         const val DEFAULT_RESERVED_FREE_SPACE_BYTES = 32L * 1024 * 1024
+        const val MIN_MODEL_BYTES = 1L * 1024 * 1024
         private const val COPY_BUFFER_SIZE = 64 * 1024
+
+        /**
+         * Basic sanity check for .litertlm files. Current LiteRT-LM bundles are commonly
+         * zip-based (PK header) or binary flatbuffer/TFLite-like files. We reject obvious
+         * text/empty/invalid files but avoid over-constraining unknown valid variants.
+         */
+        internal fun looksLikeLitertLm(header: ByteArray, read: Int): Boolean {
+            if (read < 4) return false
+            val b0 = header[0].toInt() and 0xff
+            val b1 = header[1].toInt() and 0xff
+            val b2 = header[2].toInt() and 0xff
+            val b3 = header[3].toInt() and 0xff
+            // ZIP / PK
+            if (b0 == 0x50 && b1 == 0x4B) return true
+            // FlatBuffer/TFLite often has identifier at bytes 4-7, but we only have 4 bytes;
+            // accept common binary headers and reject clear text.
+            val isAsciiText = header.take(read).all { b ->
+                val v = b.toInt() and 0xff
+                v == 0x09 || v == 0x0A || v == 0x0D || v in 0x20..0x7E
+            }
+            return !isAsciiText
+        }
     }
 }

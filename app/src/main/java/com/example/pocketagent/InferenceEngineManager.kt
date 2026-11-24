@@ -57,14 +57,29 @@ class InferenceEngineManager<T : AutoCloseable>(
      * real LiteRT-LM [com.google.ai.edge.litertlm.Engine], and that cast lives here rather than
      * leaking into every caller.
      */
+    companion object {
+        // Conservative decoding defaults for small on-device models: reduce repetition/looping
+        // while keeping answers coherent. RunawayGuard remains a secondary backstop.
+        const val DEFAULT_TOP_K = 40
+        const val DEFAULT_TOP_P = 0.95f
+        const val DEFAULT_TEMPERATURE = 0.8f
+    }
+
     private val conversationFactory: (T, String) -> ConversationHandle = { active, instruction ->
         val litertEngine = active as? com.google.ai.edge.litertlm.Engine
             ?: error("Conversation caching requires a real LiteRT-LM Engine.")
-        val conversation = litertEngine.createConversation(
-            com.google.ai.edge.litertlm.ConversationConfig(
-                systemInstruction = com.google.ai.edge.litertlm.Contents.of(instruction)
+        val sampler = try {
+            com.google.ai.edge.litertlm.SamplerConfig(
+                topK = DEFAULT_TOP_K,
+                topP = DEFAULT_TOP_P.toDouble(),
+                temperature = DEFAULT_TEMPERATURE.toDouble(),
             )
+        } catch (_: Throwable) { null }
+        val config = com.google.ai.edge.litertlm.ConversationConfig(
+            systemInstruction = com.google.ai.edge.litertlm.Contents.of(instruction),
+            samplerConfig = sampler,
         )
+        val conversation = litertEngine.createConversation(config)
         object : ConversationHandle {
             override fun sendMessage(
                 prompt: String,

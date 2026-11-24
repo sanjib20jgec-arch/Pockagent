@@ -18,7 +18,7 @@ class ModelFileStoreTest {
 
     @Test
     fun importsModelAndReplacesExistingFile() {
-        val store = ModelFileStore(temporaryFolder.root, maxBytes = 100, reservedFreeSpaceBytes = 0)
+        val store = ModelFileStore(temporaryFolder.root, maxBytes = 100, reservedFreeSpaceBytes = 0, minBytes = 1L)
         store.modelFile.writeBytes(byteArrayOf(1, 2, 3))
 
         val result = store.importModel(ByteArrayInputStream(byteArrayOf(7, 8, 9, 10)))
@@ -30,7 +30,7 @@ class ModelFileStoreTest {
 
     @Test
     fun emptyInputDoesNotReplaceExistingModel() {
-        val store = ModelFileStore(temporaryFolder.root, maxBytes = 100, reservedFreeSpaceBytes = 0)
+        val store = ModelFileStore(temporaryFolder.root, maxBytes = 100, reservedFreeSpaceBytes = 0, minBytes = 1L)
         store.modelFile.writeBytes(byteArrayOf(1, 2, 3))
 
         assertThrows(IOException::class.java) { store.importModel(ByteArrayInputStream(byteArrayOf())) }
@@ -41,7 +41,7 @@ class ModelFileStoreTest {
 
     @Test
     fun oversizeInputDoesNotReplaceExistingModel() {
-        val store = ModelFileStore(temporaryFolder.root, maxBytes = 3, reservedFreeSpaceBytes = 0)
+        val store = ModelFileStore(temporaryFolder.root, maxBytes = 3, reservedFreeSpaceBytes = 0, minBytes = 1L)
         store.modelFile.writeBytes(byteArrayOf(1, 2, 3))
 
         assertThrows(IOException::class.java) {
@@ -58,6 +58,7 @@ class ModelFileStoreTest {
             temporaryFolder.root,
             maxBytes = 100,
             reservedFreeSpaceBytes = Long.MAX_VALUE,
+            minBytes = 1L,
         )
         store.modelFile.writeBytes(byteArrayOf(1, 2, 3))
 
@@ -71,7 +72,7 @@ class ModelFileStoreTest {
 
     @Test
     fun streamFailurePreservesExistingModelAndRemovesPartialCopy() {
-        val store = ModelFileStore(temporaryFolder.root, maxBytes = 100, reservedFreeSpaceBytes = 0)
+        val store = ModelFileStore(temporaryFolder.root, maxBytes = 100, reservedFreeSpaceBytes = 0, minBytes = 1L)
         store.modelFile.writeBytes(byteArrayOf(1, 2, 3))
         val failingInput = object : FilterInputStream(ByteArrayInputStream(byteArrayOf(4, 5, 6, 7))) {
             private var sent = 0
@@ -102,7 +103,7 @@ class ModelFileStoreTest {
 
     @Test
     fun expectedBytesExceedingLimitFailsBeforeReadingStream() {
-        val store = ModelFileStore(temporaryFolder.root, maxBytes = 100, reservedFreeSpaceBytes = 0)
+        val store = ModelFileStore(temporaryFolder.root, maxBytes = 100, reservedFreeSpaceBytes = 0, minBytes = 1L)
         val unreadStream = object : java.io.InputStream() {
             override fun read(): Int = throw AssertionError("Stream should not be read when expectedBytes exceeds limit.")
         }
@@ -115,7 +116,7 @@ class ModelFileStoreTest {
 
     @Test
     fun importModelReportsCompletionProgress() {
-        val store = ModelFileStore(temporaryFolder.root, maxBytes = 100, reservedFreeSpaceBytes = 0)
+        val store = ModelFileStore(temporaryFolder.root, maxBytes = 100, reservedFreeSpaceBytes = 0, minBytes = 1L)
         val updates = mutableListOf<Pair<Long, Long?>>()
 
         store.importModel(ByteArrayInputStream(byteArrayOf(1, 2, 3, 4)), expectedBytes = 4L) { copied, total ->
@@ -128,7 +129,7 @@ class ModelFileStoreTest {
 
     @Test
     fun removeStoredModelDeletesPrimaryPartialAndBackupFiles() {
-        val store = ModelFileStore(temporaryFolder.root, maxBytes = 100, reservedFreeSpaceBytes = 0)
+        val store = ModelFileStore(temporaryFolder.root, maxBytes = 100, reservedFreeSpaceBytes = 0, minBytes = 1L)
         store.modelFile.writeBytes(byteArrayOf(1, 2))
         partFile(store).writeBytes(byteArrayOf(3, 4))
         val backup = java.io.File(temporaryFolder.root, "model.litertlm.backup").apply { writeBytes(byteArrayOf(5)) }
@@ -151,6 +152,36 @@ class ModelFileStoreTest {
 
         assertTrue(keepFile.exists())
         assertFalse(openClDir.exists())
+    }
+
+    @Test
+    fun rejectsTooSmallModelWhenMinBytesEnforced() {
+        val store = ModelFileStore(temporaryFolder.root, maxBytes = 10_000_000, reservedFreeSpaceBytes = 0)
+        val bytes = ByteArray(1024) { 0x50 } // PK-like but too small with default min
+        val ex = assertThrows(IOException::class.java) {
+            store.importModel(ByteArrayInputStream(bytes))
+        }
+        assertTrue(ex.message!!.contains("too small"))
+    }
+
+    @Test
+    fun rejectsObviousTextFileWhenIntegrityCheckEnabled() {
+        val store = ModelFileStore(temporaryFolder.root, maxBytes = 10_000_000, reservedFreeSpaceBytes = 0)
+        val bytes = ("not a model " + "x".repeat(2_000_000)).toByteArray()
+        val ex = assertThrows(IOException::class.java) {
+            store.importModel(ByteArrayInputStream(bytes))
+        }
+        assertTrue(ex.message!!.contains("does not look like a valid"))
+    }
+
+    @Test
+    fun acceptsZipLikeBinaryModelHeader() {
+        val store = ModelFileStore(temporaryFolder.root, maxBytes = 10_000_000, reservedFreeSpaceBytes = 0)
+        val bytes = ByteArray(1_200_000)
+        bytes[0] = 0x50; bytes[1] = 0x4B; bytes[2] = 0x03; bytes[3] = 0x04
+        val result = store.importModel(ByteArrayInputStream(bytes))
+        assertTrue(result.exists())
+        assertEquals(bytes.size.toLong(), result.length())
     }
 
     private fun partFile(store: ModelFileStore) =

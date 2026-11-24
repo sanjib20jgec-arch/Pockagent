@@ -1,48 +1,68 @@
 # PocketAgent
 
-PocketAgent is an on-device assistant that answers your request itself. Select a compatible `.litertlm` model, then ask a question, dictate it, attach text/PDF reference material, or use the experimental local WAV transcription path. Factual questions get answered with the actual result, and the assistant works through figures, summaries, drafts, and reasoning for you. It returns numbered steps only when the request is genuinely a procedure you have to perform yourself, such as enabling a setting on your phone. You can also save a completed answer as a plain-text file by choosing the destination in Android's system file picker.
+PocketAgent is an **offline-first, on-device Android assistant**. It runs local `.litertlm` models through LiteRT-LM, keeps conversations/notes/memory on device, and is designed around a privacy-first "answer the request yourself" UX.
 
-Image attachments are not supported. The imported-audio prototype uses a separate whisper.cpp runtime and a `.bin` model selected by the user; no transcription model weights are bundled and no cloud ASR path is provided. The current Gemma 3 1B INT4 model remains text-only. Live dictation still uses the speech-recognition provider configured on the device. WAV prototype CI/device verification and model-specific language/accuracy review remain pending. See [DEVELOPMENT_ROADMAP.md](DEVELOPMENT_ROADMAP.md) for scope and limits.
+> Status: **active development**. This repo contains the Android app source, JVM unit tests, and CI build workflow. Android SDK/Gradle runtime validation is performed in CI or a local Android dev environment.
 
-**This redesigned version does not read other apps' screens, launch apps, tap, type, scroll, or change settings.** It has no Accessibility Service. It requests microphone access only if you choose to dictate a task; speech recognition behavior depends on the provider installed on your device. The app requests offline recognition when supported, but that preference is controlled by the speech provider.
+## What it does today
 
-## Requirements
+- **Local LLM chat**: import a compatible `.litertlm` model and chat fully on-device (LiteRT-LM).
+- **Attachments / RAG**: attach text/PDF reference material; local BM25-style retrieval with citations for document Q&A.
+- **Voice (experimental/prototype paths)**: live dictation uses the device speech-recognition provider (provider behavior varies). Imported WAV transcription uses a user-selected whisper.cpp `ggml` `.bin` model (not bundled).
+- **Sessions & local memory**: conversation sessions, personal notes, user memory, privacy audit/controls.
+- **Safety/UX guardrails**: answer-first prompting, runaway/repetition guard, bounded attachment/context budgets, confirmation-first action handling, no AccessibilityService automation.
 
-- Android 9 (API 28) or newer
-- Java 17
-- Android SDK with API 35 installed
-- Gradle 8.14.4
-- Android NDK 27.2.12479018 and CMake 3.22.1 (for the CPU whisper.cpp build)
-- Build-time access to GitHub to fetch the hash-pinned whisper.cpp source; the app does not fetch engine code or model weights at runtime
+## Current constraints (honest)
 
-## Build a debug APK
+- **Model/context limits are real**: default budgets are tuned for small-context on-device models (e.g. 4K context). Large attachments/history are trimmed to fit; the UI should be treated as best-effort guidance, not a guarantee.
+- **Omni model utilization is partial**: the app currently uses LiteRT-LM text generation paths. Image/audio-input/audio-output capabilities of multimodal models are not fully wired as end-to-end product features yet.
+- **No cloud by app design**: the app declares no `INTERNET` permission. Dictation quality/offline behavior depends on the device speech provider.
+- **Release hardening in progress**: debug build workflow exists; instrumented/device validation, signing/release pipeline, localization, and full model capability registry are ongoing.
 
-From the repository root, run:
+## Build
+
+Requirements (local/CI Android environment):
+
+- Android SDK (API 35), JDK 17
+- Gradle 8.14.4 (project uses Gradle build files directly; no wrapper jar committed)
+- Android NDK 27.2.12479018 + CMake 3.22.1 (whisper.cpp native build)
+
+Commands:
 
 ```bash
-gradle --no-daemon assembleDebug
+gradle --no-daemon testDebugUnitTest assembleDebug
 ```
 
-The APK is created at:
+Debug APK output:
 
 ```text
 app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Run unit tests with `gradle --no-daemon testDebugUnitTest`. The project uses Gradle build files directly and does not include a Gradle Wrapper, so install Gradle 8.14.4 separately before running these commands.
+Source bundle:
 
-Regenerate the source bundle after source or documentation changes with `python3 scripts/package_source.py`; verify it matches the tree with `python3 scripts/package_source.py --check`. The packager rejects legacy AccessibilityService implementation files in the live app source.
+```bash
+python3 scripts/package_source.py --check
+python3 scripts/package_source.py
+```
 
-## Build with GitHub Actions
+## CI
 
-The **Build APK** workflow verifies the source bundle, runs unit tests, and assembles a debug APK on branch pushes, pull requests targeting `main`, and manual dispatch. To start it manually, open **Actions → Build APK → Run workflow** in GitHub. After a successful run, download the `PocketAgent-debug-apk` artifact from the run summary. If the Gradle build fails, the workflow summarizes diagnostic lines and uploads a `PocketAgent-gradle-failure-log` artifact.
+GitHub Actions workflow `.github/workflows/build.yml` runs on push/PR/manual dispatch: verifies source bundle, runs `testDebugUnitTest`, assembles debug APK, and uploads APK/log artifacts.
 
-## First launch
+## Privacy & security notes
 
-1. Install and open PocketAgent.
-2. Tap **Choose model (.litertlm)** and select a compatible model file.
-3. Type a task, or tap **Dictate** and review the recognized text.
-4. Optionally, choose a local whisper.cpp `.bin` model (up to 512 MiB), then select a WAV file to transcribe. The transcript is attached for preview; expand and confirm it before asking the text model to use it.
-5. Tap **Ask** and read the answer. Follow-up questions keep the conversation context. Use **Save as text file** to export a completed answer; choose its destination in the Android file picker or cancel without writing.
+- No `INTERNET` permission in app manifest.
+- Models are imported into app-private storage; import has size/sanity checks and transactional replacement.
+- Backup/data extraction rules disable cloud/device-transfer backup of local app data.
+- Biometric/device-credential lock is available for local access protection.
+- Answers/actions are not executed automatically; sensitive tasks require user verification.
 
-Saving an answer uses Android's system create-document picker: PocketAgent writes only the completed answer to the destination you select, and canceling writes nothing. The app does not search for files or modify/delete other files. The LiteRT model is copied to the app's private files directory and is not bundled in the APK. Its imports are limited to 5 GiB and use a temporary file so a failed import preserves the previous complete model. Whisper model weights are also not bundled; a user-selected `.bin` model is stored privately and can be removed in the UI. The experimental WAV path accepts uncompressed PCM16, one or two channels, 8–48 kHz, at most 25 MiB and 60 seconds, converts samples to 16 kHz mono, and deletes its temporary cached WAV after processing. Compressed audio and other WAV encodings are rejected. Importing/transcribing audio does not request microphone permission. Dictation uses the speech-recognition provider configured on the device; its offline/network behavior is provider-dependent. Answers are produced offline, and the app cannot open apps, act for you, or fetch live data; it says so when a request needs a live feed such as weather or prices. Actions are never executed automatically; verify each step, especially for account, payment, or security tasks.
+## Development docs
+
+- [PROJECT_AUDIT.md](PROJECT_AUDIT.md) - current audit snapshot, verified gaps, and priorities.
+- [DEVELOPMENT_ROADMAP.md](DEVELOPMENT_ROADMAP.md) - phased execution roadmap.
+
+## License
+
+See repository license file(s) and third-party dependency licenses. Model files are user-supplied and subject to their own licenses.

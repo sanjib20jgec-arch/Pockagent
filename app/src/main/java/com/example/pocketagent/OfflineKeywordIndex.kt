@@ -18,7 +18,7 @@ class OfflineKeywordIndex(
     companion object {
         const val DEFAULT_K1 = 1.2
         const val DEFAULT_B = 0.75
-        const val DEFAULT_MAX_CHARS = 32_000
+        const val DEFAULT_MAX_CHARS = 6_000
 
         val STOP_WORDS: Set<String> = setOf(
             "a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are",

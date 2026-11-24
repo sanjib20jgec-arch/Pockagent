@@ -81,7 +81,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     /** Throttled plain-text streaming; formats once on completion, off the UI thread. */
     private val streamingRenderer by lazy {
         StreamingRenderController(
-            mainHandler = mainHandler,
+            mainHandler = MainThreadDispatcher(mainHandler),
             formatExecutor = ioExecutor,
         ).apply {
             onPartialText = { text ->

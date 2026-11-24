@@ -421,4 +421,55 @@ class MainViewModelTest {
         assertTrue(state.documentCitations.isNotEmpty())
         assertEquals("specs.txt", state.documentCitations[0].documentName)
     }
+
+    @Test
+    fun suggestStepsExtractsAndPersistsUserMemoryFacts() {
+        fakeLlmRunner.available = true
+        fakeLlmRunner.responseToReturn = "1. Understood, I will remember."
+
+        viewModel.createNewSession()
+        viewModel.updateTaskInput("I prefer Kotlin and clean architectural code.")
+        viewModel.suggestSteps()
+
+        val state = viewModel.uiState.value
+        assertTrue(state.userMemories.isNotEmpty())
+        assertTrue(state.userMemories.any { it.content.contains("Kotlin", ignoreCase = true) })
+
+        val enrichedInstruction = fakeLlmRunner.lastSystemInstruction
+        assertNotNull(enrichedInstruction)
+        assertTrue(enrichedInstruction!!.contains("[User Profile & Stored Preferences]:"))
+        assertTrue(enrichedInstruction.contains("Kotlin"))
+    }
+
+    @Test
+    fun manualMemoryManagementAddDeleteClear() {
+        viewModel.addMemory("Prefers dark theme", UserMemoryStore.MemoryCategory.PREFERENCE)
+        assertEquals(1, viewModel.uiState.value.userMemories.size)
+        val memId = viewModel.uiState.value.userMemories[0].id
+
+        viewModel.addMemory("Lives in Kolkata", UserMemoryStore.MemoryCategory.PROFILE)
+        assertEquals(2, viewModel.uiState.value.userMemories.size)
+
+        viewModel.deleteMemory(memId)
+        assertEquals(1, viewModel.uiState.value.userMemories.size)
+        assertEquals("Lives in Kolkata", viewModel.uiState.value.userMemories[0].content)
+
+        viewModel.clearAllMemories()
+        assertTrue(viewModel.uiState.value.userMemories.isEmpty())
+    }
+
+    @Test
+    fun memoryDisabledPreventsExtractionAndInjection() {
+        fakeLlmRunner.available = true
+        fakeLlmRunner.responseToReturn = "1. Answer without memory."
+
+        viewModel.setMemoryEnabled(false)
+        assertFalse(viewModel.uiState.value.isMemoryEnabled)
+
+        viewModel.updateTaskInput("I prefer Rust for backend development.")
+        viewModel.suggestSteps()
+
+        assertTrue(viewModel.uiState.value.userMemories.isEmpty())
+        assertEquals(MainUiState.SYSTEM_INSTRUCTION, fakeLlmRunner.lastSystemInstruction)
+    }
 }

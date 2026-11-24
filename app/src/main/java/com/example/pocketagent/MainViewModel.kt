@@ -169,6 +169,7 @@ class MainViewModel internal constructor(
     private val modelFileStore: ModelFileStore = ModelFileStore(filesDir),
     private val whisperModelStore: WhisperModelStore = WhisperModelStore(filesDir),
     private val sessionStore: SessionStore = SessionStore(SessionStore.defaultDir(filesDir)),
+    private val userMemoryStore: UserMemoryStore = UserMemoryStore(UserMemoryStore.defaultDir(filesDir)),
     private val llmRunner: LlmInferenceRunner = DefaultLlmInferenceRunner(filesDir, cacheDir),
     private val whisperTranscriber: WhisperTranscriber = DefaultWhisperTranscriber(),
     private val workerExecutor: Executor = Executors.newSingleThreadExecutor(),
@@ -181,6 +182,7 @@ class MainViewModel internal constructor(
         modelFileStore = ModelFileStore(filesDir),
         whisperModelStore = WhisperModelStore(filesDir),
         sessionStore = SessionStore(SessionStore.defaultDir(filesDir)),
+        userMemoryStore = UserMemoryStore(UserMemoryStore.defaultDir(filesDir)),
     )
 
     private val promptContext = AnswerPromptComposer()
@@ -224,6 +226,7 @@ class MainViewModel internal constructor(
      */
     fun initModels() {
         refreshSessions()
+        refreshMemories()
         val model = modelFileStore.modelFile
         if (model.exists() && model.length() > 0) {
             updateState { it.withModelReady(model.length()) }
@@ -549,6 +552,30 @@ class MainViewModel internal constructor(
                     ""
                 }
 
+                // Long-term memory (from main) enriches the intent-aware instruction rather than
+                // replacing it, so the runaway guard and answer-shaped prompting still apply.
+                val effectiveInstruction = if (state.isMemoryEnabled) {
+                    val candidateFacts = MemoryFactExtractor.extractCandidateFacts(task)
+                    for (cf in candidateFacts) {
+                        userMemoryStore.addFact(
+                            content = cf.content,
+                            category = cf.category,
+                            confidence = cf.confidence,
+                            sourceSessionId = activeSession?.id
+                        )
+                    }
+                    if (candidateFacts.isNotEmpty()) {
+                        refreshMemories()
+                    }
+                    val memoryBlock = userMemoryStore.buildPromptContext(maxTokens = 120)
+                    ContextBudgetManager().enrichSystemInstructionWithMemory(
+                        AnswerDirective.systemInstructionFor(intent),
+                        memoryBlock,
+                    )
+                } else {
+                    AnswerDirective.systemInstructionFor(intent)
+                }
+
                 var attempt = 0
                 var result = ""
                 // Two attempts at most: one normal answer, plus one corrective retry if the model
@@ -573,7 +600,8 @@ class MainViewModel internal constructor(
                     }
                     val raw = llmRunner.runInference(
                         prompt = prompt,
-                        systemInstruction = AnswerDirective.systemInstructionFor(intent),
+                        // Memory-enriched, intent-aware instruction.
+                        systemInstruction = effectiveInstruction,
                         maxTokens = MainUiState.MAX_RESPONSE_TOKENS,
                         onChunk = { chunk ->
                             if (isGenerationCancelled.get()) {
@@ -800,6 +828,50 @@ class MainViewModel internal constructor(
         } else {
             sessionStore.exportSessionAsText(sessionId)
         }
+    }
+
+    /**
+     * Refreshes user long-term memories from sovereign local storage into UI state.
+     */
+    fun refreshMemories() {
+        try {
+            val memories = userMemoryStore.listMemories()
+            updateState { it.withUserMemories(memories) }
+        } catch (_: Exception) {}
+    }
+
+    /**
+     * Manually adds a user fact or preference to long-term memory.
+     */
+    fun addMemory(
+        content: String,
+        category: UserMemoryStore.MemoryCategory = UserMemoryStore.MemoryCategory.PREFERENCE,
+    ) {
+        userMemoryStore.addFact(content, category)
+        refreshMemories()
+    }
+
+    /**
+     * Deletes a specific memory entry by its UUID.
+     */
+    fun deleteMemory(id: String) {
+        userMemoryStore.deleteMemory(id)
+        refreshMemories()
+    }
+
+    /**
+     * Clears all stored long-term memories.
+     */
+    fun clearAllMemories() {
+        userMemoryStore.clearMemories()
+        refreshMemories()
+    }
+
+    /**
+     * Enables or disables long-term memory injection and extraction.
+     */
+    fun setMemoryEnabled(enabled: Boolean) {
+        updateState { it.withMemoryEnabled(enabled) }
     }
 
     private fun saveTurnToSession(task: String, attachedContext: String, answer: String) {

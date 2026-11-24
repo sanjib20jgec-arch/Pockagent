@@ -102,6 +102,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var answerIsComplete = false
     private var pendingAnswerToSave: String? = null
     private val sessionStore by lazy { SessionStore(SessionStore.defaultDir(filesDir)) }
+    private val userMemoryStore by lazy { UserMemoryStore(UserMemoryStore.defaultDir(filesDir)) }
+    private var isMemoryEnabled = true
     private var currentSession: ConversationSession? = null
     private var lastPrompt: String = ""
     @Volatile private var currentCitations = emptyList<LocalDocumentRetriever.DocumentCitation>()
@@ -163,6 +165,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             addView(text("LOCAL MODEL INFERENCE", 10f, MUTED, true).apply { letterSpacing = .12f })
         }
         brandRow.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))
+        brandRow.addView(pillButton("🧠 Memory", accessibilityLabel = "Manage sovereign long-term memory") {
+            showMemoryCenterDialog()
+        }.apply {
+            layoutParams = LinearLayout.LayoutParams(-2, dp(34)).apply { marginEnd = dp(6) }
+        })
         brandRow.addView(pillButton("☰ Chats", accessibilityLabel = "View saved conversations") {
             showHistoryDialog()
         }.apply {
@@ -893,7 +900,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private fun runGuardedGeneration(
         engine: Engine,
         prompt: String,
-        intent: AnswerDirective.Intent,
+        systemInstruction: String,
     ): String {
         val accumulated = StringBuilder()
         val firstChunk = AtomicBoolean(true)
@@ -909,9 +916,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
 
         engine.createConversation(
-            ConversationConfig(
-                systemInstruction = Contents.of(AnswerDirective.systemInstructionFor(intent))
-            )
+            ConversationConfig(systemInstruction = Contents.of(systemInstruction))
         ).use { conversation ->
             conversation.sendMessageAsync(
                 prompt,
@@ -1001,9 +1006,37 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     localCitations = emptyList()
                     ""
                 }
-                val prompt = answerPrompt(task = task, attachment = boundedAttachment, intent = intent, isRetry = false, history = history)
+
+                // Long-term memory (from main) enriches the intent-aware instruction rather than
+                // replacing it, so answer-shaped prompting and the runaway guard still apply.
+                val effectiveInstruction = if (isMemoryEnabled) {
+                    val candidateFacts = MemoryFactExtractor.extractCandidateFacts(task)
+                    for (cf in candidateFacts) {
+                        userMemoryStore.addFact(
+                            content = cf.content,
+                            category = cf.category,
+                            confidence = cf.confidence,
+                            sourceSessionId = currentSession?.id
+                        )
+                    }
+                    val memoryBlock = userMemoryStore.buildPromptContext(maxTokens = 120)
+                    ContextBudgetManager().enrichSystemInstructionWithMemory(
+                        AnswerDirective.systemInstructionFor(intent),
+                        memoryBlock,
+                    )
+                } else {
+                    AnswerDirective.systemInstructionFor(intent)
+                }
+
+                val prompt = answerPrompt(
+                    task = task,
+                    attachment = boundedAttachment,
+                    intent = intent,
+                    isRetry = false,
+                    history = history,
+                )
                 runawayFragment = null
-                var result = runGuardedGeneration(localEngine, prompt, intent)
+                var result = runGuardedGeneration(localEngine, prompt, effectiveInstruction)
                 // If the model dodged the request ("open Google Maps to measure it"), retry once
                 // with a corrective instruction instead of showing the user a non-answer.
                 if (!isGeneratingCancelled.get() && runawayFragment == null &&
@@ -1013,7 +1046,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     val retryPrompt = answerPrompt(task = task, attachment = boundedAttachment, intent = intent, isRetry = true, history = history)
                     mainHandler.post { answerText.text = "Refining the answer…" }
                     val retryEngine = engineManager.getOrInitializeEngine(modelFile, cacheDir)
-                    val retried = runGuardedGeneration(retryEngine, retryPrompt, intent)
+                    val retried = runGuardedGeneration(retryEngine, retryPrompt, effectiveInstruction)
                     if (retried.isNotBlank()) result = retried
                 }
                 mainHandler.post {
@@ -1307,6 +1340,154 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 updateStatus("No conversation to export yet.")
             }
         }
+    }
+
+    private fun showMemoryCenterDialog() {
+        val dialogView = column().apply {
+            setPadding(dp(18), dp(12), dp(18), dp(18))
+        }
+
+        val headerRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val toggleButton = pillButton(
+            if (isMemoryEnabled) "Memory: ON" else "Memory: OFF",
+            accessibilityLabel = "Toggle sovereign long-term memory"
+        ) {}.apply {
+            layoutParams = LinearLayout.LayoutParams(-2, dp(34)).apply { marginEnd = dp(8) }
+        }
+        headerRow.addView(toggleButton)
+
+        val addFactBtn = pillButton("➕ Add Fact", accessibilityLabel = "Manually record a user preference or fact") {}.apply {
+            layoutParams = LinearLayout.LayoutParams(-2, dp(34)).apply { marginEnd = dp(8) }
+        }
+        headerRow.addView(addFactBtn)
+
+        val clearAllBtn = textButton("Clear All", accessibilityLabel = "Clear all sovereign memories") {}
+        headerRow.addView(clearAllBtn)
+        dialogView.addView(headerRow, marginBottom(12))
+
+        val desc = text("100% on-device memory. PocketAgent remembers key facts and preferences across conversations without sending data anywhere.", 12f, MUTED)
+        dialogView.addView(desc, marginBottom(12))
+
+        val listContainer = column()
+        val scroll = ScrollView(this).apply {
+            addView(listContainer)
+            layoutParams = LinearLayout.LayoutParams(-1, dp(320))
+        }
+        dialogView.addView(scroll)
+
+        fun refreshList() {
+            listContainer.removeAllViews()
+            val memories = userMemoryStore.listMemories()
+            if (memories.isEmpty()) {
+                listContainer.addView(text("No memories recorded yet.\nAs you chat, preferences and facts will be remembered here.", 13f, MUTED).apply {
+                    setPadding(0, dp(30), 0, dp(30))
+                    gravity = Gravity.CENTER
+                })
+                return
+            }
+
+            for (m in memories) {
+                val card = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(dp(12), dp(10), dp(12), dp(10))
+                    background = shape(WHITE, 12, BORDER)
+                }
+
+                val info = column().apply {
+                    val catBadge = "[${m.displayLabel}]"
+                    addView(text(catBadge, 11f, TEAL, true))
+                    addView(text(m.content, 13f, INK))
+                }
+                card.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
+
+                val delBtn = text("✕", 16f, MUTED, true).apply {
+                    setPadding(dp(12), dp(6), dp(6), dp(6))
+                    setOnClickListener {
+                        userMemoryStore.deleteMemory(m.id)
+                        refreshList()
+                    }
+                }
+                card.addView(delBtn)
+
+                listContainer.addView(card, marginBottom(8))
+            }
+        }
+
+        toggleButton.setOnClickListener {
+            isMemoryEnabled = !isMemoryEnabled
+            toggleButton.text = if (isMemoryEnabled) "Memory: ON" else "Memory: OFF"
+            Toast.makeText(this, if (isMemoryEnabled) "Long-term memory enabled" else "Long-term memory paused", Toast.LENGTH_SHORT).show()
+        }
+
+        addFactBtn.setOnClickListener {
+            promptAddMemoryFact { refreshList() }
+        }
+
+        clearAllBtn.setOnClickListener {
+            AlertDialog.Builder(this)
+                .setTitle("Clear All Memories?")
+                .setMessage("Are you sure you want to permanently delete all stored memory facts?")
+                .setPositiveButton("Clear") { _, _ ->
+                    userMemoryStore.clearMemories()
+                    refreshList()
+                    Toast.makeText(this, "All memories cleared", Toast.LENGTH_SHORT).show()
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        }
+
+        refreshList()
+
+        AlertDialog.Builder(this)
+            .setTitle("🧠 Sovereign Memory Vault")
+            .setView(dialogView)
+            .setPositiveButton("Close", null)
+            .show()
+    }
+
+    private fun promptAddMemoryFact(onAdded: () -> Unit) {
+        val input = EditText(this).apply {
+            hint = "e.g., Prefers Kotlin, Speaks Bengali, Offline only…"
+            textSize = 14f
+            background = shape(WHITE, 12, BORDER)
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            setTextColor(INK)
+            setHintTextColor(MUTED)
+        }
+        val categories = arrayOf("Preference", "Profile", "Constraint", "Goal", "Custom")
+        var selectedCategoryIndex = 0
+
+        val container = column().apply {
+            setPadding(dp(18), dp(12), dp(18), dp(12))
+            addView(input, marginBottom(10))
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Add Memory Fact")
+            .setView(container)
+            .setSingleChoiceItems(categories, 0) { _, which ->
+                selectedCategoryIndex = which
+            }
+            .setPositiveButton("Save") { _, _ ->
+                val fact = input.text.toString().trim()
+                if (fact.isNotBlank()) {
+                    val category = when (selectedCategoryIndex) {
+                        0 -> UserMemoryStore.MemoryCategory.PREFERENCE
+                        1 -> UserMemoryStore.MemoryCategory.PROFILE
+                        2 -> UserMemoryStore.MemoryCategory.CONSTRAINT
+                        3 -> UserMemoryStore.MemoryCategory.GOAL
+                        else -> UserMemoryStore.MemoryCategory.CUSTOM
+                    }
+                    userMemoryStore.addFact(fact, category)
+                    onAdded()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun showActionReviewDialog(reviewUi: SystemActionTools.ActionReviewUi) {

@@ -54,6 +54,8 @@ data class MainUiState(
     val lastUserPrompt: String = "",
     val canRegenerate: Boolean = false,
     val documentCitations: List<LocalDocumentRetriever.DocumentCitation> = emptyList(),
+    val userMemories: List<UserMemoryStore.UserMemory> = emptyList(),
+    val isMemoryEnabled: Boolean = true,
 ) {
     companion object {
         const val MAX_ATTACHMENT_CHARS = 12_000
@@ -334,5 +336,13 @@ data class MainUiState(
 
     fun withDocumentCitations(citations: List<LocalDocumentRetriever.DocumentCitation>): MainUiState = copy(
         documentCitations = citations,
+    )
+
+    fun withUserMemories(memories: List<UserMemoryStore.UserMemory>): MainUiState = copy(
+        userMemories = memories,
+    )
+
+    fun withMemoryEnabled(enabled: Boolean): MainUiState = copy(
+        isMemoryEnabled = enabled,
     )
 }

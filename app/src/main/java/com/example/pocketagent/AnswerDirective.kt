@@ -228,22 +228,24 @@ class AnswerPromptComposer(
     private val budget: ContextBudgetManager = ContextBudgetManager(),
 ) {
 
+    data class PromptBuildResult(
+        val prompt: String,
+        val truncatedCount: Int,
+        val estimatedTotalTokens: Int,
+    )
+
     /**
-     * @param task the user's current request.
-     * @param attachment optional untrusted reference text, already bounded.
-     * @param intent answer shape for this request.
-     * @param isRetry true for the single corrective retry after a dodged answer.
-     * @param history earlier turns of the conversation, oldest first.
+     * Composes the structured prompt and reports token/truncation metadata so callers can track
+     * cumulative KV-cache growth and surface context trimming.
      */
-    fun answerPrompt(
+    fun composePrompt(
         task: String,
         attachment: String,
         intent: AnswerDirective.Intent,
         isRetry: Boolean,
         history: List<ChatMessage>,
-        /** Verified offline arithmetic, when the request contained a calculation. */
         calculation: LocalCalculatorTool.CalculationResult? = null,
-    ): String {
+    ): PromptBuildResult {
         val baseQuestion = task.ifBlank { "Use the attached text to answer my request." }
         // Give the model the computed result so it reports the number instead of guessing or
         // telling the user to work it out, which is the whole point of the offline tool.
@@ -266,12 +268,34 @@ class AnswerPromptComposer(
 
         // The system instruction is handed to the engine separately, so it is not re-embedded
         // here; that would send it twice and waste the limited context window.
-        return budget.buildConversationalPrompt(
+        val built = budget.buildConversationalPrompt(
             systemInstruction = "",
             messages = history + latest,
             closingInstruction = closing,
-        ).prompt
+        )
+        return PromptBuildResult(
+            prompt = built.prompt,
+            truncatedCount = built.truncatedCount,
+            estimatedTotalTokens = built.estimatedTotalTokens,
+        )
     }
+
+    /**
+     * @param task the user's current request.
+     * @param attachment optional untrusted reference text, already bounded.
+     * @param intent answer shape for this request.
+     * @param isRetry true for the single corrective retry after a dodged answer.
+     * @param history earlier turns of the conversation, oldest first.
+     */
+    fun answerPrompt(
+        task: String,
+        attachment: String,
+        intent: AnswerDirective.Intent,
+        isRetry: Boolean,
+        history: List<ChatMessage>,
+        /** Verified offline arithmetic, when the request contained a calculation. */
+        calculation: LocalCalculatorTool.CalculationResult? = null,
+    ): String = composePrompt(task, attachment, intent, isRetry, history, calculation).prompt
 
     /**
      * The turn currently being generated is supplied separately, so drop it from history to

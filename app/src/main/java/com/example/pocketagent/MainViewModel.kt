@@ -50,9 +50,10 @@ class DefaultLlmInferenceRunner(
     private companion object {
         /**
          * Hard ceiling for a single voice turn. Short enough that a wedged engine fails visibly
-         * instead of hanging the worker thread, long enough for a full answer on CPU.
+         * instead of hanging the worker thread, long enough for larger 2B INT8 models on CPU.
          */
-        const val DEFAULT_TIMEOUT_SECONDS = 90L
+        const val DEFAULT_TIMEOUT_SECONDS = 180L
+        const val WARM_CONTEXT_RESET_THRESHOLD = 3400
     }
 
     @Volatile private var isClosed = false
@@ -81,6 +82,26 @@ class DefaultLlmInferenceRunner(
         require(modelFile.exists()) { "Choose a compatible .litertlm model first." }
         check(!isClosed) { "Inference runner is closed." }
 
+        return try {
+            runInferencePass(modelFile, prompt, systemInstruction, maxTokens, onChunk)
+        } catch (gpuFailure: Throwable) {
+            if (!isClosed && engineManager.activeBackend == ActiveBackend.GPU) {
+                val reason = gpuFailure.message ?: gpuFailure.javaClass.simpleName
+                if (engineManager.fallbackToCpuAfterRuntimeFailure(reason, modelFile, cacheDir)) {
+                    return runInferencePass(modelFile, prompt, systemInstruction, maxTokens, onChunk)
+                }
+            }
+            throw gpuFailure
+        }
+    }
+
+    private fun runInferencePass(
+        modelFile: File,
+        prompt: String,
+        systemInstruction: String,
+        maxTokens: Int,
+        onChunk: (String) -> Unit,
+    ): String {
         val generated = StringBuilder()
         val streamFinished = CountDownLatch(1)
         val streamError = AtomicReference<Throwable?>(null)
@@ -93,6 +114,11 @@ class DefaultLlmInferenceRunner(
             systemInstruction = systemInstruction,
             attachmentHash = 0,
         )
+        if (manager.isConversationWarm(key) &&
+            manager.cachedConversationTokens + ChatMessage.estimateTextTokens(prompt) + maxTokens > WARM_CONTEXT_RESET_THRESHOLD
+        ) {
+            manager.invalidateConversation("voice context budget reached")
+        }
         val conversation = manager.getOrCreateConversation(key, systemInstruction)
 
         manager.beginGeneration()
@@ -121,6 +147,7 @@ class DefaultLlmInferenceRunner(
             // Bounded: never block a worker thread forever on a stalled engine.
             val finished = streamFinished.await(timeoutSeconds, TimeUnit.SECONDS)
             if (!finished) {
+                conversation.cancel()
                 throw IllegalStateException(
                     "Voice inference timed out after ${timeoutSeconds}s. Try a shorter request."
                 )
@@ -128,13 +155,18 @@ class DefaultLlmInferenceRunner(
             streamError.get()?.let { throw IllegalStateException("Streaming inference failed.", it) }
         } catch (e: Exception) {
             // Any failure leaves the cached conversation in an unknown state; drop it.
+            conversation.cancel()
             manager.invalidateConversation(e.message ?: "voice inference failed")
             throw e
         } finally {
             manager.endGeneration()
         }
 
-        return synchronized(generated) { generated.toString() }
+        val finalText = synchronized(generated) { generated.toString() }
+        manager.recordConversationTurnTokens(
+            ChatMessage.estimateTextTokens(prompt) + ChatMessage.estimateTextTokens(finalText) + 8
+        )
+        return finalText
     }
 
     private fun modelFile(): File = File(filesDir, "model.litertlm")
@@ -638,7 +670,18 @@ class MainViewModel internal constructor(
                         updateState { it.withStatus("Answer needs more detail. Refining on this device…") }
                     }
 
-                    val prompt = answerPrompt(task = task, attachment = contextToInject, intent = intent, isRetry = isRetry, history = history, calculation = calculation)
+                    val promptBuild = promptContext.composePrompt(
+                        task = task,
+                        attachment = contextToInject,
+                        intent = intent,
+                        isRetry = isRetry,
+                        history = history,
+                        calculation = calculation,
+                    )
+                    if (promptBuild.truncatedCount > 0 && !isRetry) {
+                        updateState { it.withStatus("Older context trimmed to fit model limit.") }
+                    }
+                    val prompt = promptBuild.prompt
                     // The guard stops a model that locks onto a phrase and repeats it forever.
                     val guard = GuardedGeneration { currentText ->
                         val isFirst = firstChunk.compareAndSet(true, false)

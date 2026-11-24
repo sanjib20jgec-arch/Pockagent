@@ -140,4 +140,25 @@ class AnswerPromptComposerTest {
         assertTrue(prompt.contains("Answer the request directly now"))
         assertTrue(prompt.contains("put the actual result in the first sentence"))
     }
+
+    @Test
+    fun composePromptReportsEstimatedTokensAndTruncationCount() {
+        val longHistory = (1..25).flatMap { idx ->
+            listOf(
+                ChatMessage.user("Question $idx: " + "word ".repeat(60)),
+                ChatMessage.assistant("Answer $idx: " + "reply ".repeat(60)),
+            )
+        }
+        val built = composer.composePrompt(
+            task = question,
+            attachment = "",
+            intent = AnswerDirective.Intent.FACT,
+            isRetry = false,
+            history = longHistory,
+        )
+
+        assertTrue(built.estimatedTotalTokens > 0)
+        assertTrue(built.truncatedCount > 0)
+        assertTrue(built.prompt.contains(question))
+    }
 }

@@ -2,6 +2,7 @@ package com.example.pocketagent
 
 import android.Manifest
 import android.app.Activity
+import android.app.ActivityManager
 import android.app.AlertDialog
 import android.content.ActivityNotFoundException
 import android.content.ClipData
@@ -53,10 +54,18 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         private const val CREATE_ANSWER_FILE = 7
         private const val REQUEST_RECORD_MIC = 8
         private const val STATE_PENDING_ANSWER_SAVE = "pending_answer_to_save"
+        private const val PREFS_SETTINGS = "pocketagent_settings"
+        private const val PREF_BACKEND_MODE = "pref_backend_mode"
+        private const val PREF_MODEL_DISPLAY_NAME = "pref_model_display_name"
+        private const val PREF_GPU_LOADING_GUARD = "pref_gpu_loading_crash_guard"
         private const val MAX_ATTACHMENT_CHARS = MainUiState.MAX_ATTACHMENT_CHARS
         private const val MAX_RESPONSE_TOKENS = MainUiState.MAX_RESPONSE_TOKENS
         /** Hard ceiling so a stalled engine cannot block the worker thread forever. */
-        private const val GENERATION_TIMEOUT_SECONDS = 90L
+        private const val GENERATION_TIMEOUT_SECONDS = 180L
+        /** Skip eager startup preload above 1.5 GB so multi-GB models (e.g. LFM3-Omni 3.5 GB) don't OOM idle launches. */
+        private const val EAGER_WARMUP_MAX_BYTES = 1_500_000_000L
+        /** Reset stateful KV cache before cumulative turns approach the 4096-token EngineConfig cap. */
+        private const val WARM_CONTEXT_RESET_THRESHOLD = 3400
         private val SYSTEM_INSTRUCTION: String get() = AnswerDirective.SYSTEM_INSTRUCTION
         private const val BG = 0xFFF4F7F6.toInt()
         private const val INK = 0xFF162D2A.toInt()
@@ -147,11 +156,19 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             isReadyProvider = { ttsReady }
         )
     }
+    private val settingsPrefs by lazy {
+        getSharedPreferences(PREFS_SETTINGS, MODE_PRIVATE)
+    }
     private val duplexController by lazy {
         DuplexVoiceController(
             audioRecorder = inAppAudioRecorder,
             whisperTranscriber = DefaultWhisperTranscriber(),
-            llmRunner = DefaultLlmInferenceRunner(filesDir, cacheDir),
+            llmRunner = DefaultLlmInferenceRunner(
+                filesDir = filesDir,
+                cacheDir = cacheDir,
+                engineManager = engineManager,
+                timeoutSeconds = GENERATION_TIMEOUT_SECONDS,
+            ),
             ttsSpeaker = ttsSpeaker,
             workerExecutor = inferenceExecutor,
             mainDispatcher = { mainHandler.post(it) },
@@ -187,30 +204,75 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         window.navigationBarColor = BG
         window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
         tts = TextToSpeech(this, this)
+
+        var savedBackend = BackendPreference.fromString(settingsPrefs.getString(PREF_BACKEND_MODE, null))
+        var gpuGuardTriggered = false
+        if (settingsPrefs.getBoolean(PREF_GPU_LOADING_GUARD, false)) {
+            settingsPrefs.edit()
+                .putBoolean(PREF_GPU_LOADING_GUARD, false)
+                .putString(PREF_BACKEND_MODE, BackendPreference.CPU_ONLY.name)
+                .apply()
+            savedBackend = BackendPreference.CPU_ONLY
+            gpuGuardTriggered = true
+        }
+        engineManager.preference = savedBackend
         engineManager.onFallback = { reason ->
+            settingsPrefs.edit().putString(PREF_BACKEND_MODE, BackendPreference.CPU_ONLY.name).apply()
             mainHandler.post { updateStatus(reason) }
         }
+
         cleanupStagedInputFiles()
         buildInterface()
         refreshModelStatus()
+        if (gpuGuardTriggered) {
+            updateStatus("Previous GPU model load ended unexpectedly; switched safely to CPU mode.")
+        }
         restoreWhisperModel()
         warmUpModelAfterFirstFrame()
     }
 
+    private fun isDeviceLowMemory(): Boolean {
+        val am = getSystemService(ACTIVITY_SERVICE) as? ActivityManager ?: return false
+        val info = ActivityManager.MemoryInfo()
+        am.getMemoryInfo(info)
+        return info.lowMemory
+    }
+
+    /** Initializes the LiteRT-LM engine with a persistent crash-loop guard around GPU loads. */
+    private fun ensureEngineInitialized(modelFile: File): Engine {
+        val tryingGpu = engineManager.preference == BackendPreference.GPU_PREFERRED &&
+            engineManager.engine == null
+        if (tryingGpu) {
+            settingsPrefs.edit().putBoolean(PREF_GPU_LOADING_GUARD, true).commit()
+        }
+        return try {
+            engineManager.getOrInitializeEngine(modelFile, cacheDir)
+        } finally {
+            if (tryingGpu) {
+                settingsPrefs.edit().putBoolean(PREF_GPU_LOADING_GUARD, false).apply()
+            }
+        }
+    }
+
     /**
-     * Loads the selected model in the background as soon as the UI is on screen.
+     * Loads small models in the background as soon as the UI is on screen.
      *
-     * Without this, the first question pays both the load and the prefill. Warming up on the
-     * inference thread means the cost lands before the user asks anything, and it stays off the
-     * UI thread.
+     * Multi-GB models (e.g. LFM3-Omni 3.5 GB) are loaded on demand on the first prompt to avoid
+     * idle startup RAM pressure or OOM when the user only wants History, Notes, or Privacy tools.
      */
     private fun warmUpModelAfterFirstFrame() {
         val modelFile = File(filesDir, "model.litertlm")
         if (!modelFile.exists() || modelFile.length() <= 0) return
+        if (modelFile.length() > EAGER_WARMUP_MAX_BYTES || isDeviceLowMemory()) {
+            val storedName = settingsPrefs.getString(PREF_MODEL_DISPLAY_NAME, null)
+            val label = storedName ?: formatStorageSize(modelFile.length())
+            updateStatus("Model ready ($label). Loads into RAM on your first question.")
+            return
+        }
         window.decorView.post {
             inferenceExecutor.execute {
                 try {
-                    engineManager.getOrInitializeEngine(modelFile, cacheDir)
+                    ensureEngineInitialized(modelFile)
                 } catch (_: Exception) {
                     // A failed warm-up is not user-visible; the real attempt reports properly.
                 }
@@ -251,8 +313,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         brandRow.addView(brand, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(8) })
 
-        modelPill = pillButton("Choose model", accessibilityLabel = "Active model. Tap to choose a LiteRT-LM model") {
-            chooseModel()
+        modelPill = pillButton("Choose model", accessibilityLabel = "Active model. Tap to manage or switch LiteRT-LM model") {
+            val stored = File(filesDir, "model.litertlm")
+            if (stored.exists() && stored.length() > 0L) showModelManagerDialog() else chooseModel()
         }.apply {
             layoutParams = LinearLayout.LayoutParams(-2, dp(34))
         }
@@ -840,34 +903,80 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun importModel(uri: Uri) {
-        val displayName = queryDisplayName(uri)
-        if (displayName != null && !displayName.endsWith(".litertlm", ignoreCase = true)) {
+        if (engineManager.isGenerationActive || isGeneratingUi) {
+            updateStatus("Stop the current generation before switching models.")
+            return
+        }
+        val rawName = queryDisplayName(uri)
+        if (rawName != null && !rawName.endsWith(".litertlm", ignoreCase = true)) {
             updateStatus("Choose a LiteRT-LM model file ending in .litertlm.")
             return
         }
-        updateStatus("Importing model into app storage…")
+        val cleanName = rawName?.replace(Regex("[\\r\\n]+"), " ")?.take(80)
+        val expectedBytes = queryFileSize(uri)
+        updateStatus("Preparing to import ${cleanName ?: "model"}…")
         suggestButton.isEnabled = false
-        // Different weights: nothing cached from the old model may survive.
-        engineManager.invalidateConversation("model switched")
         maybeShowRefineAffordance = false
         if (::refineButton.isInitialized) refineButton.visibility = View.GONE
+        if (duplexController.isActive) duplexController.stopSession()
+
         ioExecutor.execute {
             try {
-                engineManager.close()
+                // Close active engine on the serial inference executor before replacing files on disk.
+                val engineClosed = CountDownLatch(1)
+                inferenceExecutor.execute {
+                    try {
+                        engineManager.invalidateConversation("model switched")
+                        engineManager.close()
+                    } finally {
+                        engineClosed.countDown()
+                    }
+                }
+                engineClosed.await(15, TimeUnit.SECONDS)
+                ModelFileStore.clearEngineCaches(cacheDir)
+
+                val labelForProgress = cleanName ?: "model"
                 val target = contentResolver.openInputStream(uri)?.use { input ->
-                    ModelFileStore(filesDir).importModel(input)
+                    ModelFileStore(filesDir).importModel(
+                        input = input,
+                        expectedBytes = expectedBytes,
+                    ) { copied, total ->
+                        val progressMsg = if (total != null && total > 0L) {
+                            val pct = ((copied * 100L) / total).coerceIn(0L, 100L)
+                            "Importing $labelForProgress… ${formatStorageSize(copied)} / ${formatStorageSize(total)} ($pct%)"
+                        } else {
+                            "Importing $labelForProgress… ${formatStorageSize(copied)}"
+                        }
+                        mainHandler.post { updateStatus(progressMsg) }
+                    }
                 } ?: error("Could not open the selected file.")
+
+                settingsPrefs.edit().apply {
+                    if (!cleanName.isNullOrBlank()) putString(PREF_MODEL_DISPLAY_NAME, cleanName)
+                    else remove(PREF_MODEL_DISPLAY_NAME)
+                    putBoolean(PREF_GPU_LOADING_GUARD, false)
+                }.apply()
+
                 mainHandler.post {
                     refreshModelStatus()
-                    updateStatus("Model ready. Type, dictate, or attach text/PDF (selectable text only).")
+                    val backendLabel = if (engineManager.preference == BackendPreference.CPU_ONLY) "CPU" else "GPU (auto fallback)"
+                    val readyLabel = cleanName ?: formatStorageSize(target.length())
+                    val loadHint = if (target.length() > EAGER_WARMUP_MAX_BYTES) {
+                        "Loads on your first question to conserve RAM."
+                    } else {
+                        "Type, dictate, or attach text/PDF."
+                    }
+                    updateStatus("Model ready ($readyLabel · $backendLabel). $loadHint")
                     suggestButton.isEnabled = true
                     syncComposerState()
                 }
             } catch (e: Exception) {
                 File(filesDir, "model.litertlm.part").delete()
                 mainHandler.post {
+                    refreshModelStatus()
                     updateStatus("Model import failed: ${e.message ?: "unknown error"}")
                     suggestButton.isEnabled = true
+                    syncComposerState()
                 }
             }
         }
@@ -1207,6 +1316,16 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
     } catch (_: Exception) { null }
 
+    private fun queryFileSize(uri: Uri): Long? = try {
+        contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst() && !cursor.isNull(0)) {
+                cursor.getLong(0).takeIf { it > 0L }
+            } else {
+                null
+            }
+        }
+    } catch (_: Exception) { null }
+
     private fun clearAttachments() {
         attachmentGeneration++
         attachedContext = ""
@@ -1262,15 +1381,16 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private fun conversationHistoryFor(task: String): List<ChatMessage> =
         promptContext.historyFor(currentSession?.messages.orEmpty(), task)
 
-    /** Answer-shaped prompt for one attempt; see [AnswerPromptComposer]. */
-    private fun answerPrompt(
+    /** Composes prompt + token/truncation metadata for one attempt; see [AnswerPromptComposer]. */
+    private fun composePrompt(
         task: String,
         attachment: String,
         intent: AnswerDirective.Intent,
         isRetry: Boolean,
         history: List<ChatMessage>,
         calculation: LocalCalculatorTool.CalculationResult? = null,
-    ): String = promptContext.answerPrompt(task, attachment, intent, isRetry, history, calculation)
+    ): AnswerPromptComposer.PromptBuildResult =
+        promptContext.composePrompt(task, attachment, intent, isRetry, history, calculation)
 
     /**
      * Runs one inference pass with the runaway guard applied.
@@ -1283,6 +1403,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
      * engine's context is in an unknown state, and reusing it would corrupt the next answer.
      */
     private fun runGuardedGeneration(
+        convKey: String,
         prompt: String,
         systemInstruction: String,
     ): String {
@@ -1298,7 +1419,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             streamingRenderer.onPartial(partial)
         }
 
-        val conversation = engineManager.getOrCreateConversation(conversationKey, systemInstruction)
+        val conversation = engineManager.getOrCreateConversation(convKey, systemInstruction)
         activeStreamLatch = streamFinished
         engineManager.beginGeneration()
         try {
@@ -1329,20 +1450,29 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             val finished = streamFinished.await(GENERATION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             if (!finished) {
                 guard.cancel()
+                conversation.cancel()
                 engineManager.invalidateConversation("generation timed out")
                 throw IllegalStateException(
                     "Generation timed out after ${GENERATION_TIMEOUT_SECONDS}s. Try a shorter request."
                 )
             }
             streamError.get()?.let { error ->
+                conversation.cancel()
                 engineManager.invalidateConversation("streaming failed")
                 throw IllegalStateException("Streaming inference failed.", error)
             }
 
             // The user pressed Stop: the context holds a half-written turn, so start fresh next time.
             if (isGeneratingCancelled.get() || guard.wasCancelled) {
+                conversation.cancel()
                 engineManager.invalidateConversation("generation stopped by user")
             }
+        } catch (t: Throwable) {
+            if (t !is IllegalStateException) {
+                conversation.cancel()
+                engineManager.invalidateConversation("generation failed")
+            }
+            throw t
         } finally {
             activeStreamLatch = null
             engineManager.endGeneration()
@@ -1404,18 +1534,21 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     /**
-     * Stops the running generation immediately: flags it, unblocks the waiting latch by cancelling
-     * the guard, drops the streaming preview, and restores Ask. Whatever text had arrived is kept.
+     * Stops the running generation immediately: flags it, signals the native engine to abort,
+     * unblocks the waiter, drops the streaming preview, and waits for [exitGeneratingState] on
+     * completion so a subsequent tap cannot race the closing native conversation.
      */
     private fun stopActiveGeneration() {
         if (!isGeneratingUi) return
         isGeneratingCancelled.set(true)
         streamingRenderer.cancel()
+        engineManager.cancelActiveConversation()
+        suggestButton.isEnabled = false
+        suggestButton.text = "Stopping…"
         activeStreamLatch?.let { latch ->
             // The engine may never call onDone after a cancel, so release the waiter ourselves.
             latch.countDown()
         }
-        exitGeneratingState()
         stopGeneratingButton.visibility = View.GONE
         updateStatus("Stopping generation…")
     }
@@ -1442,14 +1575,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     /**
-     * Runs the corrective pass on demand.
+     * Runs the corrective pass on demand on the serial [inferenceExecutor].
      *
      * Forces a fresh conversation because the retry uses a different prompt shape, and reuses the
      * same intent and calculation context as the original attempt.
      */
     private fun refineLastAnswer() {
         val task = lastPrompt
-        if (task.isBlank() || isGeneratingUi) return
+        if (task.isBlank() || isGeneratingUi || engineManager.isGenerationActive) return
         val modelFile = File(filesDir, "model.litertlm")
         if (!modelFile.exists()) {
             updateStatus("Choose a compatible .litertlm model first.")
@@ -1462,14 +1595,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         enterGeneratingState()
         updateStatus("Refining the answer…")
 
-        ioExecutor.execute {
+        inferenceExecutor.execute {
             try {
-                engineManager.getOrInitializeEngine(modelFile, cacheDir)
+                ensureEngineInitialized(modelFile)
                 val intent = AnswerDirective.classify(task.ifBlank { attachedContext })
                 val history = conversationHistoryFor(task)
                 val calculation = if (task.isNotBlank()) LocalCalculatorTool.tryEvaluate(task) else null
-                val instruction = AnswerDirective.systemInstructionFor(intent)
-                val retryPrompt = answerPrompt(
+                val instruction = effectiveSystemInstruction(task, intent)
+                val retryBuild = composePrompt(
                     task = task,
                     attachment = attachedContext,
                     intent = intent,
@@ -1480,10 +1613,20 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 // Different prompt shape: start from a clean context.
                 engineManager.invalidateConversation("refine")
                 runawayFragment = null
-                val retried = runGuardedGeneration(retryPrompt, instruction)
+                val convKey = conversationKeyFor(currentSession?.id, modelFile, instruction, attachedContext)
+                val retried = executeWithGpuFallback(modelFile) {
+                    runGuardedGeneration(convKey, retryBuild.prompt, instruction)
+                }
+                if (!isGeneratingCancelled.get()) {
+                    engineManager.recordConversationTurnTokens(
+                        retryBuild.estimatedTotalTokens + ChatMessage.estimateTextTokens(retried) + 8
+                    )
+                }
                 mainHandler.post {
                     exitGeneratingState()
-                    if (retried.isNotBlank()) {
+                    if (isGeneratingCancelled.get()) {
+                        updateStatus("Generation stopped by user.")
+                    } else if (retried.isNotBlank()) {
                         answerIsComplete = true
                         renderFinalAnswer(retried, stoppedByUser = false)
                         updateStatus("Answer refined.")
@@ -1494,28 +1637,68 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             } catch (e: Exception) {
                 mainHandler.post {
                     exitGeneratingState()
-                    updateStatus("Could not refine the answer: ${e.message ?: "unknown error"}")
+                    updateStatus(
+                        if (isGeneratingCancelled.get()) "Generation stopped by user."
+                        else "Could not refine the answer: ${e.message ?: "unknown error"}"
+                    )
                 }
             }
         }
     }
 
-    /**
-     * Cache key for the reusable conversation.
-     *
-     * Changing chat, model, instruction, or attachment must all start a fresh KV cache, otherwise
-     * stale context leaks into the next answer.
-     */
-    private val conversationKey: String
-        get() {
-            val model = File(filesDir, "model.litertlm")
-            return engineManager.conversationKey(
-                sessionId = currentSession?.id,
-                modelPath = model.absolutePath,
-                systemInstruction = AnswerDirective.SYSTEM_INSTRUCTION,
-                attachmentHash = attachedContext.hashCode(),
+    private fun conversationKeyFor(
+        sessionId: String?,
+        modelFile: File,
+        systemInstruction: String,
+        attachmentContext: String,
+    ): String = engineManager.conversationKey(
+        sessionId = sessionId,
+        modelPath = modelFile.absolutePath,
+        systemInstruction = systemInstruction,
+        attachmentHash = attachmentContext.hashCode(),
+    )
+
+    private fun effectiveSystemInstruction(task: String, intent: AnswerDirective.Intent): String {
+        if (!isMemoryEnabled) return AnswerDirective.systemInstructionFor(intent)
+        val candidateFacts = MemoryFactExtractor.extractCandidateFacts(task)
+        for (cf in candidateFacts) {
+            userMemoryStore.addFact(
+                content = cf.content,
+                category = cf.category,
+                confidence = cf.confidence,
+                sourceSessionId = currentSession?.id,
             )
         }
+        val memoryBlock = userMemoryStore.buildPromptContext(maxTokens = 120)
+        return ContextBudgetManager().enrichSystemInstructionWithMemory(
+            AnswerDirective.systemInstructionFor(intent),
+            memoryBlock,
+        )
+    }
+
+    private fun executeWithGpuFallback(
+        modelFile: File,
+        onBeforeCpuRetry: (() -> Unit)? = null,
+        attempt: () -> String,
+    ): String {
+        return try {
+            attempt()
+        } catch (gpuError: Throwable) {
+            if (!isGeneratingCancelled.get() && engineManager.activeBackend == ActiveBackend.GPU) {
+                val reason = gpuError.message ?: gpuError.javaClass.simpleName
+                if (engineManager.fallbackToCpuAfterRuntimeFailure(reason, modelFile, cacheDir)) {
+                    mainHandler.post {
+                        updateStatus("GPU runtime failed; switched to CPU and retrying…")
+                        answerText.text = "Retrying on CPU…"
+                    }
+                    streamingRenderer.reset()
+                    onBeforeCpuRetry?.invoke()
+                    return attempt()
+                }
+            }
+            throw gpuError
+        }
+    }
 
     private fun suggestSteps() {
         if (isWhisperTranscribing) {
@@ -1541,6 +1724,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             updateStatus("An answer is already being generated. Tap Stop first.")
             return
         }
+        // Assign session ID before building the cache key so Turn 1 and Turn 2 share the warm KV cache.
+        val activeSession = currentSession
+            ?: ConversationSession.createWithInitialPrompt(task.ifBlank { "Conversation" }).also {
+                currentSession = it
+            }
         lastPrompt = task
         isGeneratingCancelled.set(false)
         streamingRenderer.reset()
@@ -1553,14 +1741,15 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         syncComposerState()
         scrollChatToBottom(force = true)
         answerText.text = "Working on it…"
-        val backendLabel = engineManager.activeBackend?.name ?: "accelerated"
-        updateStatus("Answering on this device ($backendLabel)…")
+        val initialBackendLabel = if (engineManager.preference == BackendPreference.CPU_ONLY) "CPU" else {
+            engineManager.activeBackend?.name ?: "GPU/auto"
+        }
+        updateStatus("Answering on this device ($initialBackendLabel)…")
         inferenceExecutor.execute {
             var localCitations = emptyList<LocalDocumentRetriever.DocumentCitation>()
             try {
-                engineManager.getOrInitializeEngine(modelFile, cacheDir)
+                ensureEngineInitialized(modelFile)
                 val intent = AnswerDirective.classify(task.ifBlank { attachedContext })
-                val history = conversationHistoryFor(task)
                 val calculation = if (task.isNotBlank()) LocalCalculatorTool.tryEvaluate(task) else null
                 val boundedAttachment = if (attachedContext.isNotBlank()) {
                     val retrieval = LocalDocumentRetriever.retrieveTextWithCitations(
@@ -1576,39 +1765,61 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     ""
                 }
 
-                // Long-term memory (from main) enriches the intent-aware instruction rather than
-                // replacing it, so answer-shaped prompting and the runaway guard still apply.
-                val effectiveInstruction = if (isMemoryEnabled) {
-                    val candidateFacts = MemoryFactExtractor.extractCandidateFacts(task)
-                    for (cf in candidateFacts) {
-                        userMemoryStore.addFact(
-                            content = cf.content,
-                            category = cf.category,
-                            confidence = cf.confidence,
-                            sourceSessionId = currentSession?.id
-                        )
-                    }
-                    val memoryBlock = userMemoryStore.buildPromptContext(maxTokens = 120)
-                    ContextBudgetManager().enrichSystemInstructionWithMemory(
-                        AnswerDirective.systemInstructionFor(intent),
-                        memoryBlock,
-                    )
-                } else {
-                    AnswerDirective.systemInstructionFor(intent)
-                }
+                val effectiveInstruction = effectiveSystemInstruction(task, intent)
+                val convKey = conversationKeyFor(activeSession.id, modelFile, effectiveInstruction, boundedAttachment)
 
-                val prompt = answerPrompt(
+                var isWarm = engineManager.isConversationWarm(convKey)
+                val sessionHistory = conversationHistoryFor(task)
+                var promptBuild = composePrompt(
                     task = task,
                     attachment = boundedAttachment,
                     intent = intent,
                     isRetry = false,
-                    history = history,
+                    history = if (isWarm) emptyList() else sessionHistory,
                     calculation = calculation,
                 )
+                if (isWarm &&
+                    engineManager.cachedConversationTokens + promptBuild.estimatedTotalTokens + MAX_RESPONSE_TOKENS >
+                    WARM_CONTEXT_RESET_THRESHOLD
+                ) {
+                    engineManager.invalidateConversation("context budget reached")
+                    isWarm = false
+                    promptBuild = composePrompt(
+                        task = task,
+                        attachment = boundedAttachment,
+                        intent = intent,
+                        isRetry = false,
+                        history = sessionHistory,
+                        calculation = calculation,
+                    )
+                }
+                if (promptBuild.truncatedCount > 0) {
+                    mainHandler.post { updateStatus("Older context trimmed to fit model limit.") }
+                }
+
                 runawayFragment = null
-                // One pass only. A dodged answer is surfaced as-is with a Refine affordance,
-                // rather than silently burning a second full generation the user never asked for.
-                val result = runGuardedGeneration(prompt, effectiveInstruction)
+                var activeBuild = promptBuild
+                val result = executeWithGpuFallback(
+                    modelFile = modelFile,
+                    onBeforeCpuRetry = {
+                        activeBuild = composePrompt(
+                            task = task,
+                            attachment = boundedAttachment,
+                            intent = intent,
+                            isRetry = false,
+                            history = sessionHistory,
+                            calculation = calculation,
+                        )
+                    },
+                ) {
+                    runGuardedGeneration(convKey, activeBuild.prompt, effectiveInstruction)
+                }
+
+                if (!isGeneratingCancelled.get()) {
+                    engineManager.recordConversationTurnTokens(
+                        activeBuild.estimatedTotalTokens + ChatMessage.estimateTextTokens(result) + 8
+                    )
+                }
                 val needsRefineHint = !isGeneratingCancelled.get() && runawayFragment == null &&
                     (AnswerDirective.looksLikeDelegationRefusal(result, intent) ||
                         AnswerDirective.isUnsubstantive(result))
@@ -1641,7 +1852,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     // Auto-save turn to local conversation session
                     if (result.isNotBlank()) {
                         try {
-                            val sess = currentSession ?: ConversationSession.createWithInitialPrompt(task.ifBlank { "Conversation" })
+                            val sess = currentSession ?: activeSession
                             val userMsg = ChatMessage.user(
                                 content = task,
                                 attachmentContent = if (attachedContext.isNotBlank()) attachedContext else null
@@ -1674,8 +1885,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 }
             } catch (e: Exception) {
                 mainHandler.post {
+                    exitGeneratingState()
                     stopGeneratingButton.visibility = View.GONE
                     suggestButton.isEnabled = true
+                    syncComposerState()
                     if (isGeneratingCancelled.get()) {
                         updateStatus("Generation stopped by user.")
                     } else {
@@ -2222,6 +2435,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun showDuplexVoiceDialog() {
+        if (engineManager.isGenerationActive || isGeneratingUi) {
+            Toast.makeText(this, "Stop active text generation before starting voice mode.", Toast.LENGTH_SHORT).show()
+            return
+        }
         if (whisperContext == 0L) {
             Toast.makeText(this, "Select a local Whisper model first.", Toast.LENGTH_SHORT).show()
             return
@@ -2598,13 +2815,142 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val model = File(filesDir, "model.litertlm")
         if (!::modelPill.isInitialized) return
         if (model.exists() && model.length() > 0) {
-            modelPill.text = "MODEL READY · ${formatBytes(model.length())}"
+            val savedName = settingsPrefs.getString(PREF_MODEL_DISPLAY_NAME, null)
+            val shortName = savedName?.removeSuffix(".litertlm")?.take(16)
+            val sizeLabel = formatStorageSize(model.length())
+            modelPill.text = if (!shortName.isNullOrBlank()) "$shortName · $sizeLabel" else "MODEL READY · $sizeLabel"
             modelPill.contentDescription =
-                "Active model ready, ${formatBytes(model.length())}. Tap to choose a different LiteRT-LM model"
+                "Active model ${savedName ?: ""}, $sizeLabel. Tap to configure backend, unload from RAM, or switch model"
         } else {
             modelPill.text = "Choose model"
             modelPill.contentDescription = "No active model. Tap to choose a LiteRT-LM model"
         }
+    }
+
+    private fun showModelManagerDialog() {
+        val model = File(filesDir, "model.litertlm")
+        if (!model.exists() || model.length() == 0L) {
+            chooseModel()
+            return
+        }
+        val modelName = settingsPrefs.getString(PREF_MODEL_DISPLAY_NAME, null) ?: "model.litertlm"
+        val sizeStr = formatStorageSize(model.length())
+        val isCpuOnly = engineManager.preference == BackendPreference.CPU_ONLY
+        val runtimeState = when (engineManager.activeBackend) {
+            ActiveBackend.GPU -> "Loaded in RAM (GPU)"
+            ActiveBackend.CPU -> "Loaded in RAM (CPU)"
+            null -> "Stored on disk (standby · 0 RAM)"
+        }
+        val dialogView = column().apply {
+            setPadding(dp(20), dp(14), dp(20), dp(12))
+        }
+        dialogView.addView(text(modelName, 15f, INK, true))
+        dialogView.addView(text("Size: $sizeStr  ·  $runtimeState", 12f, MUTED).apply {
+            setPadding(0, dp(4), 0, dp(8))
+        })
+        dialogView.addView(
+            text(
+                "Note: Multimodal (.litertlm Omni) weights occupy storage & memory for their bundle, while PocketAgent runs text inference only (vision/audio towers kept disabled) to save RAM.",
+                11f,
+                MUTED,
+            ).apply { setPadding(0, 0, 0, dp(12)) }
+        )
+
+        lateinit var dialog: AlertDialog
+
+        val backendLabel = if (isCpuOnly) {
+            "Backend: CPU Only (Tap to allow GPU)"
+        } else {
+            "Backend: GPU + Auto CPU Fallback (Tap for CPU Only)"
+        }
+        dialogView.addView(
+            pillButton(backendLabel, accessibilityLabel = "Toggle GPU or CPU inference backend") {
+                if (engineManager.isGenerationActive || isGeneratingUi) {
+                    Toast.makeText(this, "Stop generation before changing backend.", Toast.LENGTH_SHORT).show()
+                    return@pillButton
+                }
+                val next = if (isCpuOnly) BackendPreference.GPU_PREFERRED else BackendPreference.CPU_ONLY
+                settingsPrefs.edit()
+                    .putString(PREF_BACKEND_MODE, next.name)
+                    .putBoolean(PREF_GPU_LOADING_GUARD, false)
+                    .apply()
+                dialog.dismiss()
+                updateStatus("Switching backend to ${if (next == BackendPreference.CPU_ONLY) "CPU Only" else "GPU (auto fallback)"}…")
+                inferenceExecutor.execute {
+                    engineManager.switchBackend(next)
+                    mainHandler.post {
+                        updateStatus("Backend set to ${if (next == BackendPreference.CPU_ONLY) "CPU Only" else "GPU (auto fallback)"}. Ready for your next question.")
+                    }
+                }
+            },
+            marginBottom(8),
+        )
+
+        dialogView.addView(
+            pillButton("🧹 Unload Model from RAM (Keep File)", accessibilityLabel = "Release model memory from RAM") {
+                if (engineManager.isGenerationActive || isGeneratingUi) {
+                    Toast.makeText(this, "Stop generation before unloading model.", Toast.LENGTH_SHORT).show()
+                    return@pillButton
+                }
+                dialog.dismiss()
+                inferenceExecutor.execute {
+                    engineManager.close()
+                    mainHandler.post {
+                        updateStatus("Model unloaded from RAM ($sizeStr file kept on disk). Will reload on next prompt.")
+                    }
+                }
+            },
+            marginBottom(8),
+        )
+
+        dialogView.addView(
+            pillButton("📂 Switch / Choose Different .litertlm File", accessibilityLabel = "Pick a different LiteRT-LM model file") {
+                dialog.dismiss()
+                chooseModel()
+            },
+            marginBottom(8),
+        )
+
+        dialogView.addView(
+            pillButton("🗑️ Remove Stored Model ($sizeStr)", accessibilityLabel = "Delete stored model file to free space") {
+                if (engineManager.isGenerationActive || isGeneratingUi) {
+                    Toast.makeText(this, "Stop generation before removing model.", Toast.LENGTH_SHORT).show()
+                    return@pillButton
+                }
+                dialog.dismiss()
+                AlertDialog.Builder(this)
+                    .setTitle("Remove Local Model?")
+                    .setMessage("Delete $modelName ($sizeStr) from app private storage to free disk space?")
+                    .setPositiveButton("Remove") { _, _ ->
+                        inferenceExecutor.execute {
+                            engineManager.close()
+                            ModelFileStore(filesDir).removeStoredModel()
+                            ModelFileStore.clearEngineCaches(cacheDir)
+                            settingsPrefs.edit()
+                                .remove(PREF_MODEL_DISPLAY_NAME)
+                                .putBoolean(PREF_GPU_LOADING_GUARD, false)
+                                .apply()
+                            mainHandler.post {
+                                refreshModelStatus()
+                                syncComposerState()
+                                updateStatus("Stored model removed. Freed $sizeStr.")
+                            }
+                        }
+                    }
+                    .setNegativeButton("Cancel", null)
+                    .show()
+            }.apply {
+                background = shape(0xFFFFEBEE.toInt(), 12, 0xFFFFCDD2.toInt())
+                setTextColor(0xFFC62828.toInt())
+            }
+        )
+
+        dialog = AlertDialog.Builder(this)
+            .setTitle("⚙️ Local Model & Engine")
+            .setView(dialogView)
+            .setNegativeButton("Close", null)
+            .create()
+        dialog.show()
     }
 
     private fun cleanupStagedInputFiles() {
@@ -2651,6 +2997,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun formatBytes(bytes: Long): String = if (bytes >= 1024L * 1024) "${bytes / (1024 * 1024)} MB" else "${bytes / 1024} KB"
+    private fun formatStorageSize(bytes: Long): String = PrivacyAuditCenter.StorageAudit.formatBytes(bytes)
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     private fun column() = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -2744,11 +3091,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         recognizer?.destroy()
         tts?.stop()
         tts?.shutdown()
+        duplexController.stopSession()
         inAppAudioRecorder.cancelRecording()
         streamingRenderer.cancel()
-        // Drop the cached conversation explicitly so a stale KV cache cannot outlive the Activity.
-        engineManager.closeConversation()
-        ioExecutor.execute {
+        engineManager.cancelActiveConversation()
+        // Close native LiteRT-LM and Whisper contexts serially on inferenceExecutor.
+        inferenceExecutor.execute {
             engineManager.close()
             val context = whisperContext
             whisperContext = 0L

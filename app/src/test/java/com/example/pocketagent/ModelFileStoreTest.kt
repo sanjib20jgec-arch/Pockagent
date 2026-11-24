@@ -4,6 +4,7 @@ import java.io.ByteArrayInputStream
 import java.io.FilterInputStream
 import java.io.IOException
 import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
@@ -97,6 +98,59 @@ class ModelFileStoreTest {
         assertThrows(IllegalArgumentException::class.java) {
             ModelFileStore(temporaryFolder.root, maxBytes = 1, reservedFreeSpaceBytes = -1)
         }
+    }
+
+    @Test
+    fun expectedBytesExceedingLimitFailsBeforeReadingStream() {
+        val store = ModelFileStore(temporaryFolder.root, maxBytes = 100, reservedFreeSpaceBytes = 0)
+        val unreadStream = object : java.io.InputStream() {
+            override fun read(): Int = throw AssertionError("Stream should not be read when expectedBytes exceeds limit.")
+        }
+
+        assertThrows(IOException::class.java) {
+            store.importModel(unreadStream, expectedBytes = 250L)
+        }
+        assertFalse(partFile(store).exists())
+    }
+
+    @Test
+    fun importModelReportsCompletionProgress() {
+        val store = ModelFileStore(temporaryFolder.root, maxBytes = 100, reservedFreeSpaceBytes = 0)
+        val updates = mutableListOf<Pair<Long, Long?>>()
+
+        store.importModel(ByteArrayInputStream(byteArrayOf(1, 2, 3, 4)), expectedBytes = 4L) { copied, total ->
+            updates += copied to total
+        }
+
+        assertTrue(updates.isNotEmpty())
+        assertEquals(4L to 4L, updates.last())
+    }
+
+    @Test
+    fun removeStoredModelDeletesPrimaryPartialAndBackupFiles() {
+        val store = ModelFileStore(temporaryFolder.root, maxBytes = 100, reservedFreeSpaceBytes = 0)
+        store.modelFile.writeBytes(byteArrayOf(1, 2))
+        partFile(store).writeBytes(byteArrayOf(3, 4))
+        val backup = java.io.File(temporaryFolder.root, "model.litertlm.backup").apply { writeBytes(byteArrayOf(5)) }
+
+        assertTrue(store.removeStoredModel())
+        assertFalse(store.modelFile.exists())
+        assertFalse(partFile(store).exists())
+        assertFalse(backup.exists())
+    }
+
+    @Test
+    fun clearEngineCachesDeletesCompilerArtifactsButPreservesPocketAgentDirs() {
+        val cacheDir = temporaryFolder.newFolder("cache")
+        val keepDir = java.io.File(cacheDir, "pocketagent-kept").apply { mkdirs() }
+        val keepFile = java.io.File(keepDir, "note.txt").apply { writeText("keep") }
+        val openClDir = java.io.File(cacheDir, "opencl_cache").apply { mkdirs() }
+        java.io.File(openClDir, "shader.bin").writeBytes(byteArrayOf(9, 8))
+
+        ModelFileStore.clearEngineCaches(cacheDir)
+
+        assertTrue(keepFile.exists())
+        assertFalse(openClDir.exists())
     }
 
     private fun partFile(store: ModelFileStore) =

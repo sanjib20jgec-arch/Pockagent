@@ -19,19 +19,36 @@ import java.io.File
 interface ConversationHandle : AutoCloseable {
     fun sendMessage(prompt: String, callback: com.google.ai.edge.litertlm.MessageCallback, maxOutputTokens: Int)
 
+    /** Requests early cancellation of an in-flight streaming generation, if supported. */
+    fun cancel() {}
+
     override fun close()
 }
 
 class InferenceEngineManager<T : AutoCloseable>(
     var preference: BackendPreference = BackendPreference.GPU_PREFERRED,
     private val engineFactory: (isGpu: Boolean, modelFile: File, cacheDir: File) -> T = { isGpu, model, cache ->
-        val config = com.google.ai.edge.litertlm.EngineConfig(
-            modelPath = model.absolutePath,
-            backend = if (isGpu) com.google.ai.edge.litertlm.Backend.GPU() else com.google.ai.edge.litertlm.Backend.CPU(),
-            cacheDir = cache.absolutePath
-        )
+        fun createAndInit(maxTokens: Int?): com.google.ai.edge.litertlm.Engine {
+            val config = com.google.ai.edge.litertlm.EngineConfig(
+                modelPath = model.absolutePath,
+                backend = if (isGpu) com.google.ai.edge.litertlm.Backend.GPU() else com.google.ai.edge.litertlm.Backend.CPU(),
+                maxNumTokens = maxTokens,
+                cacheDir = cache.absolutePath,
+            )
+            return com.google.ai.edge.litertlm.Engine(config).also { it.initialize() }
+        }
+        val initialized = try {
+            createAndInit(ContextBudgetManager.TokenBudget.DEFAULT_MAX_CONTEXT_TOKENS)
+        } catch (explicitCapError: Throwable) {
+            if (!isGpu) {
+                // Fall back to the model's compiled KV-cache default if 4096 is rejected.
+                createAndInit(null)
+            } else {
+                throw explicitCapError
+            }
+        }
         @Suppress("UNCHECKED_CAST")
-        (com.google.ai.edge.litertlm.Engine(config).also { it.initialize() } as T)
+        (initialized as T)
     },
     /**
      * Opens a conversation on the live engine.
@@ -55,6 +72,14 @@ class InferenceEngineManager<T : AutoCloseable>(
                 maxOutputTokens: Int,
             ) {
                 conversation.sendMessageAsync(prompt, callback, maxOutputToken = maxOutputTokens)
+            }
+
+            override fun cancel() {
+                try {
+                    conversation.cancelProcess()
+                } catch (_: Exception) {
+                    // Best-effort abort; conversation is invalidated afterward.
+                }
             }
 
             override fun close() {
@@ -92,7 +117,11 @@ class InferenceEngineManager<T : AutoCloseable>(
 
         val current = engine
         if (current != null) {
-            return current
+            if (preferredBackend == BackendPreference.CPU_ONLY && activeBackend == ActiveBackend.GPU) {
+                close()
+            } else {
+                return current
+            }
         }
 
         preference = preferredBackend
@@ -116,6 +145,42 @@ class InferenceEngineManager<T : AutoCloseable>(
         engine = cpuEngine
         activeBackend = ActiveBackend.CPU
         return cpuEngine
+    }
+
+    /**
+     * Switches the backend preference and tears down any loaded engine that does not match.
+     * The next request will reinitialize the model on the newly selected backend.
+     */
+    @Synchronized
+    fun switchBackend(newPreference: BackendPreference) {
+        preference = newPreference
+        val currentBackend = activeBackend
+        val shouldTearDown = (newPreference == BackendPreference.CPU_ONLY && currentBackend == ActiveBackend.GPU) ||
+            (newPreference == BackendPreference.GPU_PREFERRED && currentBackend == ActiveBackend.CPU)
+        if (shouldTearDown) {
+            close()
+        }
+    }
+
+    /**
+     * Recovers from a GPU/OpenCL runtime error during conversation creation or token streaming
+     * (after `Engine.initialize()` had already succeeded) by tearing down the GPU engine and
+     * switching to CPU execution. Returns `true` if a GPU->CPU switch occurred.
+     */
+    @Synchronized
+    fun fallbackToCpuAfterRuntimeFailure(
+        reason: String,
+        modelFile: File,
+        cacheDir: File,
+    ): Boolean {
+        if (activeBackend != ActiveBackend.GPU) return false
+        close()
+        val fallbackNote = "GPU execution failed ($reason); falling back to CPU."
+        lastFallbackReason = fallbackNote
+        preference = BackendPreference.CPU_ONLY
+        onFallback?.invoke(fallbackNote)
+        getOrInitializeEngine(modelFile, cacheDir, BackendPreference.CPU_ONLY)
+        return true
     }
 
     // ------------------------------------------------------- conversation (KV) cache
@@ -147,6 +212,33 @@ class InferenceEngineManager<T : AutoCloseable>(
     @Volatile var conversationCreateCount: Int = 0
         private set
 
+    /** Estimated cumulative tokens already stored in the cached conversation's KV cache. */
+    @Volatile var cachedConversationTokens: Int = 0
+        private set
+
+    /** True when calling [getOrCreateConversation] with [key] will hit an already open conversation. */
+    @Synchronized
+    fun isConversationWarm(key: String): Boolean =
+        engine != null && cachedConversation != null && cachedKey == key
+
+    /** Tracks estimated tokens added to the cached KV state so callers can reset before overflow. */
+    @Synchronized
+    fun recordConversationTurnTokens(estimatedDeltaTokens: Int) {
+        if (cachedConversation != null && estimatedDeltaTokens > 0) {
+            cachedConversationTokens += estimatedDeltaTokens
+        }
+    }
+
+    /** Sends an early native cancellation signal to the active cached conversation, if any. */
+    @Synchronized
+    fun cancelActiveConversation() {
+        try {
+            cachedConversation?.cancel()
+        } catch (_: Exception) {
+            // Safe best-effort cancel.
+        }
+    }
+
     /**
      * Returns a conversation for [key], creating one only when none is cached.
      *
@@ -174,6 +266,7 @@ class InferenceEngineManager<T : AutoCloseable>(
         val created = conversationFactory(activeEngine, systemInstruction)
         cachedConversation = created
         cachedKey = key
+        cachedConversationTokens = 0
         conversationCreateCount++
         return created
     }
@@ -212,6 +305,7 @@ class InferenceEngineManager<T : AutoCloseable>(
         val conversation = cachedConversation
         cachedConversation = null
         cachedKey = null
+        cachedConversationTokens = 0
         try {
             conversation?.close()
         } catch (_: Exception) {

@@ -23,8 +23,13 @@ internal class ModelFileStore(
         require(reservedFreeSpaceBytes >= 0) { "Reserved free space cannot be negative." }
     }
 
+    @JvmOverloads
     @Throws(IOException::class)
-    fun importModel(input: InputStream): File {
+    fun importModel(
+        input: InputStream,
+        expectedBytes: Long? = null,
+        onProgress: ((copiedBytes: Long, totalBytes: Long?) -> Unit)? = null,
+    ): File {
         if (!directory.exists() && !directory.mkdirs()) {
             throw IOException("Could not create private model storage.")
         }
@@ -42,9 +47,14 @@ internal class ModelFileStore(
             maxBytes
         }
 
+        if (expectedBytes != null && expectedBytes > 0L && expectedBytes > copyLimit) {
+            throw IOException(sizeLimitMessage(0L, copyLimit, maxBytes, expectedBytes))
+        }
+
         var committed = false
         try {
             var copied = 0L
+            var lastReported = 0L
             FileOutputStream(temporary).use { output ->
                 val buffer = ByteArray(COPY_BUFFER_SIZE)
                 while (true) {
@@ -53,16 +63,23 @@ internal class ModelFileStore(
                     if (count == 0) {
                         val singleByte = input.read()
                         if (singleByte < 0) break
-                        if (copied >= copyLimit) throw IOException(sizeLimitMessage())
+                        if (copied >= copyLimit) throw IOException(sizeLimitMessage(copied, copyLimit, maxBytes, expectedBytes))
                         output.write(singleByte)
                         copied++
-                        continue
+                    } else {
+                        if (count.toLong() > copyLimit - copied) {
+                            throw IOException(sizeLimitMessage(copied, copyLimit, maxBytes, expectedBytes))
+                        }
+                        output.write(buffer, 0, count)
+                        copied += count
                     }
-                    if (count.toLong() > copyLimit - copied) throw IOException(sizeLimitMessage())
-                    output.write(buffer, 0, count)
-                    copied += count
+                    if (onProgress != null && copied - lastReported >= PROGRESS_INTERVAL_BYTES) {
+                        lastReported = copied
+                        onProgress.invoke(copied, expectedBytes)
+                    }
                 }
                 if (copied == 0L) throw IOException("The selected model file is empty.")
+                onProgress?.invoke(copied, expectedBytes ?: copied)
                 output.fd.sync()
             }
 
@@ -72,6 +89,19 @@ internal class ModelFileStore(
         } finally {
             if (!committed && temporary.exists()) temporary.delete()
         }
+    }
+
+    /** Removes the stored model and any incomplete import/backup artifacts cleanly. */
+    fun removeStoredModel(): Boolean {
+        var ok = true
+        listOf(
+            modelFile,
+            File(directory, "$MODEL_FILE_NAME.part"),
+            File(directory, "$MODEL_FILE_NAME.backup"),
+        ).forEach { file ->
+            if (file.exists() && !file.delete()) ok = false
+        }
+        return ok
     }
 
     private fun replaceCurrentModel(temporary: File, target: File) {
@@ -103,13 +133,46 @@ internal class ModelFileStore(
         }
     }
 
-    private fun sizeLimitMessage(): String =
-        "Model exceeds the allowed size or available storage. Free space and try again."
+    private fun sizeLimitMessage(
+        copied: Long,
+        copyLimit: Long,
+        maxBytes: Long,
+        expectedBytes: Long?,
+    ): String {
+        val neededBytes = expectedBytes ?: copied
+        return if (copyLimit < maxBytes) {
+            val existingNote = if (modelFile.exists() && modelFile.length() > 0L) {
+                " Remove the current stored model first to free ${formatGbOrMb(modelFile.length())}."
+            } else {
+                ""
+            }
+            "Not enough free storage (need ${formatGbOrMb(neededBytes)}, only ${formatGbOrMb(copyLimit)} safely available).$existingNote"
+        } else {
+            "Model exceeds the ${maxBytes / (1024 * 1024 * 1024)} GB import limit. Choose a smaller compatible .litertlm model."
+        }
+    }
+
+    private fun formatGbOrMb(bytes: Long): String = when {
+        bytes >= 1024L * 1024 * 1024 -> String.format(java.util.Locale.US, "%.1f GB", bytes.toDouble() / (1024 * 1024 * 1024))
+        bytes >= 1024L * 1024 -> "${bytes / (1024 * 1024)} MB"
+        else -> "${bytes / 1024} KB"
+    }
 
     companion object {
         const val MODEL_FILE_NAME = "model.litertlm"
         const val DEFAULT_MAX_MODEL_BYTES = 5L * 1024 * 1024 * 1024
-        const val DEFAULT_RESERVED_FREE_SPACE_BYTES = 32L * 1024 * 1024
-        private const val COPY_BUFFER_SIZE = 64 * 1024
+        const val DEFAULT_RESERVED_FREE_SPACE_BYTES = 128L * 1024 * 1024
+        private const val COPY_BUFFER_SIZE = 256 * 1024
+        private const val PROGRESS_INTERVAL_BYTES = 16L * 1024 * 1024
+
+        /** Removes stale LiteRT/OpenCL/XNNPACK compiled cache files on model switch or wipe. */
+        fun clearEngineCaches(cacheDir: File) {
+            cacheDir.listFiles()?.forEach { entry ->
+                val name = entry.name
+                if (!name.startsWith("pocketagent-")) {
+                    entry.deleteRecursively()
+                }
+            }
+        }
     }
 }

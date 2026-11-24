@@ -14,6 +14,7 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -77,7 +78,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var taskInput: EditText
     private lateinit var statusText: TextView
     private lateinit var answerText: TextView
-    private lateinit var modelText: TextView
     private lateinit var attachmentText: TextView
     private lateinit var attachmentPreview: TextView
     private lateinit var attachmentPreviewButton: Button
@@ -88,6 +88,23 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var suggestButton: Button
     private lateinit var attachmentCard: LinearLayout
     private lateinit var outputCard: LinearLayout
+    // Sticky bottom composer and its collapsible chrome.
+    private lateinit var chatScroll: ScrollView
+    private lateinit var chatCanvas: LinearLayout
+    private lateinit var heroCard: LinearLayout
+    private lateinit var quickChips: View
+    private lateinit var composerDock: LinearLayout
+    private lateinit var composerCard: LinearLayout
+    private lateinit var composerRoot: LinearLayout
+    private lateinit var toolsTray: LinearLayout
+    private lateinit var toolsToggleButton: Button
+    private lateinit var attachmentChipBar: LinearLayout
+    private lateinit var attachmentChipText: TextView
+    private lateinit var composerMicButton: Button
+    private lateinit var modelPill: Button
+    private var isToolsTrayOpen = false
+    /** True while the user is reading earlier output; suppresses forced auto-scroll. */
+    @Volatile private var isUserReadingUpwards = false
     private lateinit var citationsContainer: LinearLayout
     private lateinit var systemActionContainer: LinearLayout
     private var recognizer: SpeechRecognizer? = null
@@ -153,41 +170,44 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun buildInterface() {
-        val page = LinearLayout(this).apply {
+        // Three zones stacked in a full-height column: a slim pinned header, a scrolling chat
+        // canvas, and a sticky bottom composer that never scrolls away from the thumb.
+        val rootLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(14), dp(18), dp(26))
             setBackgroundColor(BG)
+            fitsSystemWindows = true
         }
+        applyImeInsets(rootLayout)
 
-        val scroll = ScrollView(this).apply {
-            isFillViewport = true
-            overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
-            addView(page)
-        }
-        setContentView(scroll)
-
+        // ---------------------------------------------------------------- Zone A: pinned header
         val brandRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, dp(4), 0, dp(16))
+            setPadding(dp(18), dp(10), dp(10), dp(8))
         }
         val mark = TextView(this).apply {
             text = "P"
-            textSize = 20f
+            textSize = 17f
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
             setTextColor(WHITE)
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            background = shape(TEAL, 15)
-            layoutParams = LinearLayout.LayoutParams(dp(42), dp(42))
+            background = shape(TEAL, 13)
+            layoutParams = LinearLayout.LayoutParams(dp(34), dp(34))
         }
         brandRow.addView(mark)
         val brand = column().apply {
-            setPadding(dp(11), 0, 0, 0)
-            addView(text("PocketAgent", 18f, INK, true))
-            addView(text("LOCAL MODEL INFERENCE", 10f, MUTED, true).apply { letterSpacing = .12f })
+            setPadding(dp(9), 0, 0, 0)
+            addView(text("PocketAgent", 16f, INK, true))
         }
-        brandRow.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))
+        brandRow.addView(brand, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(8) })
+
+        modelPill = pillButton("Choose model", accessibilityLabel = "Active model. Tap to choose a LiteRT-LM model") {
+            chooseModel()
+        }.apply {
+            layoutParams = LinearLayout.LayoutParams(-2, dp(34))
+        }
+        brandRow.addView(modelPill)
 
         val headerToolsScroll = HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
@@ -227,151 +247,51 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             layoutParams = LinearLayout.LayoutParams(-2, dp(34))
         })
         headerToolsScroll.addView(headerToolsRow)
-        brandRow.addView(headerToolsScroll, LinearLayout.LayoutParams(-2, -2))
-        page.addView(brandRow)
+        brandRow.addView(headerToolsScroll, LinearLayout.LayoutParams(0, -2, 1f))
+        rootLayout.addView(brandRow, LinearLayout.LayoutParams(-1, -2))
 
-        val hero = column().apply {
-            background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(0xFF153B36.toInt(), 0xFF176B60.toInt())).apply { cornerRadius = dp(24).toFloat() }
-            setPadding(dp(20), dp(20), dp(20), dp(20))
+        // ------------------------------------------------- Zone B: scrolling chat & workspace
+        chatCanvas = column().apply {
+            setPadding(dp(16), dp(2), dp(16), dp(10))
         }
-        hero.addView(text("Your pocket assistant", 25f, WHITE, true))
-        hero.addView(text("Ask anything. Get the actual answer, computed on this device.", 14f, 0xFFD5EAE5.toInt()).apply {
-            setPadding(0, dp(7), 0, dp(14))
+
+        // Condensed welcome block, shown only while the conversation is empty.
+        heroCard = column().apply {
+            background = GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                intArrayOf(0xFF153B36.toInt(), 0xFF176B60.toInt())
+            ).apply { cornerRadius = dp(20).toFloat() }
+            setPadding(dp(16), dp(15), dp(16), dp(15))
+        }
+        heroCard.addView(text("Your pocket assistant", 20f, WHITE, true))
+        heroCard.addView(text("Ask anything. Get the actual answer, computed on this device.", 13f, 0xFFD5EAE5.toInt()).apply {
+            setPadding(0, dp(5), 0, 0)
         })
-        val modelRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        modelText = text("No model selected", 12f, WHITE, true).apply {
-            setPadding(dp(12), dp(10), dp(10), dp(10))
-            maxLines = 2
-            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
-        }
-        modelRow.addView(modelText, LinearLayout.LayoutParams(0, -2, 1f))
-        modelRow.addView(pillButton("Choose model", accessibilityLabel = "Choose a LiteRT-LM model") { chooseModel() })
-        hero.addView(modelRow)
-        page.addView(hero, marginBottom(18))
+        chatCanvas.addView(heroCard, marginBottom(12))
 
-        val promptHeading = sectionHeading("What can I help with?", "Type, dictate, or attach text or a selectable-text PDF")
-        val promptTitle = promptHeading.getChildAt(0) as TextView
-        page.addView(promptHeading, marginBottom(9))
-        val promptCard = column().apply {
-            background = shape(WHITE, 20, BORDER)
-            setPadding(dp(15), dp(9), dp(15), dp(12))
-        }
-        taskInput = EditText(this).apply {
-            id = View.generateViewId()
-            promptTitle.labelFor = id
-            hint = "e.g. Help me plan a study schedule…"
-            setHintTextColor(MUTED)
-            setTextColor(INK)
-            textSize = 16f
-            minLines = 4
-            maxLines = 9
-            gravity = Gravity.TOP or Gravity.START
-            setPadding(dp(2), dp(5), dp(2), dp(8))
-            background = null
-            imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_NONE
-        }
-        promptCard.addView(taskInput, LinearLayout.LayoutParams(-1, -2))
-
-        val actionRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        actionRow.addView(pillButton("＋  Add text", accessibilityLabel = "Attach text files") { chooseTextFiles() }, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(7) })
-        actionRow.addView(pillButton("◉  Dictate", accessibilityLabel = "Dictate a task") { startDictation() }, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(7) })
-        promptCard.addView(actionRow)
-        promptCard.addView(pillButton("＋  Add PDF", accessibilityLabel = "Attach a PDF document") { choosePdf() }.apply {
-            layoutParams = LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(7) }
-        })
-        whisperModelText = text("No local Whisper model selected.", 11f, MUTED).apply {
-            setPadding(dp(2), dp(9), dp(2), dp(1))
-            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
-        }
-        promptCard.addView(whisperModelText)
-        promptCard.addView(pillButton("Choose Whisper model", accessibilityLabel = "Choose a local whisper.cpp ggml model") {
-            chooseWhisperModel()
-        }.apply { layoutParams = LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(5) } })
-        promptCard.addView(textButton("Remove Whisper model", accessibilityLabel = "Remove the locally stored Whisper model") {
-            removeWhisperModel()
-        })
-        val audioActionsRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        recordAudioButton = pillButton("🎙  Record audio", accessibilityLabel = "Record audio for local Whisper transcription") {
-            toggleInAppRecording()
-        }.apply { isEnabled = false }
-        audioActionsRow.addView(recordAudioButton, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(4) })
-
-        transcribeWavButton = pillButton("Transcribe WAV", accessibilityLabel = "Choose a WAV file for local transcription") {
-            chooseWav()
-        }.apply { isEnabled = false }
-        audioActionsRow.addView(transcribeWavButton, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(4) })
-        promptCard.addView(audioActionsRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(3) })
-
-        promptCard.addView(text("WAV and in-app recording run locally with a Whisper model you choose; no weights are bundled. In-app audio is PCM16 16kHz mono (max 60s, 25 MB) with automatic memory wipe. Scanned PDFs are not OCR'd; dictation still depends on your device's speech service.", 11f, MUTED).apply {
-            setPadding(dp(2), dp(8), dp(2), dp(2))
-        })
-        attachmentCard = column().apply { visibility = View.GONE; setPadding(0, dp(9), 0, 0) }
-        attachmentText = text("", 12f, MUTED)
-        attachmentCard.addView(attachmentText)
-        attachmentPreview = text("", 12f, INK).apply {
-            setPadding(dp(10), dp(8), dp(10), dp(8))
-            background = shape(BG, 10)
-            setTextIsSelectable(true)
-            maxLines = 8
-            ellipsize = android.text.TextUtils.TruncateAt.END
-        }
-        attachmentCard.addView(attachmentPreview, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(7) })
-        attachmentPreviewButton = textButton("Show full attachment text", accessibilityLabel = "Expand attachment text preview") {
-            toggleAttachmentPreview()
-        }
-        attachmentCard.addView(attachmentPreviewButton)
-        confirmTranscriptButton = textButton("Use reviewed transcript", accessibilityLabel = "Confirm transcript after reviewing it") {
-            if (transcriptReviewPending && !isWhisperTranscribing) {
-                transcriptReviewPending = false
-                confirmTranscriptButton.visibility = View.GONE
-                suggestButton.isEnabled = true
-                updateStatus("Transcript confirmed. Ask your question when ready.")
-            }
-        }.apply { visibility = View.GONE }
-        attachmentCard.addView(confirmTranscriptButton)
-        attachmentCard.addView(textButton("Remove attachment", accessibilityLabel = "Remove attached files and extracted text") { clearAttachments() })
-        promptCard.addView(attachmentCard)
-        page.addView(promptCard, marginBottom(12))
-
+        // Quick prompt chips collapse once the conversation has output.
         val quickScroll = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false }
         val quickRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         listOf("Plan my day", "Explain a setting", "Write a message", "Learn something").forEach { label ->
-            val chip = pillButton(label, accessibilityLabel = "Use task preset: $label") { taskInput.setText(label) }
+            val chip = pillButton(label, accessibilityLabel = "Use task preset: $label") {
+                taskInput.setText(label)
+                taskInput.requestFocus()
+                syncComposerState()
+            }
             quickRow.addView(chip, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(8) })
         }
         quickScroll.addView(quickRow)
-        page.addView(quickScroll, marginBottom(14))
-
-        suggestButton = actionButton("Ask", accessibilityLabel = "Send your question and get an answer") { suggestSteps() }
-        page.addView(suggestButton, marginBottom(9))
-        statusText = text("Choose a compatible .litertlm model to get started.", 12f, MUTED).apply {
-            gravity = Gravity.CENTER
-            setPadding(dp(4), dp(2), dp(4), dp(15))
-            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
-        }
-        page.addView(statusText)
-
-        val disclaimer = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            background = shape(0xFFEAF2F0.toInt(), 14)
-            setPadding(dp(12), dp(10), dp(12), dp(10))
-        }
-        disclaimer.addView(text("ⓘ", 18f, TEAL, true).apply { setPadding(0, 0, dp(9), 0) })
-        disclaimer.addView(text("Answers and steps only. PocketAgent never controls your phone or acts for you.", 12f, 0xFF46615B.toInt()))
-        page.addView(disclaimer, marginBottom(18))
+        quickChips = quickScroll
+        chatCanvas.addView(quickScroll, marginBottom(10))
 
         outputCard = column().apply {
             visibility = View.GONE
             background = shape(WHITE, 20, BORDER)
-            setPadding(dp(16), dp(15), dp(16), dp(16))
+            setPadding(dp(16), dp(14), dp(16), dp(16))
         }
         val outputHeader = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         val outputTitle = column()
-        outputTitle.addView(text("Answer", 19f, INK, true))
+        outputTitle.addView(text("Answer", 18f, INK, true))
         outputTitle.addView(text("Generated locally · runs offline", 11f, MUTED).apply { setPadding(0, dp(3), 0, 0) })
         outputHeader.addView(outputTitle, LinearLayout.LayoutParams(0, -2, 1f))
         outputHeader.addView(textButton("Clear", accessibilityLabel = "Clear answer") {
@@ -383,6 +303,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             currentCitations = emptyList()
             systemActionContainer.removeAllViews()
             systemActionContainer.visibility = View.GONE
+            syncComposerState()
         })
         outputCard.addView(outputHeader)
         stopGeneratingButton = pillButton("■ Stop Generating", accessibilityLabel = "Stop in-progress generation") {
@@ -398,7 +319,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         outputCard.addView(stopGeneratingButton)
 
         answerText = text("", 15f, INK).apply {
-            setPadding(0, dp(15), 0, dp(15))
+            setPadding(0, dp(13), 0, dp(13))
             setTextIsSelectable(true)
             setLineSpacing(dp(4).toFloat(), 1.0f)
         }
@@ -430,12 +351,346 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             setPadding(0, dp(6), 0, 0)
         }
         outputCard.addView(systemActionContainer)
-        page.addView(outputCard)
+        chatCanvas.addView(outputCard, marginBottom(6))
 
-        page.addView(text("Your selected model and prompts stay in this app. Attached text is included only in the local prompt.", 11f, MUTED).apply {
+        chatCanvas.addView(text("Your selected model and prompts stay in this app. Attached text is included only in the local prompt.", 11f, MUTED).apply {
             gravity = Gravity.CENTER
-            setPadding(dp(10), dp(18), dp(10), 0)
+            setPadding(dp(10), dp(10), dp(10), dp(4))
         })
+
+        chatScroll = ScrollView(this).apply {
+            isFillViewport = true
+            overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+            clipToPadding = false
+            setPadding(0, 0, 0, 0)
+            addView(chatCanvas)
+            setOnScrollChangeListener { _, _, scrollY, _, _ ->
+                // Track whether the reader is parked at the bottom, so streaming output only
+                // auto-scrolls when they have not deliberately scrolled up.
+                isUserReadingUpwards = scrollY + height < (chatCanvas.height + paddingTop + paddingBottom - dp(24))
+            }
+        }
+        rootLayout.addView(chatScroll, LinearLayout.LayoutParams(-1, 0, 1f))
+
+        // ------------------------------------------------- Zone C: sticky bottom composer dock
+        composerDock = column().apply {
+            background = shape(BG, 0)
+            setPadding(dp(12), dp(6), dp(12), dp(8))
+            // Absorb bottom system-navigation insets when the keyboard is closed.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                setOnApplyWindowInsetsListener { view, insets ->
+                    val bottom = insets.systemWindowInsetBottom
+                    view.setPadding(dp(12), dp(6), dp(12), dp(8) + bottom)
+                    insets
+                }
+            }
+        }
+        composerCard = column().apply {
+            background = shape(WHITE, 20, BORDER)
+            elevation = dp(6).toFloat()
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+        }
+
+        attachmentChipBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            visibility = View.GONE
+            background = shape(MINT, 14)
+            setPadding(dp(10), dp(2), dp(2), dp(2))
+        }
+        attachmentChipText = text("", 12f, TEAL, true).apply {
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        }
+        attachmentChipBar.addView(attachmentChipText, LinearLayout.LayoutParams(0, -2, 1f))
+        attachmentChipBar.addView(textButton("Edit", accessibilityLabel = "Review attached files and transcripts") {
+            toggleToolsTray(force = true)
+        }.apply { textSize = 11f; minHeight = dp(36) })
+        attachmentChipBar.addView(textButton("×", accessibilityLabel = "Remove attached files and extracted text") {
+            clearAttachments()
+        }.apply { textSize = 15f; minHeight = dp(36) })
+        attachmentChipBar.setOnClickListener { toggleToolsTray(force = true) }
+        composerCard.addView(attachmentChipBar, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(6) })
+
+        toolsTray = column().apply {
+            visibility = View.GONE
+            setPadding(0, dp(2), 0, dp(6))
+        }
+        val trayTextRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        trayTextRow.addView(pillButton("＋ Text", accessibilityLabel = "Attach text files") { chooseTextFiles() }, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(5) })
+        trayTextRow.addView(pillButton("＋ PDF", accessibilityLabel = "Attach a PDF document") { choosePdf() }, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(5) })
+        toolsTray.addView(trayTextRow)
+
+        val audioActionsRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        recordAudioButton = pillButton("🎙  Record audio", accessibilityLabel = "Record audio for local Whisper transcription") {
+            toggleInAppRecording()
+        }.apply { isEnabled = false }
+        audioActionsRow.addView(recordAudioButton, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(5) })
+
+        transcribeWavButton = pillButton("Transcribe WAV", accessibilityLabel = "Choose a WAV file for local transcription") {
+            chooseWav()
+        }.apply { isEnabled = false }
+        audioActionsRow.addView(transcribeWavButton, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(5) })
+        toolsTray.addView(audioActionsRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(2) })
+
+        // Whisper model management lives here instead of cluttering the chat canvas.
+        whisperModelText = text("No local Whisper model selected.", 11f, MUTED).apply {
+            setPadding(dp(4), dp(9), dp(4), dp(2))
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+        }
+        toolsTray.addView(whisperModelText)
+        val whisperRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        whisperRow.addView(pillButton("Choose Whisper model", accessibilityLabel = "Choose a local whisper.cpp ggml model") {
+            chooseWhisperModel()
+        }, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(5) })
+        whisperRow.addView(pillButton("Remove", accessibilityLabel = "Remove the locally stored Whisper model") {
+            removeWhisperModel()
+        }, LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(5) })
+        toolsTray.addView(whisperRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(2) })
+
+        // Compact attachment strip: summary plus preview and transcript review controls.
+        attachmentCard = column().apply {
+            visibility = View.GONE
+            setPadding(0, dp(8), 0, 0)
+        }
+        attachmentText = text("", 12f, MUTED)
+        attachmentCard.addView(attachmentText)
+        attachmentPreview = text("", 12f, INK).apply {
+            setPadding(dp(10), dp(8), dp(10), dp(8))
+            background = shape(BG, 10)
+            setTextIsSelectable(true)
+            maxLines = 4
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        }
+        attachmentCard.addView(attachmentPreview, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
+        attachmentPreviewButton = textButton("Show full attachment text", accessibilityLabel = "Expand attachment text preview") {
+            toggleAttachmentPreview()
+        }
+        attachmentCard.addView(attachmentPreviewButton)
+        confirmTranscriptButton = textButton("Use reviewed transcript", accessibilityLabel = "Confirm transcript after reviewing it") {
+            if (transcriptReviewPending && !isWhisperTranscribing) {
+                transcriptReviewPending = false
+                confirmTranscriptButton.visibility = View.GONE
+                suggestButton.isEnabled = true
+                updateStatus("Transcript confirmed. Ask your question when ready.")
+            }
+        }.apply { visibility = View.GONE }
+        attachmentCard.addView(confirmTranscriptButton)
+        attachmentCard.addView(textButton("Remove attachment", accessibilityLabel = "Remove attached files and extracted text") { clearAttachments() })
+        toolsTray.addView(attachmentCard)
+
+        composerCard.addView(toolsTray)
+
+        // Main composer row: always visible, always thumb-reachable.
+        composerRoot = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.BOTTOM
+        }
+
+        toolsToggleButton = Button(this).apply {
+            text = "＋"
+            contentDescription = "Show attachment and audio tools"
+            setAllCaps(false)
+            textSize = 19f
+            typeface = Typeface.create("sans-serif", Typeface.BOLD)
+            gravity = Gravity.CENTER
+            setTextColor(TEAL)
+            setPadding(0, 0, 0, 0)
+            background = ripple(shape(MINT, 24), 0x33126B60)
+            backgroundTintList = null
+            isFocusable = true
+            setOnClickListener { toggleToolsTray(force = false) }
+        }
+        composerRoot.addView(toolsToggleButton, LinearLayout.LayoutParams(dp(44), dp(44)).apply {
+            marginEnd = dp(7)
+            bottomMargin = dp(1)
+        })
+
+        taskInput = EditText(this).apply {
+            id = View.generateViewId()
+            hint = "Ask Pockagent..."
+            setHintTextColor(MUTED)
+            setTextColor(INK)
+            textSize = 15f
+            minLines = 1
+            maxLines = 5
+            gravity = Gravity.TOP or Gravity.START
+            setPadding(dp(12), dp(11), dp(12), dp(11))
+            background = shape(BG, 18)
+            isSingleLine = false
+            isVerticalScrollBarEnabled = true
+            overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+            imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEND or
+                android.view.inputmethod.EditorInfo.IME_FLAG_NO_ENTER_ACTION
+            setOnEditorActionListener { _, actionId, event ->
+                val sends = actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEND ||
+                    (event != null && event.keyCode == android.view.KeyEvent.KEYCODE_ENTER &&
+                        event.action == android.view.KeyEvent.ACTION_DOWN && !event.isShiftPressed)
+                if (sends && suggestButton.isEnabled) {
+                    suggestSteps()
+                    true
+                } else {
+                    false
+                }
+            }
+            setOnFocusChangeListener { _, hasFocus ->
+                if (hasFocus && isToolsTrayOpen) toggleToolsTray(force = false)
+            }
+            addTextChangedListener(object : android.text.TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+                override fun afterTextChanged(s: android.text.Editable?) {
+                    isUserReadingUpwards = false
+                }
+            })
+        }
+        composerRoot.addView(taskInput, LinearLayout.LayoutParams(0, -2, 1f))
+
+        composerMicButton = Button(this).apply {
+            text = "🎙"
+            contentDescription = "Dictate your question"
+            setAllCaps(false)
+            textSize = 17f
+            gravity = Gravity.CENTER
+            setTextColor(TEAL)
+            setPadding(0, 0, 0, 0)
+            background = ripple(shape(MINT, 24), 0x33126B60)
+            backgroundTintList = null
+            isFocusable = true
+            setOnClickListener { startDictation() }
+        }
+        composerRoot.addView(composerMicButton, LinearLayout.LayoutParams(dp(44), dp(44)).apply {
+            marginStart = dp(7)
+            bottomMargin = dp(1)
+        })
+
+        suggestButton = actionButton("Ask", accessibilityLabel = "Send your question and get an answer") {
+            suggestSteps()
+        }.apply {
+            textSize = 15f
+            minHeight = dp(44)
+            minWidth = dp(64)
+            setPadding(dp(18), dp(10), dp(18), dp(10))
+        }
+        composerRoot.addView(suggestButton, LinearLayout.LayoutParams(-2, dp(44)).apply {
+            marginStart = dp(7)
+        })
+
+        composerCard.addView(composerRoot)
+        composerDock.addView(composerCard, LinearLayout.LayoutParams(-1, -2))
+
+        statusText = text(
+            "Choose a compatible .litertlm model to get started.",
+            11f,
+            MUTED
+        ).apply {
+            gravity = Gravity.CENTER
+            setPadding(dp(6), dp(7), dp(6), dp(0))
+            maxLines = 2
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+        }
+        composerDock.addView(statusText, LinearLayout.LayoutParams(-1, -2))
+
+        rootLayout.addView(composerDock, LinearLayout.LayoutParams(-1, -2))
+
+        setContentView(rootLayout)
+        syncComposerState()
+    }
+
+    /**
+     * Keeps the pinned composer above the soft keyboard on API 28-35.
+     *
+     * `adjustResize` shrinks the window by the keyboard height, which already lifts the composer on
+     * standard devices. The residual inset is the part of the keyboard that the resize did *not*
+     * cover (edge-to-edge and some gesture-navigation configurations), and only that leftover is
+     * turned into bottom padding, so the composer is never pushed up twice.
+     */
+    private fun applyImeInsets(rootLayout: LinearLayout) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
+        rootLayout.setOnApplyWindowInsetsListener { view, insets ->
+            val imeBottom = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                insets.getInsets(android.view.WindowInsets.Type.ime()).bottom
+            } else {
+                @Suppress("DEPRECATION")
+                insets.systemWindowInsetBottom
+            }
+            // How much the window was already shortened by adjustResize.
+            val coveredByResize = (view.rootView.height - view.height).coerceAtLeast(0)
+            val residual = (imeBottom - coveredByResize).coerceAtLeast(0)
+            if (view.paddingBottom != residual) view.setPadding(0, 0, 0, residual)
+            insets
+        }
+    }
+
+    /** Opens or closes the `+` tools tray. */
+    private fun toggleToolsTray(force: Boolean) {
+        val open = if (force) true else !isToolsTrayOpen
+        isToolsTrayOpen = open
+        toolsTray.visibility = if (open) View.VISIBLE else View.GONE
+        toolsToggleButton.text = if (open) "×" else "＋"
+        toolsToggleButton.contentDescription =
+            if (open) "Hide attachment and audio tools" else "Show attachment and audio tools"
+        // The tray opens through the attachment chip's Edit action too, which must reveal the
+        // preview controls rather than the collapsed state.
+        if (open) attachmentCard.visibility = if (attachedContext.isNotBlank()) View.VISIBLE else View.GONE
+        syncComposerState()
+    }
+
+    /**
+     * Synchronises composer chrome with the current conversation and attachment state.
+     *
+     * Called wherever a view used to be toggled individually, so the welcome block, quick chips,
+     * attachment pill, and busy state can never drift out of sync with each other.
+     */
+    private fun syncComposerState() {
+        if (!::heroCard.isInitialized) return
+        val hasConversation = (::outputCard.isInitialized && outputCard.visibility == View.VISIBLE) ||
+            taskInput.text.isNotBlank() || attachedContext.isNotBlank() ||
+            lastPrompt.isNotBlank() || currentSession?.messages?.isNotEmpty() == true
+        val welcomeVisibility = if (hasConversation) View.GONE else View.VISIBLE
+        heroCard.visibility = welcomeVisibility
+        quickChips.visibility = welcomeVisibility
+
+        val hasAttachment = attachedContext.isNotBlank()
+        attachmentChipBar.visibility = if (hasAttachment) View.VISIBLE else View.GONE
+        if (hasAttachment) {
+            attachmentChipText.text = attachedNames.joinToString(" · ").ifBlank { "Attachment ready" }
+            attachmentChipText.contentDescription =
+                "Attachments: ${attachedNames.joinToString(", ").ifBlank { "one attachment" }}"
+        }
+        if (!hasAttachment && ::attachmentCard.isInitialized) {
+            attachmentCard.visibility = View.GONE
+        }
+
+        // Badge the + button whenever there is hidden work sitting behind it.
+        toolsToggleButton.contentDescription = when {
+            isToolsTrayOpen -> "Hide attachment and audio tools"
+            hasAttachment -> "Show attachment and audio tools (attachment active)"
+            else -> "Show attachment and audio tools"
+        }
+        if (::recordAudioButton.isInitialized) {
+            recordAudioButton.isEnabled = whisperContext != 0L && !isWhisperTranscribing
+        }
+        if (::transcribeWavButton.isInitialized) {
+            transcribeWavButton.isEnabled = whisperContext != 0L && !isWhisperTranscribing
+        }
+        if (::suggestButton.isInitialized) {
+            suggestButton.alpha = if (suggestButton.isEnabled) 1f else .55f
+        }
+    }
+
+    /** Scrolls the chat canvas to the newest content unless the reader scrolled up. */
+    private fun scrollChatToBottom(force: Boolean = false) {
+        if (!::chatScroll.isInitialized) return
+        if (!force && isUserReadingUpwards) return
+        chatScroll.post {
+            if (!force && isUserReadingUpwards) return@post
+            chatScroll.fullScroll(View.FOCUS_DOWN)
+        }
     }
 
     private fun chooseModel() {
@@ -534,9 +789,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     ModelFileStore(filesDir).importModel(input)
                 } ?: error("Could not open the selected file.")
                 mainHandler.post {
-                    modelText.text = "MODEL READY  ·  ${formatBytes(target.length())}"
+                    refreshModelStatus()
                     updateStatus("Model ready. Type, dictate, or attach text/PDF (selectable text only).")
                     suggestButton.isEnabled = true
+                    syncComposerState()
                 }
             } catch (e: Exception) {
                 File(filesDir, "model.litertlm.part").delete()
@@ -570,6 +826,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     attachmentText.text = names.joinToString(" · ") + "\nAttached content limited to 12,000 characters."
                     showAttachmentPreview(attachedContext)
                     attachmentCard.visibility = View.VISIBLE
+                    syncComposerState()
                     updateStatus("Text attached. Review the preview, then add your question.")
                 }
             } catch (e: Exception) {
@@ -601,6 +858,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                         "\nAttached content limited to 12,000 characters. PDF text is extracted locally."
                     showAttachmentPreview(attachedContext)
                     attachmentCard.visibility = View.VISIBLE
+                    syncComposerState()
                     updateStatus(
                         if (extraction.limitReached) "PDF text attached with the 12,000-character limit applied. Review it, then ask your question."
                         else "PDF text attached. Review the document name and page count, then add a question."
@@ -710,6 +968,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                         "\nCombined attachment text limited to 12,000 characters. Temporary WAV cache file is deleted after processing."
                     showAttachmentPreview(attachedContext)
                     attachmentCard.visibility = View.VISIBLE
+                    syncComposerState()
                     isWhisperTranscribing = false
                     suggestButton.isEnabled = false
                     updateStatus("Transcript ready. Expand and review it, then tap Use reviewed transcript.")
@@ -842,6 +1101,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     "\nCombined attachment text limited to 12,000 characters. All recording memory is wiped after transcription."
                 showAttachmentPreview(attachedContext)
                 attachmentCard.visibility = View.VISIBLE
+                syncComposerState()
                 isWhisperTranscribing = false
                 suggestButton.isEnabled = false
                 updateStatus("Transcript ready. Expand and review it, then tap Use reviewed transcript.")
@@ -889,6 +1149,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         attachmentPreviewButton.text = "Show full attachment text"
         attachmentPreviewButton.contentDescription = "Expand attachment text preview"
         attachmentCard.visibility = View.GONE
+        syncComposerState()
         updateStatus("Attachment removed.")
     }
 
@@ -1033,6 +1294,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         answerIsComplete = false
         outputCard.visibility = View.VISIBLE
         stopGeneratingButton.visibility = View.VISIBLE
+        syncComposerState()
+        scrollChatToBottom(force = true)
         answerText.text = "Working on it…"
         val backendLabel = engineManager.activeBackend?.name ?: "accelerated"
         updateStatus("Answering on this device ($backendLabel)…")
@@ -1103,6 +1366,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 mainHandler.post {
                     stopGeneratingButton.visibility = View.GONE
                     suggestButton.isEnabled = true
+                    syncComposerState()
+                    scrollChatToBottom()
                     currentCitations = localCitations
                     renderCitations(localCitations)
                     if (isGeneratingCancelled.get()) {
@@ -1197,6 +1462,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         outputCard.visibility = View.GONE
         systemActionContainer.removeAllViews()
         systemActionContainer.visibility = View.GONE
+        lastPrompt = ""
+        syncComposerState()
+        scrollChatToBottom(force = true)
         updateStatus("Started a new conversation.")
     }
 
@@ -2072,7 +2340,15 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private fun refreshModelStatus() {
         val model = File(filesDir, "model.litertlm")
-        if (model.exists() && model.length() > 0) modelText.text = "MODEL READY  ·  ${formatBytes(model.length())}"
+        if (!::modelPill.isInitialized) return
+        if (model.exists() && model.length() > 0) {
+            modelPill.text = "MODEL READY · ${formatBytes(model.length())}"
+            modelPill.contentDescription =
+                "Active model ready, ${formatBytes(model.length())}. Tap to choose a different LiteRT-LM model"
+        } else {
+            modelPill.text = "Choose model"
+            modelPill.contentDescription = "No active model. Tap to choose a LiteRT-LM model"
+        }
     }
 
     private fun cleanupStagedInputFiles() {

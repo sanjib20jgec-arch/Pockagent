@@ -20,11 +20,11 @@ This is the persistent task ledger for the current product direction. It is grou
 
 ## Current baseline
 
-- Audit baseline: `b86f420`; M0 implementation commit: `ab12ad9`; M1 UI commit: `eb0668b`; latest pre-PDF roadmap commit: `d4ecea9` on `arena/85d065bd-pockagent`; base `main` is `f579f52`.
-- GitHub Actions run `45348835447` passed source-archive verification, `testDebugUnitTest`, `assembleDebug`, and APK artifact upload for the M1 roadmap update. The current PDF implementation changes are pending CI.
-- Nine unit tests now cover bounded text reading and model import success/failure/rollback. No Android UI/instrumented tests, lint, or device/emulator tests exist. Local build remains unavailable (no Java/Gradle executable or wrapper).
+- Audit baseline: `b86f420`; M0 implementation commit: `ab12ad9`; M1 UI commit: `eb0668b`; PDF implementation commit: `5ad1201` with CI compile-fix follow-up `d9e5c83` on `arena/85d065bd-pockagent`; base `main` is `f579f52`.
+- GitHub Actions run `45351718497` passed source-archive verification, `testDebugUnitTest`, `assembleDebug`, and APK artifact upload for `d9e5c83`.
+- Twelve unit tests cover bounded text reading, PDF staging size/cleanup, and model import success/failure/rollback. No Android UI/instrumented tests, lint, or device/emulator tests exist. Local build remains unavailable (no Java/Gradle executable or wrapper).
 - User-reported: app launches and loads the Gemma 3 1B INT4 model; generated output/UI need improvement.
-- Current app supports typed prompts, live system speech-to-text, bounded text/Markdown/CSV attachments, local CPU inference, and answer copy/share/TTS. The approved PDF-only slice is implemented locally but awaits CI/device verification. Image input, imported audio transcription, chat history and tool execution are not implemented.
+- Current app supports typed prompts, live system speech-to-text, bounded text/Markdown/CSV/PDF attachments, local CPU inference, and answer copy/share/TTS. The PDF slice passed CI; device/runtime validation remains open. Image input, imported audio transcription, chat history and tool execution are not implemented.
 - The stale source ZIP has been regenerated. The guard verifies current files and rejects active AccessibilityService/control code; local and CI archive checks passed.
 
 ## Task ledger
@@ -39,7 +39,7 @@ This is the persistent task ledger for the current product direction. It is grou
 | UX-001 | Accessibility, responsive layout, and accurate speech-privacy disclosure review | UI/UX + Security + QA | **IN PROGRESS** | AUD-001 | Native button semantics, explicit labels, 48dp minimum controls, live status regions, stronger muted-text contrast implemented; CI passes; device review remains unverified |
 | QA-DEVICE-001 | Verify permission, missing/corrupt model, speech, inference and UI flows on Android | QA | **BLOCKED** | M0 app build available; physical device/emulator needed | No device/emulator is available in workspace; user-device checks requested after APK install |
 | AI-002 | Model status/capability metadata and inference progress/cancel feasibility | AI Engine + QA | **PROPOSED** | AI-001; LiteRT-LM API review | Medium; no unsupported capability promises |
-| DOC-001 | Bounded PDF text extraction with user preview/source attribution | Document/Knowledge + Security | **IN PROGRESS (user-approved PDF-only slice)** | M0 device QA remains open; PDF input/staging and TEST-001 | Medium-high; PDF parser attack surface, decompression, page/context bounds |
+| DOC-001 | Bounded PDF text extraction with user preview/source attribution | Document/Knowledge + Security | **IN PROGRESS (CI verified; device/runtime validation pending)** | M0 device QA remains open; PDF input/staging and TEST-001 | Medium-high; parser attack surface, decompression, dependency and device testing |
 | VOICE-001 | Imported audio transcription | Voice + Security + QA | **PROPOSED (implementation not approved)** | Separate ASR/provider and privacy decision | High; offline/network, model size, language and hardware availability |
 | VOICE-FEAS-001 | Research offline imported-audio ASR options | Voice + Security + QA | **IN PROGRESS (research only, user-approved)** | No code/dependency integration | Medium; native binaries, model licensing/size and language coverage |
 | VIS-001 | Image input with a compatible multimodal model/runtime | AI Engine + UI/UX + QA + Security | **PROPOSED** | M0 gates, AI-002, model/API/hardware compatibility review | High; memory, preprocessing, model license/size |
@@ -98,7 +98,7 @@ M0 quality gate
 
 **Risks:** platform/provider differences; no device QA can be claimed without a device.
 
-### M2 — Documents and audio input (P2) — IN PROGRESS (narrow approved slice)
+### M2 — Documents and audio input (P2) — IN PROGRESS (PDF code and CI verified; device validation pending)
 
 **Objective:** accept user-selected material only through a bounded, inspectable representation the current text model can use. This work is user-approved for selectable-text PDFs only; imported-audio transcription is not approved for implementation.
 
@@ -144,4 +144,4 @@ For each approved task: inspect relevant code and dependencies; document a narro
 
 ## Current decision and next gate
 
-**M0's code and CI gates pass; physical-device verification remains blocked.** M1's accessibility implementation and CI pass, but device verification remains explicitly pending. The user has now approved a narrow M2 PDF-only implementation and research-only feasibility work for offline imported-audio transcription. PDF changes remain pending CI/device verification; audio implementation, OCR, image input, persistent memory, and tools remain unapproved.
+**M0's code and CI gates pass; physical-device verification remains blocked.** M1's accessibility implementation and CI pass, but device verification remains explicitly pending. The user has now approved a narrow M2 PDF-only implementation and research-only feasibility work for offline imported-audio transcription. PDF code and CI are verified; device/runtime checks remain pending. Audio implementation, OCR, image input, persistent memory, and tools remain unapproved.

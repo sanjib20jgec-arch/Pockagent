@@ -445,8 +445,9 @@ class MainViewModelTest {
 
         // Make whisper & llm ready
         fakeLlmRunner.available = true
+        val validGgml = "ggml".toByteArray(Charsets.US_ASCII) + ByteArray(1024)
         viewModel.importWhisperModel("whisper.bin") {
-            ByteArrayInputStream(ByteArray(1024))
+            ByteArrayInputStream(validGgml)
         }
 
         viewModel.startDuplexVoiceSession()

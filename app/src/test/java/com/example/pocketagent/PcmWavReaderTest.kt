@@ -64,7 +64,11 @@ class PcmWavReaderTest {
     @Test
     fun rejectsTruncatedChunks() {
         val file = temporaryFolder.newFile("truncated.wav").apply {
-            writeBytes(byteArrayOf('R'.code.toByte(), 'I'.code.toByte(), 'F'.code.toByte(), 'F'.code.toByte(), 20, 0, 0, 0))
+            writeBytes(byteArrayOf(
+                'R'.code.toByte(), 'I'.code.toByte(), 'F'.code.toByte(), 'F'.code.toByte(), 8, 0, 0, 0,
+                'W'.code.toByte(), 'A'.code.toByte(), 'V'.code.toByte(), 'E'.code.toByte(),
+                'f'.code.toByte(), 'm'.code.toByte(), 't'.code.toByte(), ' '.code.toByte(),
+            ))
         }
 
         assertThrows(IOException::class.java) { PcmWavReader.read(file) }

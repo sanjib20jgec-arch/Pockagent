@@ -11,7 +11,7 @@ internal object AnswerTextWriter {
     fun write(output: OutputStream, text: String) {
         require(text.isNotBlank()) { "There is no answer to save." }
         require(text.length <= MAX_CHARS) { "The answer is too large to save as a text result." }
-        output.write((text.trimEnd() + "\n").toByteArray(Charsets.UTF_8))
+        output.write((text.trim() + "\n").toByteArray(Charsets.UTF_8))
         output.flush()
     }
 }

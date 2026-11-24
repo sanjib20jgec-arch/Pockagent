@@ -257,7 +257,9 @@ class MainViewModel internal constructor(
     }
 
     /** Alias used when restoring a prompt from history or a regenerate request. */
-    fun updateTaskInput(text: String) = onTaskInputChanged(text)
+    fun updateTaskInput(text: String) {
+        onTaskInputChanged(text)
+    }
 
     fun onTtsReady(ready: Boolean) {
         updateState { it.withTtsReady(ready) }

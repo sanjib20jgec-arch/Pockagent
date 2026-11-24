@@ -49,6 +49,33 @@ data class ChatMessage(
     val isSystem: Boolean get() = role == Role.SYSTEM
 
     companion object {
+        fun user(
+            content: String,
+            attachmentContent: String? = null,
+            attachmentSummary: String? = null,
+            attachmentReferences: List<String> = emptyList(),
+        ): ChatMessage = ChatMessage(
+            role = Role.USER,
+            content = content,
+            attachmentContent = attachmentContent,
+            attachmentSummary = attachmentSummary,
+            attachmentReferences = attachmentReferences,
+        )
+
+        fun assistant(
+            content: String,
+        ): ChatMessage = ChatMessage(
+            role = Role.ASSISTANT,
+            content = content,
+        )
+
+        fun system(
+            content: String,
+        ): ChatMessage = ChatMessage(
+            role = Role.SYSTEM,
+            content = content,
+        )
+
         private val WHITESPACE_REGEX = "\\s+".toRegex()
 
         /**
@@ -70,25 +97,6 @@ data class ChatMessage(
             }
             return total.coerceAtLeast(1)
         }
-
-        fun user(
-            content: String,
-            attachmentSummary: String? = null,
-            attachmentReferences: List<String> = emptyList(),
-            attachmentContent: String? = null,
-        ): ChatMessage = ChatMessage(
-            role = Role.USER,
-            content = content,
-            attachmentSummary = attachmentSummary,
-            attachmentReferences = attachmentReferences,
-            attachmentContent = attachmentContent,
-        )
-
-        fun assistant(content: String): ChatMessage =
-            ChatMessage(role = Role.ASSISTANT, content = content)
-
-        fun system(content: String): ChatMessage =
-            ChatMessage(role = Role.SYSTEM, content = content)
 
         fun estimateTextTokens(text: String): Int {
             if (text.isBlank()) return 0

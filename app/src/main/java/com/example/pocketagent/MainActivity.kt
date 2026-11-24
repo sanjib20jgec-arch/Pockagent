@@ -119,7 +119,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
     private val biometricLockManager by lazy {
         BiometricLockManager(
-            preferences = getSharedPreferences("pocketagent_security", Context.MODE_PRIVATE),
+            preferences = getSharedPreferences("pocketagent_security", MODE_PRIVATE),
             authenticator = AndroidBiometricAuthenticator(this)
         )
     }
@@ -182,45 +182,45 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         brandRow.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))
 
-        val actionScroll = HorizontalScrollView(this).apply {
+        val headerToolsScroll = HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
         }
-        val actionRow = LinearLayout(this).apply {
+        val headerToolsRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        actionRow.addView(pillButton("🎙️ Voice", accessibilityLabel = "Start continuous hands-free voice duplex mode") {
+        headerToolsRow.addView(pillButton("🎙️ Voice", accessibilityLabel = "Start continuous hands-free voice duplex mode") {
             showDuplexVoiceDialog()
         }.apply {
             layoutParams = LinearLayout.LayoutParams(-2, dp(34)).apply { marginEnd = dp(6) }
         })
-        actionRow.addView(pillButton("🧠 Memory", accessibilityLabel = "Manage sovereign long-term memory") {
+        headerToolsRow.addView(pillButton("🧠 Memory", accessibilityLabel = "Manage sovereign long-term memory") {
             showMemoryCenterDialog()
         }.apply {
             layoutParams = LinearLayout.LayoutParams(-2, dp(34)).apply { marginEnd = dp(6) }
         })
-        actionRow.addView(pillButton("📝 Notes", accessibilityLabel = "Manage sovereign personal notes") {
+        headerToolsRow.addView(pillButton("📝 Notes", accessibilityLabel = "Manage sovereign personal notes") {
             showNotesManagerDialog()
         }.apply {
             layoutParams = LinearLayout.LayoutParams(-2, dp(34)).apply { marginEnd = dp(6) }
         })
-        actionRow.addView(pillButton("🛡️ Privacy", accessibilityLabel = "View privacy audit and storage controls") {
+        headerToolsRow.addView(pillButton("🛡️ Privacy", accessibilityLabel = "View privacy audit and storage controls") {
             showPrivacyCenterDialog()
         }.apply {
             layoutParams = LinearLayout.LayoutParams(-2, dp(34)).apply { marginEnd = dp(6) }
         })
-        actionRow.addView(pillButton("☰ Chats", accessibilityLabel = "View saved conversations") {
+        headerToolsRow.addView(pillButton("☰ Chats", accessibilityLabel = "View saved conversations") {
             showHistoryDialog()
         }.apply {
             layoutParams = LinearLayout.LayoutParams(-2, dp(34)).apply { marginEnd = dp(6) }
         })
-        actionRow.addView(pillButton("+ New", accessibilityLabel = "Start a fresh conversation") {
+        headerToolsRow.addView(pillButton("+ New", accessibilityLabel = "Start a fresh conversation") {
             startNewConversation()
         }.apply {
             layoutParams = LinearLayout.LayoutParams(-2, dp(34))
         })
-        actionScroll.addView(actionRow)
-        brandRow.addView(actionScroll, LinearLayout.LayoutParams(-2, -2))
+        headerToolsScroll.addView(headerToolsRow)
+        brandRow.addView(headerToolsScroll, LinearLayout.LayoutParams(-2, -2))
         page.addView(brandRow)
 
         val hero = column().apply {

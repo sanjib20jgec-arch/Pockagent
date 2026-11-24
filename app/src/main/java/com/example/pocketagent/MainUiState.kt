@@ -108,9 +108,6 @@ data class MainUiState(
                 !isWhisperTranscribing &&
                 !isGenerating
 
-    val isGenerating: Boolean
-        get() = generationStatus == GenerationStatus.THINKING || generationStatus == GenerationStatus.STREAMING
-
     val canSaveAnswer: Boolean
         get() = answerIsComplete &&
                 generatedAnswer.isNotBlank() &&

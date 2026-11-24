@@ -24,7 +24,7 @@ class AnswerPromptComposerTest {
             intent = AnswerDirective.Intent.FACT,
             isRetry = false,
             history = emptyList(),
-        )
+        ).prompt
 
         assertTrue(prompt.contains("Answer this request directly and completely:"))
         assertTrue(prompt.contains(question))
@@ -42,7 +42,7 @@ class AnswerPromptComposerTest {
             intent = AnswerDirective.Intent.PROCEDURE,
             isRetry = false,
             history = emptyList(),
-        )
+        ).prompt
 
         assertTrue(prompt.contains("3-6 complete numbered steps"))
         assertTrue(prompt.contains("produce it inside the step"))
@@ -56,7 +56,7 @@ class AnswerPromptComposerTest {
             intent = AnswerDirective.Intent.LIVE_DATA,
             isRetry = false,
             history = emptyList(),
-        )
+        ).prompt
 
         assertTrue(prompt.contains("cannot fetch live data"))
         assertTrue(prompt.contains("approximate"))
@@ -70,7 +70,7 @@ class AnswerPromptComposerTest {
             intent = AnswerDirective.Intent.FACT,
             isRetry = false,
             history = emptyList(),
-        )
+        ).prompt
 
         assertTrue(prompt.contains(ContextBudgetManager.ATTACHMENT_START_TAG))
         assertTrue(prompt.contains(ContextBudgetManager.ATTACHMENT_END_TAG))
@@ -91,7 +91,7 @@ class AnswerPromptComposerTest {
             intent = AnswerDirective.Intent.FACT,
             isRetry = false,
             history = history,
-        )
+        ).prompt
 
         assertTrue(prompt.contains("About 1,470 km by road."))
         assertTrue(prompt.contains("And by train?"))
@@ -135,7 +135,7 @@ class AnswerPromptComposerTest {
             intent = AnswerDirective.Intent.FACT,
             isRetry = true,
             history = emptyList(),
-        )
+        ).prompt
 
         assertTrue(prompt.contains("Answer the request directly now"))
         assertTrue(prompt.contains("put the actual result in the first sentence"))

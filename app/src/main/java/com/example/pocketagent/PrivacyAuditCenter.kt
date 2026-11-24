@@ -125,14 +125,14 @@ object PrivacyAuditCenter {
                 "whisper-model.bin.backup",
             )
             artifactNames.forEach { name ->
-                val file = File(filesDir, name)
-                if (file.exists() && !file.delete()) success = false
+                val f = File(filesDir, name)
+                if (f.exists() && !f.delete()) success = false
             }
 
             if (purgeModels) {
                 listOf("model.litertlm", "whisper-model.bin").forEach { name ->
-                    val file = File(filesDir, name)
-                    if (file.exists() && !file.delete()) success = false
+                    val f = File(filesDir, name)
+                    if (f.exists() && !f.delete()) success = false
                 }
             }
         } catch (_: Exception) {

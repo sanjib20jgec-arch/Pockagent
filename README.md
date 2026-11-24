@@ -1,6 +1,8 @@
 # PocketAgent
 
-PocketAgent is an on-device task-instruction assistant. Select a compatible `.litertlm` model, describe a task, and the model suggests steps for you to review and perform manually.
+PocketAgent is an on-device task-instruction assistant. Select a compatible `.litertlm` model, describe a task, dictate it, or attach plain-text reference files, and the model suggests steps for you to review and perform manually.
+
+The current Gemma 3 1B INT4 setup is text-first: it does not understand image attachments or transcribe imported audio files. Live dictation uses the speech-recognition provider configured on the device. See [DEVELOPMENT_ROADMAP.md](DEVELOPMENT_ROADMAP.md) for planned modality work and current scope.
 
 **This redesigned version does not read other apps' screens, launch apps, tap, type, scroll, or change settings.** It has no Accessibility Service. It requests microphone access only if you choose to dictate a task; speech recognition behavior depends on the provider installed on your device. The app requests offline recognition when supported, but that preference is controlled by the speech provider.
 

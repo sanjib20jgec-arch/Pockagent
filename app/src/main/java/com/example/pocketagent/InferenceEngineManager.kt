@@ -9,6 +9,19 @@ import java.io.File
  * Parameterized by [T] (defaulting to [AutoCloseable]) so unit tests on standard JVMs can verify
  * fallback policies without loading native LiteRT-LM classes that require Java 21 bytecode.
  */
+/**
+ * A cached conversation handle.
+ *
+ * Deliberately narrow so the cache can be tested on a plain JVM: constructing a real LiteRT-LM
+ * `Conversation` requires native code, and `Handler`-style subclasses are not the point of the
+ * test. Production wraps the real conversation in an anonymous implementation below.
+ */
+interface ConversationHandle : AutoCloseable {
+    fun sendMessage(prompt: String, callback: com.google.ai.edge.litertlm.MessageCallback, maxOutputTokens: Int)
+
+    override fun close()
+}
+
 class InferenceEngineManager<T : AutoCloseable>(
     var preference: BackendPreference = BackendPreference.GPU_PREFERRED,
     private val engineFactory: (isGpu: Boolean, modelFile: File, cacheDir: File) -> T = { isGpu, model, cache ->
@@ -27,15 +40,27 @@ class InferenceEngineManager<T : AutoCloseable>(
      * real LiteRT-LM [com.google.ai.edge.litertlm.Engine], and that cast lives here rather than
      * leaking into every caller.
      */
-    private val conversationFactory: (T, String) -> com.google.ai.edge.litertlm.Conversation = { active, instruction ->
-        @Suppress("UNCHECKED_CAST")
+    private val conversationFactory: (T, String) -> ConversationHandle = { active, instruction ->
         val litertEngine = active as? com.google.ai.edge.litertlm.Engine
             ?: error("Conversation caching requires a real LiteRT-LM Engine.")
-        litertEngine.createConversation(
+        val conversation = litertEngine.createConversation(
             com.google.ai.edge.litertlm.ConversationConfig(
                 systemInstruction = com.google.ai.edge.litertlm.Contents.of(instruction)
             )
         )
+        object : ConversationHandle {
+            override fun sendMessage(
+                prompt: String,
+                callback: com.google.ai.edge.litertlm.MessageCallback,
+                maxOutputTokens: Int,
+            ) {
+                conversation.sendMessageAsync(prompt, callback, maxOutputToken = maxOutputTokens)
+            }
+
+            override fun close() {
+                conversation.close()
+            }
+        }
     },
 ) : AutoCloseable {
 
@@ -103,7 +128,7 @@ class InferenceEngineManager<T : AutoCloseable>(
      * INT4 model on a phone that is the difference between a couple of seconds and tens of
      * seconds per turn.
      */
-    private var cachedConversation: com.google.ai.edge.litertlm.Conversation? = null
+    private var cachedConversation: ConversationHandle? = null
 
     /** Identity of the conversation currently cached; any change invalidates it. */
     private var cachedKey: String? = null
@@ -133,7 +158,7 @@ class InferenceEngineManager<T : AutoCloseable>(
     fun getOrCreateConversation(
         key: String,
         systemInstruction: String,
-    ): com.google.ai.edge.litertlm.Conversation {
+    ): ConversationHandle {
         val activeEngine = engine ?: error("Engine must be initialized before opening a conversation.")
         val existing = cachedConversation
         if (existing != null && cachedKey == key) {

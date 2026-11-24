@@ -1,7 +1,5 @@
 package com.example.pocketagent
 
-import android.os.Handler
-import android.os.Looper
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
@@ -16,18 +14,23 @@ import org.junit.Test
 
 class StreamingRenderControllerTest {
 
-    /** Runs posted work synchronously so the test can observe each throttled paint. */
-    private class InlineHandler : Handler() {
+    /**
+     * Runs posted work inline so each throttled paint is observable.
+     *
+     * Note this implements [UiDispatcher] rather than subclassing `Handler`: `Handler.post` and
+     * `postDelayed` are final on the platform class and cannot be overridden.
+     */
+    private class InlineDispatcher : UiDispatcher {
         val paints = AtomicInteger(0)
-        override fun post(r: Runnable): Boolean { paints.incrementAndGet(); r.run(); return true }
-        override fun postDelayed(r: Runnable, ms: Long): Boolean { r.run(); return true }
+        override fun post(block: () -> Unit) { paints.incrementAndGet(); block() }
+        override fun postDelayed(delayMillis: Long, block: () -> Unit) { block() }
     }
 
     @Test
     fun streamsPlainTextAndNeverFormatsWhileStreaming() {
         val paints = mutableListOf<String>()
         val controller = StreamingRenderController(
-            mainHandler = InlineHandler(),
+            mainHandler = InlineDispatcher(),
             formatExecutor = Executor { it.run() },
         )
         controller.onPartialText = { paints.add(it) }
@@ -48,7 +51,7 @@ class StreamingRenderControllerTest {
         val formatRuns = AtomicInteger(0)
 
         val controller = StreamingRenderController(
-            mainHandler = InlineHandler(),
+            mainHandler = InlineDispatcher(),
             formatExecutor = Executor { r -> formatRuns.incrementAndGet(); r.run() },
         )
         controller.reset()
@@ -73,7 +76,7 @@ class StreamingRenderControllerTest {
         val delivered = AtomicReference<CharSequence>()
 
         val controller = StreamingRenderController(
-            mainHandler = InlineHandler(),
+            mainHandler = InlineDispatcher(),
             formatExecutor = Executor { r -> formatRuns.incrementAndGet(); r.run() },
         )
         controller.reset()
@@ -90,7 +93,7 @@ class StreamingRenderControllerTest {
         val gate = CountDownLatch(1)
 
         val controller = StreamingRenderController(
-            mainHandler = InlineHandler(),
+            mainHandler = InlineDispatcher(),
             formatExecutor = Executor { r -> executor.execute { gate.await(); r.run() } },
         )
         controller.reset()
@@ -109,7 +112,7 @@ class StreamingRenderControllerTest {
     fun resetDropsEarlierGenerationPaints() {
         val paints = AtomicInteger(0)
         val controller = StreamingRenderController(
-            mainHandler = InlineHandler(),
+            mainHandler = InlineDispatcher(),
             formatExecutor = Executor { it.run() },
         )
         controller.onPartialText = { paints.incrementAndGet() }
@@ -127,7 +130,7 @@ class StreamingRenderControllerTest {
     fun unformattableTextStillReachesTheUser() {
         val delivered = AtomicReference<CharSequence>()
         val controller = StreamingRenderController(
-            mainHandler = InlineHandler(),
+            mainHandler = InlineDispatcher(),
             formatExecutor = Executor { it.run() },
         )
         controller.reset()

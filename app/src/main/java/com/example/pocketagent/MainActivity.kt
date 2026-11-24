@@ -1302,7 +1302,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         activeStreamLatch = streamFinished
         engineManager.beginGeneration()
         try {
-            conversation.sendMessageAsync(
+            conversation.sendMessage(
                 prompt,
                 object : MessageCallback {
                     override fun onMessage(message: Message) {
@@ -1322,7 +1322,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     }
                 },
                 // Attachments need more room to summarise; plain questions stay lean.
-                maxOutputToken = if (attachedContext.isNotBlank()) {
+                maxOutputTokens = if (attachedContext.isNotBlank()) {
                     MainUiState.MAX_RESPONSE_TOKENS_WITH_CONTEXT
                 } else {
                     MAX_RESPONSE_TOKENS

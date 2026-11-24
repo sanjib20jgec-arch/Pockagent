@@ -1,7 +1,5 @@
 package com.example.pocketagent
 
-import com.google.ai.edge.litertlm.Conversation
-import com.google.ai.edge.litertlm.Engine
 import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
@@ -21,18 +19,41 @@ class ConversationCacheTest {
         deleteOnExit()
     }
 
-    private fun manager(created: MutableList<Any?>) = InferenceEngineManager<Engine>(
+    /** Stand-in for a live engine; the cache policy never inspects it. */
+    private class FakeEngine : AutoCloseable {
+        override fun close() {}
+    }
+
+    /** Stand-in for a live conversation; records creation and close. */
+    private class FakeConversation(private val created: MutableList<Any?>) : ConversationHandle {
+        var closed = false
+
+        override fun sendMessage(
+            prompt: String,
+            callback: com.google.ai.edge.litertlm.MessageCallback,
+            maxOutputTokens: Int,
+        ) = Unit
+
+        override fun close() {
+            closed = true
+        }
+
+        init {
+            created += this
+        }
+    }
+
+    /**
+     * Manager wired entirely with fakes.
+     *
+     * Real `Engine`/`Conversation` construction needs native LiteRT-LM code plus a specific
+     * `EngineConfig` shape, so the cache policy is proved against [ConversationHandle] instead.
+     * This is exactly why the manager is generic.
+     */
+    private fun manager(created: MutableList<Any?>) = InferenceEngineManager<FakeEngine>(
         preference = BackendPreference.CPU_ONLY,
-        engineFactory = { _, _, _ ->
-            Engine(
-                com.google.ai.edge.litertlm.EngineConfig(
-                    modelPath = model.absolutePath,
-                    backend = com.google.ai.edge.litertlm.Backend.CPU(),
-                    cacheDir = cache.absolutePath,
-                )
-            )
-        },
-        conversationFactory = { _, _ -> Conversation().also { created += it } },
+        engineFactory = { _, _, _ -> FakeEngine() },
+        conversationFactory = { _, _ -> FakeConversation(created) },
     )
 
     @Test

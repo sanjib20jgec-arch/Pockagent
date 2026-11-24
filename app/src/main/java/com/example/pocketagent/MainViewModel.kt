@@ -97,7 +97,7 @@ class DefaultLlmInferenceRunner(
 
         manager.beginGeneration()
         try {
-            conversation.sendMessageAsync(
+            conversation.sendMessage(
                 prompt,
                 object : MessageCallback {
                     override fun onMessage(message: Message) {
@@ -115,7 +115,7 @@ class DefaultLlmInferenceRunner(
                         streamFinished.countDown()
                     }
                 },
-                maxOutputToken = maxTokens,
+                maxOutputTokens = maxTokens,
             )
 
             // Bounded: never block a worker thread forever on a stalled engine.

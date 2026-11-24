@@ -25,9 +25,34 @@ import java.util.concurrent.atomic.AtomicReference
  *
  * All public methods are safe to call from any thread.
  */
+/**
+ * Minimal "run this on the UI thread" seam.
+ *
+ * `Handler.post`/`postDelayed` are **final** on the platform class, so a test double cannot
+ * subclass `Handler`. Depending on this tiny interface instead keeps the controller testable with
+ * a synchronous dispatcher while production still uses the real main looper.
+ */
+interface UiDispatcher {
+    fun post(block: () -> Unit)
+    fun postDelayed(delayMillis: Long, block: () -> Unit)
+}
+
+/** Posts to the real main looper. */
+class MainThreadDispatcher(
+    private val handler: Handler = Handler(Looper.getMainLooper()),
+) : UiDispatcher {
+    override fun post(block: () -> Unit) {
+        handler.post(block)
+    }
+
+    override fun postDelayed(delayMillis: Long, block: () -> Unit) {
+        handler.postDelayed(block, delayMillis)
+    }
+}
+
 class StreamingRenderController(
     /** Target thread for UI updates. Defaults to the main looper. */
-    private val mainHandler: Handler = Handler(Looper.getMainLooper()),
+    private val mainHandler: UiDispatcher = MainThreadDispatcher(),
     /** Minimum gap between two UI paints while streaming. */
     private val minIntervalMillis: Long = DEFAULT_MIN_INTERVAL_MILLIS,
     /** Where final Markdown formatting runs. Must not be the UI thread. */
@@ -151,7 +176,7 @@ class StreamingRenderController(
         val now = System.currentTimeMillis()
         val wait = (lastPaintAt.get() + minIntervalMillis - now).coerceAtLeast(0L)
 
-        mainHandler.postDelayed({
+        mainHandler.postDelayed(wait) {
             hasPendingPaint.set(false)
             if (ticket != generation.get()) return@postDelayed
             lastPaintAt.set(System.currentTimeMillis())
@@ -159,7 +184,7 @@ class StreamingRenderController(
             if (text.isEmpty()) return@postDelayed
             onPartialText?.invoke(text)
             onAutoScroll?.invoke()
-        }, wait)
+        }
     }
 
     private fun postIfCurrent(ticket: Long, block: () -> Unit) {

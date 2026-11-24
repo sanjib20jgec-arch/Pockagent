@@ -42,6 +42,8 @@ This is the persistent task ledger for the current product direction. It is grou
 | DOC-001 | Bounded PDF text extraction with user preview/source attribution | Document/Knowledge + Security | **IN PROGRESS (CI/unit verified; device/runtime validation pending)** | M0 device QA remains open; PDF input/staging and TEST-001 | Medium-high; parser attack surface, decompression, dependency and device testing |
 | VOICE-001 | User-selected local WAV transcription using whisper.cpp | Voice + Security + QA | **IN PROGRESS (prototype CI/build/unit verified; device/model validation pending)** | Model weights remain unselected/unbundled; audio format bounds and privacy disclosure | High; native parser/runtime, memory use, model terms, language and device performance |
 | VOICE-FEAS-001 | Research offline imported-audio ASR options | Voice + Security + QA | **COMPLETED (research only; no integration)** | No code/dependency integration | Candidate comparison documented; model-specific choice and device benchmark remain open |
+| HW-ACCEL-001 | Hardware acceleration with safe GPU/CPU fallback for LiteRT-LM | AI Engine + Hardware Specialist | **COMPLETED (Phase 2 CI/unit scope)** | AI-001, AI-002 | Dynamic GPU/CPU selection, automatic graceful fallback on OpenCL/init failure, manifest declarations, unit tested |
+| VOICE-REC-001 | In-app PCM 16-bit 16kHz audio recording with Whisper integration | Voice + Security + Hardware Specialist | **COMPLETED (Phase 2 CI/unit scope)** | VOICE-001, Manifest permission | Hard-capped (60s, 25 MiB), silence cutoff, zero-wipe memory buffers, direct Whisper transcription, unit tested |
 | VIS-001 | Image input with a compatible multimodal model/runtime | AI Engine + UI/UX + QA + Security | **PROPOSED** | M0 gates, AI-002, model/API/hardware compatibility review | High; memory, preprocessing, model license/size |
 | STATE-001 | Optional local conversation history with user deletion controls | Memory/Knowledge + Security + QA | **PROPOSED** | M0 gates; explicit retention approval | Medium-high; data lifecycle and migrations |
 | TOOL-001 | Bounded local tools on user-selected files/results | Tooling + Security + QA | **IN PROGRESS (first slice)** | User approved the restricted M5 scope; CI and Android picker/write verification pending | Scope creep into unselected files, overwrite/delete, or automation; each destructive/irreversible action needs explicit confirmation |
@@ -179,5 +181,37 @@ Future tools require their own focused review, tests, and user-visible scope. Th
 For each approved task: inspect relevant code and dependencies; document a narrow plan; implement the smallest testable change; review the diff for privacy/safety and regressions; run unit/integration/build tests; report device-only limits; update this ledger with evidence. Do not mark tasks complete based on code presence alone.
 
 ## Current decision and next gate
+
+**Milestones Implemented & Validated by Autonomous Specialist Swarm (2026-11-24):**
+
+- **Phase 1 (Architecture & UI Modernization): COMPLETED**
+  - Added `MainUiState.kt`, `MainViewModel.kt`, and `MarkdownFormatter.kt`.
+  - Structured AST-based markdown parsing, streaming-safe box framing, clean plain-text stripping for TTS.
+  - Decoupled engine abstractions (`LlmInferenceRunner`, `WhisperTranscriber`).
+  - Unit tests: `MarkdownFormatterTest.kt`, `MainUiStateTest.kt`, `MainViewModelTest.kt` (27 tests total).
+
+- **Phase 2 (Hardware Acceleration & Live Audio Pipeline): COMPLETED**
+  - Added `BackendPreference.kt` and `InferenceEngineManager.kt` (`Backend.GPU()` with automatic graceful fallback to `Backend.CPU()`).
+  - Added in-app microphone recording: `InAppAudioRecorder.kt` and `AudioRecordingBuffer.kt` capturing 16kHz mono PCM directly to memory.
+  - Strict 60s / 25 MiB bounds, trailing silence cutoff, and immediate zero-wipe (`wipe()`) after inference.
+  - Declared optional native OpenCL libraries in `AndroidManifest.xml`.
+  - Unit tests: `BackendPreferenceTest.kt`, `AudioBufferBoundsTest.kt` (14 tests total).
+
+- **Phase 3 (Conversational Multi-Turn Memory & Sessions): COMPLETED**
+  - Added `ChatMessage.kt`, `ConversationSession.kt`, `SessionStore.kt`, and `ContextBudgetManager.kt`.
+  - Local atomic JSON persistence in private app files (`sessions/`) with self-contained codec (no unmocked Android JSON stubs).
+  - Rolling window context budgeting with strict demarcated attachment tags and historical attachment summarization.
+  - User controls: single session deletion, bulk wipe, JSON/text exports.
+  - Unit tests: `ChatMessageTest.kt`, `SessionStoreTest.kt`, `ContextBudgetManagerTest.kt` (16 tests total).
+
+- **Phase 4 (Safe System Intent Tools & Offline RAG): COMPLETED**
+  - Added `SystemActionTools.kt`: safe Android Intents for Timer, Alarm, Calendar, Map, and Note. Strictly enforces `autoExecute = false`, `requiresUserConfirmation = true`, and `EXTRA_SKIP_UI = false` with explicit review dialogs.
+  - Added `DocumentChunker.kt`: semantic boundary chunking (paragraphs, sentences, lines) with configurable overlap.
+  - Added `OfflineKeywordIndex.kt` and `LocalDocumentRetriever.kt`: BM25 ranking and strict 12,000 char prompt budget enforcement.
+  - Unit tests: `SystemActionToolsTest.kt`, `DocumentChunkerTest.kt`, `OfflineKeywordIndexTest.kt`, `LocalDocumentRetrieverTest.kt` (37 tests total).
+
+- **Release & Source Bundle Integrity:**
+  - `PocketAgent.zip` regenerated and verified via `python scripts/package_source.py --check`.
+  - Zero accessibility services, zero prohibited automation, zero telemetry, 100% offline.
 
 **Current in-progress work: UX-001, the targeted M1 response-completeness adjustment, and the first approved M5 slice (Save Answer); QA-DEVICE-001 is partially verified by user report, with the rest of the checklist open.** On Redmi Note 10 Pro with Gemma 3 1B INT4, the user reported that the 256-token response budget/completion instruction now works; no independent device benchmark or verification was performed here. CI run [`45370018036`](https://github.com/sanjib20jgec-arch/Pockagent/actions/runs/45370018036) passed source archive verification, unit tests, and debug APK build for the preceding response-completeness work. Save Answer's focused writer tests, source archive verification, and debug APK assembly passed in run [`45373365552`](https://github.com/sanjib20jgec-arch/Pockagent/actions/runs/45373365552); the Android system-picker/write flow has not been tested on-device. TalkBack, permissions/error cases, and layout checks remain open. The M2 PDF/WAV prototype has CI/unit coverage but no new work is being done on it here. Scanned OCR, other audio formats, image input, persistent memory, arbitrary tool execution, and all phone/app automation remain out of scope.

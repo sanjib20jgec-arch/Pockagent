@@ -9,6 +9,9 @@
         android:label="PocketAgent"
         android:largeHeap="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        <!-- Hardware acceleration native libraries for LiteRT-LM GPU OpenCL backend -->
+        <uses-native-library android:name="libvndksupport.so" android:required="false" />
+        <uses-native-library android:name="libOpenCL.so" android:required="false" />
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

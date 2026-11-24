@@ -27,5 +27,7 @@ kotlin {
 dependencies {
     implementation("com.google.ai.edge.litertlm:litertlm-android:0.19.1")
     implementation("com.dineshdev:pdfbox-android:2.0.27.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
 }

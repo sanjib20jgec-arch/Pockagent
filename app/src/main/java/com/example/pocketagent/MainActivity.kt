@@ -2,6 +2,7 @@ package com.example.pocketagent
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -29,11 +30,9 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
-import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.Contents
 import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
-import com.google.ai.edge.litertlm.EngineConfig
 import com.google.ai.edge.litertlm.Message
 import com.google.ai.edge.litertlm.MessageCallback
 import java.io.File
@@ -52,6 +51,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         private const val PICK_WHISPER_MODEL = 5
         private const val PICK_WAV = 6
         private const val CREATE_ANSWER_FILE = 7
+        private const val REQUEST_RECORD_MIC = 8
         private const val STATE_PENDING_ANSWER_SAVE = "pending_answer_to_save"
         private const val MAX_ATTACHMENT_CHARS = 12_000
         private const val MAX_RESPONSE_TOKENS = 256
@@ -67,7 +67,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private val worker = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
-    @Volatile private var engine: Engine? = null
+    private val engineManager = InferenceEngineManager()
+    private val inAppAudioRecorder = InAppAudioRecorder()
     @Volatile private var whisperContext: Long = 0L
     private lateinit var taskInput: EditText
     private lateinit var statusText: TextView
@@ -77,11 +78,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var attachmentPreview: TextView
     private lateinit var attachmentPreviewButton: Button
     private lateinit var whisperModelText: TextView
+    private lateinit var recordAudioButton: Button
     private lateinit var transcribeWavButton: Button
     private lateinit var confirmTranscriptButton: Button
     private lateinit var suggestButton: Button
     private lateinit var attachmentCard: LinearLayout
     private lateinit var outputCard: LinearLayout
+    private lateinit var systemActionContainer: LinearLayout
     private var recognizer: SpeechRecognizer? = null
     private var tts: TextToSpeech? = null
     private var ttsReady = false
@@ -101,6 +104,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         window.navigationBarColor = BG
         window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
         tts = TextToSpeech(this, this)
+        engineManager.onFallback = { reason ->
+            mainHandler.post { updateStatus(reason) }
+        }
         cleanupStagedInputFiles()
         buildInterface()
         refreshModelStatus()
@@ -209,14 +215,22 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         promptCard.addView(textButton("Remove Whisper model", accessibilityLabel = "Remove the locally stored Whisper model") {
             removeWhisperModel()
         })
+        val audioActionsRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        recordAudioButton = pillButton("🎙  Record audio", accessibilityLabel = "Record audio for local Whisper transcription") {
+            toggleInAppRecording()
+        }.apply { isEnabled = false }
+        audioActionsRow.addView(recordAudioButton, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(4) })
+
         transcribeWavButton = pillButton("Transcribe WAV", accessibilityLabel = "Choose a WAV file for local transcription") {
             chooseWav()
-        }.apply {
-            layoutParams = LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(3) }
-            isEnabled = false
-        }
-        promptCard.addView(transcribeWavButton)
-        promptCard.addView(text("WAV transcription runs locally with a model you choose; no weights are bundled. Supports PCM16 mono/stereo, 8–48 kHz, up to 25 MB and 60 seconds. Scanned PDFs are not OCR'd; dictation still depends on your device's speech service.", 11f, MUTED).apply {
+        }.apply { isEnabled = false }
+        audioActionsRow.addView(transcribeWavButton, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(4) })
+        promptCard.addView(audioActionsRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(3) })
+
+        promptCard.addView(text("WAV and in-app recording run locally with a Whisper model you choose; no weights are bundled. In-app audio is PCM16 16kHz mono (max 60s, 25 MB) with automatic memory wipe. Scanned PDFs are not OCR'd; dictation still depends on your device's speech service.", 11f, MUTED).apply {
             setPadding(dp(2), dp(8), dp(2), dp(2))
         })
         attachmentCard = column().apply { visibility = View.GONE; setPadding(0, dp(9), 0, 0) }
@@ -289,6 +303,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             outputCard.visibility = View.GONE
             answerText.text = ""
             answerIsComplete = false
+            systemActionContainer.removeAllViews()
+            systemActionContainer.visibility = View.GONE
         })
         outputCard.addView(outputHeader)
         answerText = text("", 15f, INK).apply {
@@ -305,6 +321,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         outputCard.addView(pillButton("Save as text file", accessibilityLabel = "Save the completed answer to a text file you choose") {
             saveAnswerToFile()
         }.apply { layoutParams = LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(7) } })
+        systemActionContainer = column().apply {
+            visibility = View.GONE
+            setPadding(0, dp(6), 0, 0)
+        }
+        outputCard.addView(systemActionContainer)
         page.addView(outputCard)
 
         page.addView(text("Your selected model and prompts stay in this app. Attached text is included only in the local prompt.", 11f, MUTED).apply {
@@ -404,8 +425,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         suggestButton.isEnabled = false
         worker.execute {
             try {
-                engine?.close()
-                engine = null
+                engineManager.close()
                 val target = contentResolver.openInputStream(uri)?.use { input ->
                     ModelFileStore(filesDir).importModel(input)
                 } ?: error("Could not open the selected file.")
@@ -497,7 +517,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             return
         }
         val displayName = rawName.replace(Regex("[\\r\\n]+"), " ").take(80)
-        transcribeWavButton.isEnabled = false
+        updateWhisperActionButtons(false)
         whisperModelText.text = "Staging and loading the selected local Whisper model…"
         updateStatus("Loading a user-selected ggml model locally. Large models may take time and memory.")
         worker.execute {
@@ -522,8 +542,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 candidateContext = 0L
                 mainHandler.post {
                     whisperModelText.text = "Whisper model ready: ${displayName.take(80)} (stored locally)."
-                    updateStatus("Whisper model loaded. Choose a bounded PCM WAV file to transcribe locally.")
-                    transcribeWavButton.isEnabled = true
+                    updateStatus("Whisper model loaded. Record audio directly or choose a PCM WAV file to transcribe.")
+                    updateWhisperActionButtons(true)
                 }
             } catch (e: Exception) {
                 if (candidateContext != 0L) WhisperNative.release(candidateContext)
@@ -540,7 +560,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     whisperModelText.text = if (whisperContext != 0L) "Previous local Whisper model restored."
                     else "No local Whisper model loaded. Choose a valid ggml .bin file (max 512 MB)."
                     updateStatus("Could not load Whisper model: ${e.message ?: "unsupported model file"}")
-                    transcribeWavButton.isEnabled = whisperContext != 0L
+                    updateWhisperActionButtons(whisperContext != 0L)
                 }
             }
         }
@@ -551,7 +571,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             updateStatus("Choose a local whisper.cpp ggml .bin model first.")
             return
         }
-        transcribeWavButton.isEnabled = false
+        updateWhisperActionButtons(false)
         suggestButton.isEnabled = false
         isWhisperTranscribing = true
         val generationAtStart = attachmentGeneration
@@ -589,14 +609,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     isWhisperTranscribing = false
                     suggestButton.isEnabled = false
                     updateStatus("Transcript ready. Expand and review it, then tap Use reviewed transcript before suggestions.")
-                    transcribeWavButton.isEnabled = true
+                    updateWhisperActionButtons(true)
                 }
             } catch (e: Exception) {
                 mainHandler.post {
                     isWhisperTranscribing = false
                     suggestButton.isEnabled = !transcriptReviewPending
                     updateStatus("Could not transcribe WAV: ${e.message ?: "unsupported or unreadable audio"}")
-                    transcribeWavButton.isEnabled = whisperContext != 0L
+                    updateWhisperActionButtons(whisperContext != 0L)
                 }
             } finally {
                 staged?.delete()
@@ -605,7 +625,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun removeWhisperModel() {
-        transcribeWavButton.isEnabled = false
+        updateWhisperActionButtons(false)
         updateStatus("Removing the local Whisper model…")
         worker.execute {
             try {
@@ -625,6 +645,127 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 mainHandler.post { updateStatus("Could not remove Whisper model: ${e.message ?: "storage error"}") }
             }
         }
+    }
+
+    private fun toggleInAppRecording() {
+        if (whisperContext == 0L) {
+            updateStatus("Choose a local whisper.cpp ggml .bin model first.")
+            return
+        }
+        if (inAppAudioRecorder.isRecordingActive) {
+            recordAudioButton.text = "Transcribing…"
+            recordAudioButton.isEnabled = false
+            inAppAudioRecorder.stopRecording()
+            return
+        }
+        if (!InAppAudioRecorder.hasMicrophonePermission(this)) {
+            requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_RECORD_MIC)
+            updateStatus("Allow microphone access, then tap Record audio again.")
+            return
+        }
+        startInAppRecording()
+    }
+
+    private fun startInAppRecording() {
+        val generationAtStart = attachmentGeneration
+        suggestButton.isEnabled = false
+        transcribeWavButton.isEnabled = false
+        recordAudioButton.text = "■  Stop recording"
+        recordAudioButton.contentDescription = "Stop in-app audio recording"
+        updateStatus("Recording audio… speak your task (max 60 seconds). Tap Stop when done.")
+
+        inAppAudioRecorder.startRecording(object : AudioRecorderListener {
+            override fun onRecordingStarted() {
+                mainHandler.post {
+                    updateStatus("Listening… audio is kept in memory (PCM 16-bit 16kHz mono).")
+                }
+            }
+
+            override fun onSilenceCutoff() {
+                mainHandler.post {
+                    updateStatus("Silence detected. Finishing recording…")
+                }
+            }
+
+            override fun onMaxDurationReached() {
+                mainHandler.post {
+                    updateStatus("60-second limit reached. Finishing recording…")
+                }
+            }
+
+            override fun onRecordingComplete(samples: FloatArray) {
+                mainHandler.post {
+                    recordAudioButton.text = "Transcribing…"
+                    recordAudioButton.isEnabled = false
+                }
+                worker.execute {
+                    transcribeRecordedAudio(samples, generationAtStart)
+                }
+            }
+
+            override fun onError(error: Throwable) {
+                mainHandler.post {
+                    resetRecordButton()
+                    suggestButton.isEnabled = !transcriptReviewPending
+                    updateWhisperActionButtons(whisperContext != 0L)
+                    updateStatus("Recording error: ${error.message ?: "could not record audio"}")
+                }
+            }
+        })
+    }
+
+    private fun transcribeRecordedAudio(samples: FloatArray, generationAtStart: Long) {
+        isWhisperTranscribing = true
+        try {
+            val availableChars = MAX_ATTACHMENT_CHARS - attachedContext.length
+            require(availableChars > 160) { "Remove the current attachment to make room for a transcript." }
+            val sourceLabel = "\n\n--- Local microphone transcript ---\n"
+            require(availableChars > sourceLabel.length) {
+                "Remove the current attachment to make room for a transcript."
+            }
+            val context = whisperContext
+            require(context != 0L) { "Select a Whisper model before transcribing audio." }
+            val textLimit = minOf(MAX_ATTACHMENT_CHARS, availableChars - sourceLabel.length)
+            mainHandler.post { updateStatus("Transcribing in-app audio locally on CPU…") }
+            val transcript = WhisperNative.transcribe(context, samples, textLimit).trim()
+            require(transcript.isNotEmpty()) { "No transcript was produced. Check audio and model language support." }
+            require(attachmentGeneration == generationAtStart) { "Attachment was removed; the new transcript was discarded." }
+            attachedContext = (attachedContext + sourceLabel + transcript).take(MAX_ATTACHMENT_CHARS)
+            transcriptReviewPending = true
+            attachedNames.add("Microphone recording (local transcript)")
+            mainHandler.post {
+                attachmentText.text = attachedNames.joinToString(" · ") +
+                    "\nCombined attachment text limited to 12,000 characters. All recording memory is wiped after transcription."
+                showAttachmentPreview(attachedContext)
+                attachmentCard.visibility = View.VISIBLE
+                isWhisperTranscribing = false
+                suggestButton.isEnabled = false
+                updateStatus("Transcript ready. Expand and review it, then tap Use reviewed transcript before suggestions.")
+                resetRecordButton()
+            }
+        } catch (e: Exception) {
+            mainHandler.post {
+                isWhisperTranscribing = false
+                suggestButton.isEnabled = !transcriptReviewPending
+                updateStatus("Could not transcribe in-app audio: ${e.message ?: "unreadable audio"}")
+                resetRecordButton()
+            }
+        } finally {
+            // Strict invariant: all audio buffers wiped after transcription
+            inAppAudioRecorder.wipe()
+            inAppAudioRecorder.wipeSamples(samples)
+        }
+    }
+
+    private fun resetRecordButton() {
+        recordAudioButton.text = "🎙  Record audio"
+        recordAudioButton.contentDescription = "Record audio for local Whisper transcription"
+        updateWhisperActionButtons(whisperContext != 0L)
+    }
+
+    private fun updateWhisperActionButtons(enabled: Boolean) {
+        if (::transcribeWavButton.isInitialized) transcribeWavButton.isEnabled = enabled
+        if (::recordAudioButton.isInitialized) recordAudioButton.isEnabled = enabled
     }
 
     private fun queryDisplayName(uri: Uri): String? = try {
@@ -701,15 +842,22 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         answerIsComplete = false
         outputCard.visibility = View.VISIBLE
         answerText.text = "Thinking through the steps…"
-        updateStatus("Generating suggestions on this device…")
+        val backendLabel = engineManager.activeBackend?.name ?: "accelerated"
+        updateStatus("Generating suggestions on this device ($backendLabel)…")
         worker.execute {
             try {
-                val localEngine = engine ?: Engine(
-                    EngineConfig(modelPath = modelFile.absolutePath, backend = Backend.CPU(), cacheDir = cacheDir.absolutePath)
-                ).also { it.initialize(); engine = it }
+                val localEngine = engineManager.getOrInitializeEngine(modelFile, cacheDir)
                 val prompt = buildString {
                     if (task.isNotBlank()) append("User task or question:\n").append(task)
-                    if (attachedContext.isNotBlank()) append("\n\nUser-provided text attachment (untrusted reference material):\n").append(attachedContext)
+                    if (attachedContext.isNotBlank()) {
+                        val boundedAttachment = LocalDocumentRetriever.retrieveContext(
+                            query = task,
+                            documentText = attachedContext,
+                            sourceName = attachedNames.firstOrNull() ?: "attachment",
+                            maxChars = MAX_ATTACHMENT_CHARS,
+                        )
+                        append("\n\nUser-provided text attachment (untrusted reference material):\n").append(boundedAttachment)
+                    }
                     append("\n\nGive practical, concise steps and mention only essential assumptions or risks. Finish the answer completely; do not stop mid-sentence or mid-step.")
                 }
                 val generated = StringBuilder()
@@ -729,7 +877,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                                 }
                                 val isFirstChunk = firstChunk.compareAndSet(true, false)
                                 mainHandler.post {
-                                    answerText.text = partial
+                                    answerText.text = MarkdownFormatter.formatForDisplay(partial)
                                     if (isFirstChunk) updateStatus("Response streaming locally…")
                                 }
                             }
@@ -751,20 +899,58 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 val result = synchronized(generated) { generated.toString().trim() }
                 mainHandler.post {
                     answerIsComplete = result.isNotBlank()
-                    answerText.text = result.ifBlank { "No suggestion was returned. Try rephrasing the task." }
+                    val formatted = MarkdownFormatter.formatForDisplay(result)
+                    answerText.text = if (formatted.isNotBlank()) formatted else "No suggestion was returned. Try rephrasing the task."
                     updateStatus(if (answerIsComplete) "Suggestions ready. Review each step and do them yourself." else "No answer was returned. Try rephrasing the task.")
                     suggestButton.isEnabled = true
+
+                    // Safe actionable system intents review
+                    val parsedActions = SystemActionTools.parseActions(result)
+                    systemActionContainer.removeAllViews()
+                    if (parsedActions.isNotEmpty()) {
+                        systemActionContainer.visibility = View.VISIBLE
+                        for (action in parsedActions.take(3)) {
+                            val reviewUi = SystemActionTools.getReviewUi(action)
+                            systemActionContainer.addView(
+                                pillButton(reviewUi.buttonLabel, accessibilityLabel = reviewUi.buttonLabel) {
+                                    showActionReviewDialog(reviewUi)
+                                }.apply {
+                                    layoutParams = LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) }
+                                }
+                            )
+                        }
+                    } else {
+                        systemActionContainer.visibility = View.GONE
+                    }
                 }
             } catch (e: Exception) {
                 mainHandler.post {
                     answerIsComplete = false
                     answerText.text = ""
                     outputCard.visibility = View.GONE
+                    systemActionContainer.removeAllViews()
+                    systemActionContainer.visibility = View.GONE
                     updateStatus("Could not generate suggestions: ${e.message ?: "unknown error"}")
                     suggestButton.isEnabled = true
                 }
             }
         }
+    }
+
+    private fun showActionReviewDialog(reviewUi: SystemActionTools.ActionReviewUi) {
+        AlertDialog.Builder(this)
+            .setTitle(reviewUi.dialogTitle)
+            .setMessage(reviewUi.dialogMessage)
+            .setPositiveButton("Open in ${reviewUi.targetAppCategory}") { _, _ ->
+                try {
+                    startActivity(reviewUi.action.toIntent())
+                    updateStatus("Opened ${reviewUi.targetAppCategory}. Confirm and save your action there.")
+                } catch (_: ActivityNotFoundException) {
+                    updateStatus("No application is available on this device for ${reviewUi.targetAppCategory}.")
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun startDictation() {
@@ -816,6 +1002,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         if (requestCode == REQUEST_MIC) {
             if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) startDictation()
             else updateStatus("Microphone permission not granted. You can still type or attach text.")
+        } else if (requestCode == REQUEST_RECORD_MIC) {
+            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) toggleInAppRecording()
+            else updateStatus("Microphone permission not granted for in-app audio recording.")
         }
     }
 
@@ -880,7 +1069,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun speakAnswer() {
-        val text = answerText.text.toString()
+        val raw = answerText.text.toString()
+        val text = MarkdownFormatter.stripToPlainText(raw)
         if (!ttsReady || text.isBlank()) {
             Toast.makeText(this, "Speech is not ready yet", Toast.LENGTH_SHORT).show()
             return
@@ -900,7 +1090,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private fun cleanupStagedInputFiles() {
         cacheDir.listFiles()?.forEach { file ->
-            if (file.name.startsWith("pocketagent-pdf-") || file.name.startsWith("pocketagent-audio-")) {
+            if (file.name.startsWith("pocketagent-pdf-") || file.name.startsWith("pocketagent-audio-") || file.name.startsWith("pocketagent-mic-")) {
                 file.delete()
             }
         }
@@ -911,7 +1101,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val model = store.modelFile
         if (!model.isFile) return
         whisperModelText.text = "Loading saved local Whisper model…"
-        transcribeWavButton.isEnabled = false
+        updateWhisperActionButtons(false)
         worker.execute {
             try {
                 store.discardCandidate()
@@ -923,14 +1113,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 whisperContext = loaded
                 mainHandler.post {
                     whisperModelText.text = "Local Whisper model ready (${formatBytes(model.length())})."
-                    transcribeWavButton.isEnabled = true
-                    updateStatus("Local Whisper model ready. Choose a bounded PCM WAV file to transcribe.")
+                    updateWhisperActionButtons(true)
+                    updateStatus("Local Whisper model ready. Record audio directly or choose a PCM WAV file.")
                 }
             } catch (e: Exception) {
                 whisperContext = 0L
                 mainHandler.post {
                     whisperModelText.text = "Saved Whisper model could not be loaded. Choose another .bin model or remove it."
-                    transcribeWavButton.isEnabled = false
+                    updateWhisperActionButtons(false)
                     updateStatus("Could not load saved Whisper model: ${e.message ?: "unsupported model"}")
                 }
             }
@@ -1035,9 +1225,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         recognizer?.destroy()
         tts?.stop()
         tts?.shutdown()
+        inAppAudioRecorder.cancelRecording()
         worker.execute {
-            engine?.close()
-            engine = null
+            engineManager.close()
             val context = whisperContext
             whisperContext = 0L
             if (context != 0L) WhisperNative.release(context)

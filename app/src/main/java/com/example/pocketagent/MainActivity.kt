@@ -13,6 +13,7 @@ import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
 import android.net.Uri
@@ -20,10 +21,12 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
+import android.text.TextUtils
 import android.view.Gravity
 import android.view.View
 import android.widget.Button
@@ -31,6 +34,9 @@ import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
+import android.widget.ProgressBar
+import android.widget.RadioButton
+import android.widget.RadioGroup
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
@@ -56,6 +62,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         private const val CREATE_ANSWER_FILE = 7
         private const val REQUEST_RECORD_MIC = 8
         private const val STATE_PENDING_ANSWER_SAVE = "pending_answer_to_save"
+        private const val STATE_ACTIVE_SESSION_ID = "active_session_id"
         private const val PREFS_SETTINGS = "pocketagent_settings"
         private const val PREF_BACKEND_MODE = "pref_backend_mode"
         private const val PREF_MODEL_DISPLAY_NAME = "pref_model_display_name"
@@ -69,40 +76,10 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         /** Reset stateful KV cache before cumulative turns approach the 4096-token EngineConfig cap. */
         private const val WARM_CONTEXT_RESET_THRESHOLD = 3400
         private val SYSTEM_INSTRUCTION: String get() = AnswerDirective.SYSTEM_INSTRUCTION
-        private var BG = 0xFFF4F7F6.toInt()
-        private var INK = 0xFF162D2A.toInt()
-        private var MUTED = 0xFF5F6F6A.toInt()
-        private var TEAL = 0xFF126B60.toInt()
-        private var MINT = 0xFFE2F3ED.toInt()
-        private var BORDER = 0xFFE3EBE8.toInt()
-        private var SURFACE = Color.WHITE
         private const val WHITE = Color.WHITE
-        private var STOP_CRIMSON = 0xFFB91C1C.toInt()
-        private var isDarkTheme = false
-
-        private fun applyTheme(dark: Boolean) {
-            isDarkTheme = dark
-            if (dark) {
-                BG = 0xFF121816.toInt()
-                INK = 0xFFE8F0EE.toInt()
-                MUTED = 0xFF9FB0AB.toInt()
-                TEAL = 0xFF4DB6A6.toInt()
-                MINT = 0xFF1E332F.toInt()
-                BORDER = 0xFF2A3D39.toInt()
-                SURFACE = 0xFF1A2421.toInt()
-                STOP_CRIMSON = 0xFFEF5350.toInt()
-            } else {
-                BG = 0xFFF4F7F6.toInt()
-                INK = 0xFF162D2A.toInt()
-                MUTED = 0xFF5F6F6A.toInt()
-                TEAL = 0xFF126B60.toInt()
-                MINT = 0xFFE2F3ED.toInt()
-                BORDER = 0xFFE3EBE8.toInt()
-                SURFACE = Color.WHITE
-                STOP_CRIMSON = 0xFFB91C1C.toInt()
-            }
-        }
     }
+
+    private lateinit var palette: UiPalette
 
     /** Serial executor for LiteRT-LM load and inference: engine access must never overlap. */
     private val inferenceExecutor = Executors.newSingleThreadExecutor { r ->
@@ -121,7 +98,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             formatExecutor = ioExecutor,
         ).apply {
             onPartialText = { text ->
-                answerText.text = text
+                activeAssistantHandle?.bindStreamingText(text)
                 maybeFollowStreamingOutput()
             }
         }
@@ -133,7 +110,6 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     @Volatile private var whisperContext: Long = 0L
     private lateinit var taskInput: EditText
     private lateinit var statusText: TextView
-    private lateinit var answerText: TextView
     private lateinit var attachmentText: TextView
     private lateinit var attachmentPreview: TextView
     private lateinit var attachmentPreviewButton: Button
@@ -143,27 +119,32 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     private lateinit var confirmTranscriptButton: Button
     private lateinit var suggestButton: Button
     private lateinit var attachmentCard: LinearLayout
-    private lateinit var outputCard: LinearLayout
-    // Sticky bottom composer and its collapsible chrome.
+    // Sticky bottom composer, multi-turn chat thread, and collapsible chrome.
     private lateinit var chatScroll: ScrollView
     private lateinit var chatCanvas: LinearLayout
+    private lateinit var chatThreadContainer: LinearLayout
+    private lateinit var jumpToBottomButton: Button
     private lateinit var heroCard: LinearLayout
+    private lateinit var heroModelCtaButton: Button
     private lateinit var quickChips: View
     private lateinit var composerDock: LinearLayout
     private lateinit var composerCard: LinearLayout
     private lateinit var composerRoot: LinearLayout
     private lateinit var toolsTray: LinearLayout
     private lateinit var toolsToggleButton: Button
-    private lateinit var attachmentChipBar: LinearLayout
-    private lateinit var attachmentChipText: TextView
+    private lateinit var attachmentChipContainer: LinearLayout
+    private lateinit var recordingBanner: LinearLayout
+    private lateinit var recordingDot: View
+    private lateinit var recordingBannerText: TextView
+    private lateinit var recordingStopButton: Button
     private lateinit var composerMicButton: Button
-    private lateinit var modelPill: Button
+    private lateinit var modelStatusPill: ModelStatusPillView
     private var isToolsTrayOpen = false
+    private var lastAttachmentStripSignature: String? = null
     /** True while the user is reading earlier output; suppresses forced auto-scroll. */
     @Volatile private var isUserReadingUpwards = false
-    private lateinit var citationsContainer: LinearLayout
-    private lateinit var systemActionContainer: LinearLayout
     private var recognizer: SpeechRecognizer? = null
+    private var isDictating = false
     private var tts: TextToSpeech? = null
     private var ttsReady = false
     @Volatile private var attachedContext = ""
@@ -173,6 +154,12 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     private var attachedNames = mutableListOf<String>()
     private var attachmentPreviewExpanded = false
     private var answerIsComplete = false
+    private var latestAssistantText: String = ""
+    private var activeAssistantHandle: ActiveAssistantCardHandle? = null
+    private val thinkingPulseAnimator = PulseAnimator()
+    private val recordingPulseAnimator = PulseAnimator()
+    private var generationStartElapsedMs: Long = 0L
+    private var generationTimerRunnable: Runnable? = null
     private var pendingAnswerToSave: String? = null
     private val sessionStore by lazy { SessionStore(SessionStore.defaultDir(filesDir)) }
     private val userMemoryStore by lazy { UserMemoryStore(UserMemoryStore.defaultDir(filesDir)) }
@@ -216,29 +203,22 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
 
     /** Set by the runaway guard so the UI can explain why generation stopped. */
     @Volatile private var runawayFragment: String? = null
-    private lateinit var stopGeneratingButton: Button
-    private lateinit var refineButton: Button
     /** True while the primary composer button is acting as Stop. */
     @Volatile private var isGeneratingUi = false
+    /** True after the user tapped Stop while waiting for native cancellation to complete. */
+    @Volatile private var isStoppingUi = false
     /** Set when the model dodged the question, so Refine can be offered instead of auto-retrying. */
     @Volatile private var maybeShowRefineAffordance = false
     /** Latch of the in-flight stream, so Stop can release a waiter the engine may never notify. */
     @Volatile private var activeStreamLatch: CountDownLatch? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        val nightMode = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
-        applyTheme(nightMode == Configuration.UI_MODE_NIGHT_YES)
+        val themeMode = ThemeMode.fromString(settingsPrefs.getString(UiThemeResolver.PREF_THEME_MODE, null))
+        val systemNightActive = UiThemeResolver.isDarkFromConfiguration(resources.configuration.uiMode)
+        palette = UiThemeResolver.paletteFor(themeMode, systemNightActive)
         super.onCreate(savedInstanceState)
         pendingAnswerToSave = savedInstanceState?.getString(STATE_PENDING_ANSWER_SAVE)
-        window.statusBarColor = BG
-        window.navigationBarColor = BG
-        var flags = window.decorView.systemUiVisibility
-        flags = if (isDarkTheme) {
-            flags and View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR.inv() and View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR.inv()
-        } else {
-            flags or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
-        }
-        window.decorView.systemUiVisibility = flags
+        applyWindowBars(this, palette)
         tts = TextToSpeech(this, this)
 
         var savedBackend = BackendPreference.fromString(settingsPrefs.getString(PREF_BACKEND_MODE, null))
@@ -254,11 +234,15 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         engineManager.preference = savedBackend
         engineManager.onFallback = { reason ->
             settingsPrefs.edit().putString(PREF_BACKEND_MODE, BackendPreference.CPU_ONLY.name).apply()
-            mainHandler.post { updateStatus(reason) }
+            mainHandler.post {
+                refreshModelStatus()
+                updateStatus(reason)
+            }
         }
 
         cleanupStagedInputFiles()
         buildInterface()
+        savedInstanceState?.getString(STATE_ACTIVE_SESSION_ID)?.let { loadSession(it) }
         refreshModelStatus()
         if (gpuGuardTriggered) {
             updateStatus("Previous GPU model load ended unexpectedly; switched safely to CPU mode.")
@@ -309,6 +293,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             inferenceExecutor.execute {
                 try {
                     ensureEngineInitialized(modelFile)
+                    mainHandler.post { refreshModelStatus() }
                 } catch (_: Exception) {
                     // A failed warm-up is not user-visible; the real attempt reports properly.
                 }
@@ -321,7 +306,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         // canvas, and a sticky bottom composer that never scrolls away from the thumb.
         val rootLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(BG)
+            setBackgroundColor(palette.bg)
             fitsSystemWindows = true
         }
         applyImeInsets(rootLayout)
@@ -330,7 +315,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         val brandRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(18), dp(10), dp(10), dp(8))
+            setPadding(dp(12), dp(6), dp(8), dp(6))
         }
         val mark = TextView(this).apply {
             text = "P"
@@ -339,90 +324,154 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             gravity = Gravity.CENTER
             setTextColor(WHITE)
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            background = shape(TEAL, 13)
+            background = shape(palette.teal, 12)
             layoutParams = LinearLayout.LayoutParams(dp(34), dp(34))
         }
         brandRow.addView(mark)
         val brand = column().apply {
-            setPadding(dp(9), 0, 0, 0)
-            addView(text("PocketAgent", 16f, INK, true))
+            setPadding(dp(8), 0, 0, 0)
+            addView(text("PocketAgent", 16f, palette.ink, true))
         }
         brandRow.addView(brand, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(8) })
 
-        modelPill = pillButton("Choose model", accessibilityLabel = "Active model. Tap to manage or switch LiteRT-LM model") {
+        modelStatusPill = ModelStatusPillView(this, palette) {
             val stored = File(filesDir, "model.litertlm")
             if (stored.exists() && stored.length() > 0L) showModelManagerDialog() else chooseModel()
         }.apply {
-            layoutParams = LinearLayout.LayoutParams(-2, dp(34))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply {
+                marginEnd = dp(6)
+            }
         }
-        brandRow.addView(modelPill)
+        brandRow.addView(modelStatusPill)
 
         val headerToolsScroll = HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
+            overScrollMode = View.OVER_SCROLL_NEVER
         }
         val headerToolsRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        headerToolsRow.addView(pillButton("🎙️ Voice", accessibilityLabel = "Start continuous hands-free voice duplex mode") {
-            showDuplexVoiceDialog()
-        }.apply {
-            layoutParams = LinearLayout.LayoutParams(-2, dp(34)).apply { marginEnd = dp(6) }
-        })
-        headerToolsRow.addView(pillButton("🧠 Memory", accessibilityLabel = "Manage sovereign long-term memory") {
-            showMemoryCenterDialog()
-        }.apply {
-            layoutParams = LinearLayout.LayoutParams(-2, dp(34)).apply { marginEnd = dp(6) }
-        })
-        headerToolsRow.addView(pillButton("📝 Notes", accessibilityLabel = "Manage sovereign personal notes") {
-            showNotesManagerDialog()
-        }.apply {
-            layoutParams = LinearLayout.LayoutParams(-2, dp(34)).apply { marginEnd = dp(6) }
-        })
-        headerToolsRow.addView(pillButton("🛡️ Privacy", accessibilityLabel = "View privacy audit and storage controls") {
-            showPrivacyCenterDialog()
-        }.apply {
-            layoutParams = LinearLayout.LayoutParams(-2, dp(34)).apply { marginEnd = dp(6) }
-        })
-        headerToolsRow.addView(pillButton("☰ Chats", accessibilityLabel = "View saved conversations") {
-            showHistoryDialog()
-        }.apply {
-            layoutParams = LinearLayout.LayoutParams(-2, dp(34)).apply { marginEnd = dp(6) }
-        })
-        headerToolsRow.addView(pillButton("+ New", accessibilityLabel = "Start a fresh conversation") {
-            startNewConversation()
-        }.apply {
-            layoutParams = LinearLayout.LayoutParams(-2, dp(34))
-        })
+        val headerSpecs = listOf(
+            Triple("+ New", "Start a fresh conversation") { startNewConversation() },
+            Triple("☰ Chats", "View saved conversations") { showHistoryDialog() },
+            Triple("🎙️ Voice", "Start continuous hands-free voice duplex mode") { showDuplexVoiceDialog() },
+            Triple("📝 Notes", "Manage sovereign personal notes") { showNotesManagerDialog() },
+            Triple("🧠 Memory", "Manage sovereign long-term memory") { showMemoryCenterDialog() },
+            Triple("🛡️ Privacy", "View privacy audit, appearance, and security controls") { showPrivacyCenterDialog() },
+        )
+        for ((index, spec) in headerSpecs.withIndex()) {
+            val (label, a11y, action) = spec
+            val btn = com.example.pocketagent.pillButton(
+                context = this,
+                palette = palette,
+                label = label,
+                accessibilityLabel = a11y,
+                compact = true,
+                onClick = action,
+            ).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply {
+                    if (index < headerSpecs.lastIndex) marginEnd = dp(6)
+                }
+            }
+            headerToolsRow.addView(btn)
+        }
         headerToolsScroll.addView(headerToolsRow)
         brandRow.addView(headerToolsScroll, LinearLayout.LayoutParams(0, -2, 1f))
         rootLayout.addView(brandRow, LinearLayout.LayoutParams(-1, -2))
 
         // ------------------------------------------------- Zone B: scrolling chat & workspace
         chatCanvas = column().apply {
-            setPadding(dp(16), dp(2), dp(16), dp(10))
+            setPadding(dp(14), dp(4), dp(14), dp(12))
         }
 
-        // Condensed welcome block, shown only while the conversation is empty.
+        // Modernized welcome block, shown only while the conversation is empty.
         heroCard = column().apply {
             background = GradientDrawable(
                 GradientDrawable.Orientation.TL_BR,
-                intArrayOf(0xFF153B36.toInt(), 0xFF176B60.toInt())
+                intArrayOf(palette.heroGradientStart, palette.heroGradientEnd),
             ).apply { cornerRadius = dp(20).toFloat() }
-            setPadding(dp(16), dp(15), dp(16), dp(15))
+            setPadding(dp(18), dp(16), dp(18), dp(16))
         }
-        heroCard.addView(text("Your pocket assistant", 20f, WHITE, true))
-        heroCard.addView(text("Ask anything. Get the actual answer, computed on this device.", 13f, 0xFFD5EAE5.toInt()).apply {
-            setPadding(0, dp(5), 0, 0)
-        })
+        val trustBadge = styledText(
+            context = this,
+            text = "🔒 100% Offline · Zero Cloud",
+            sizeSp = 11.5f,
+            color = WHITE,
+            bold = true,
+        ).apply {
+            background = roundedShape(0x29FFFFFF, dp(12).toFloat())
+            setPadding(dp(10), dp(4), dp(10), dp(4))
+            layoutParams = LinearLayout.LayoutParams(-2, -2).apply {
+                bottomMargin = dp(10)
+            }
+        }
+        heroCard.addView(trustBadge)
+        heroCard.addView(text("Your pocket assistant", 21f, WHITE, true))
+        heroCard.addView(
+            text(
+                "Private on-device AI. Ask anything, analyze PDFs, or speak hands-free with zero cloud.",
+                13.5f,
+                palette.heroSubtitleInk,
+            ).apply {
+                setPadding(0, dp(6), 0, 0)
+                setLineSpacing(dp(3).toFloat(), 1f)
+            }
+        )
+        heroModelCtaButton = Button(this).apply {
+            text = "📂 Choose .litertlm Model"
+            contentDescription = "Choose a LiteRT-LM model file to get started"
+            setAllCaps(false)
+            textSize = 13.5f
+            typeface = Typeface.create("sans-serif", Typeface.BOLD)
+            setTextColor(WHITE)
+            gravity = Gravity.CENTER
+            minHeight = dp(48)
+            minimumHeight = dp(48)
+            setPadding(dp(16), dp(10), dp(16), dp(10))
+            background = rippleDrawable(
+                roundedShape(
+                    color = 0x2EFFFFFF,
+                    radiusPx = dp(16).toFloat(),
+                    strokeWidthPx = maxOf(1, dp(1)),
+                    strokeColor = 0x55FFFFFF,
+                ),
+                palette.rippleOnAccent,
+            )
+            backgroundTintList = null
+            stateListAnimator = null
+            isFocusable = true
+            setOnClickListener { chooseModel() }
+            layoutParams = LinearLayout.LayoutParams(-2, -2).apply {
+                topMargin = dp(12)
+            }
+        }
+        heroCard.addView(heroModelCtaButton)
         chatCanvas.addView(heroCard, marginBottom(12))
 
         // Quick prompt chips collapse once the conversation has output.
-        val quickScroll = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false }
+        val quickScroll = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            overScrollMode = View.OVER_SCROLL_NEVER
+        }
         val quickRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        listOf("Plan my day", "Explain a setting", "Write a message", "Learn something").forEach { label ->
-            val chip = pillButton(label, accessibilityLabel = "Use task preset: $label") {
+        listOf("Summarize a PDF", "Explain a concept", "Draft a message", "Plan my day").forEach { label ->
+            val chip = secondaryOutlineButton(
+                context = this,
+                palette = palette,
+                label = label,
+                accessibilityLabel = "Use prompt starter: $label",
+                compact = true,
+                textColor = palette.teal,
+            ) {
                 taskInput.setText(label)
+                taskInput.setSelection(label.length)
                 taskInput.requestFocus()
                 syncComposerState()
             }
@@ -432,109 +481,54 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         quickChips = quickScroll
         chatCanvas.addView(quickScroll, marginBottom(10))
 
-        outputCard = column().apply {
-            visibility = View.GONE
-            background = shape(SURFACE, 20, BORDER)
-            setPadding(dp(16), dp(14), dp(16), dp(16))
-        }
-        val outputHeader = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        val outputTitle = column()
-        outputTitle.addView(text("Answer", 18f, INK, true))
-        outputTitle.addView(text("Generated locally · runs offline", 11f, MUTED).apply { setPadding(0, dp(3), 0, 0) })
-        outputHeader.addView(outputTitle, LinearLayout.LayoutParams(0, -2, 1f))
-        outputHeader.addView(textButton("Clear", accessibilityLabel = "Clear answer") {
-            outputCard.visibility = View.GONE
-            answerText.text = ""
-            answerIsComplete = false
-            citationsContainer.removeAllViews()
-            citationsContainer.visibility = View.GONE
-            currentCitations = emptyList()
-            systemActionContainer.removeAllViews()
-            systemActionContainer.visibility = View.GONE
-            maybeShowRefineAffordance = false
-            if (::refineButton.isInitialized) refineButton.visibility = View.GONE
-            syncComposerState()
-        })
-        outputCard.addView(outputHeader)
-        stopGeneratingButton = pillButton("■ Stop Generating", accessibilityLabel = "Stop in-progress generation") {
-            isGeneratingCancelled.set(true)
-            suggestButton.isEnabled = true
-            updateStatus("Stopping generation…")
-        }.apply {
-            visibility = View.GONE
-            background = shape(0xFFC62828.toInt(), 18)
-            setTextColor(WHITE)
-            layoutParams = LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6); bottomMargin = dp(6) }
-        }
-        outputCard.addView(stopGeneratingButton)
+        chatThreadContainer = column()
+        chatCanvas.addView(chatThreadContainer, LinearLayout.LayoutParams(-1, -2))
 
-        answerText = text("", 15f, INK).apply {
-            setPadding(0, dp(13), 0, dp(13))
-            setTextIsSelectable(true)
-            setLineSpacing(dp(4).toFloat(), 1.0f)
-        }
-        outputCard.addView(answerText)
-
-        citationsContainer = column().apply {
-            visibility = View.GONE
-            setPadding(0, dp(4), 0, dp(10))
-        }
-        outputCard.addView(citationsContainer)
-
-        // Offered instead of silently running a second full generation.
-        refineButton = pillButton(
-            "✨ Refine answer",
-            accessibilityLabel = "Refine this answer with a corrective second pass",
-        ) { refineLastAnswer() }.apply {
-            visibility = View.GONE
-            layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(6) }
-        }
-        outputCard.addView(refineButton)
-
-        val outputActions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        outputActions.addView(pillButton("Copy", accessibilityLabel = "Copy answer") { copyAnswer() }, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(4) })
-        outputActions.addView(pillButton("Share", accessibilityLabel = "Share answer") { shareAnswer() }, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(3); marginEnd = dp(3) })
-        outputActions.addView(pillButton("Regenerate", accessibilityLabel = "Regenerate answer") { regenerateAnswer() }, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(3); marginEnd = dp(3) })
-        outputActions.addView(pillButton("Read aloud", accessibilityLabel = "Read answer aloud") { speakAnswer() }, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(4) })
-        outputCard.addView(outputActions)
-
-        val exportActions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(6), 0, 0) }
-        exportActions.addView(pillButton("Save text file", accessibilityLabel = "Save the completed answer to a text file") {
-            saveAnswerToFile()
-        }, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(4) })
-        exportActions.addView(pillButton("Export Markdown", accessibilityLabel = "Share or export conversation as Markdown") {
-            exportCurrentAsMarkdown()
-        }, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(4) })
-        outputCard.addView(exportActions)
-        systemActionContainer = column().apply {
-            visibility = View.GONE
-            setPadding(0, dp(6), 0, 0)
-        }
-        outputCard.addView(systemActionContainer)
-        chatCanvas.addView(outputCard, marginBottom(6))
-
-        chatCanvas.addView(text("Your selected model and prompts stay in this app. Attached text is included only in the local prompt.", 11f, MUTED).apply {
-            gravity = Gravity.CENTER
-            setPadding(dp(10), dp(10), dp(10), dp(4))
-        })
+        chatCanvas.addView(
+            text(
+                "Your selected model and prompts stay in this app. Attached text is included only in the local prompt.",
+                11f,
+                palette.muted,
+            ).apply {
+                gravity = Gravity.CENTER
+                setPadding(dp(10), dp(10), dp(10), dp(4))
+            }
+        )
 
         chatScroll = ScrollView(this).apply {
             isFillViewport = true
             overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
             clipToPadding = false
-            setPadding(0, 0, 0, 0)
+            setPadding(0, 0, 0, dp(8))
             addView(chatCanvas)
             setOnScrollChangeListener { _, _, scrollY, _, _ ->
                 // Track whether the reader is parked at the bottom, so streaming output only
                 // auto-scrolls when they have not deliberately scrolled up.
                 isUserReadingUpwards = scrollY + height < (chatCanvas.height + paddingTop + paddingBottom - dp(24))
+                updateJumpToBottomVisibility()
             }
         }
-        rootLayout.addView(chatScroll, LinearLayout.LayoutParams(-1, 0, 1f))
+
+        jumpToBottomButton = ComposerChromeViews.buildJumpToBottomButton(this, palette) {
+            isUserReadingUpwards = false
+            scrollChatToBottom(force = true)
+            updateJumpToBottomVisibility()
+        }
+
+        val chatFrame = FrameLayout(this).apply {
+            addView(chatScroll, FrameLayout.LayoutParams(-1, -1))
+            addView(
+                jumpToBottomButton,
+                FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.END).apply {
+                    setMargins(0, 0, dp(16), dp(16))
+                },
+            )
+        }
+        rootLayout.addView(chatFrame, LinearLayout.LayoutParams(-1, 0, 1f))
 
         // ------------------------------------------------- Zone C: sticky bottom composer dock
         composerDock = column().apply {
-            background = shape(BG, 0)
+            background = shape(palette.bg, 0)
             setPadding(dp(12), dp(6), dp(12), dp(8))
             // Absorb bottom system-navigation insets when the keyboard is closed.
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -546,84 +540,80 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             }
         }
         composerCard = column().apply {
-            background = shape(SURFACE, 20, BORDER)
+            background = shape(palette.surface, 20, palette.border)
             elevation = dp(6).toFloat()
             setPadding(dp(12), dp(10), dp(12), dp(10))
         }
 
-        attachmentChipBar = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
+        attachmentChipContainer = column().apply {
             visibility = View.GONE
-            background = shape(MINT, 14)
-            setPadding(dp(10), dp(2), dp(2), dp(2))
         }
-        attachmentChipText = text("", 12f, TEAL, true).apply {
-            maxLines = 1
-            ellipsize = android.text.TextUtils.TruncateAt.END
-        }
-        attachmentChipBar.addView(attachmentChipText, LinearLayout.LayoutParams(0, -2, 1f))
-        attachmentChipBar.addView(textButton("Edit", accessibilityLabel = "Review attached files and transcripts") {
-            toggleToolsTray(force = true)
-        }.apply { textSize = 11f; minHeight = dp(36) })
-        attachmentChipBar.addView(textButton("×", accessibilityLabel = "Remove attached files and extracted text") {
-            clearAttachments()
-        }.apply { textSize = 15f; minHeight = dp(36) })
-        attachmentChipBar.setOnClickListener { toggleToolsTray(force = true) }
-        composerCard.addView(attachmentChipBar, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(6) })
+        composerCard.addView(attachmentChipContainer, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(4) })
 
         toolsTray = column().apply {
             visibility = View.GONE
             setPadding(0, dp(2), 0, dp(6))
         }
         val trayTextRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        trayTextRow.addView(pillButton("＋ Text", accessibilityLabel = "Attach text files") { chooseTextFiles() }, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(5) })
-        trayTextRow.addView(pillButton("＋ PDF", accessibilityLabel = "Attach a PDF document") { choosePdf() }, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(5) })
+        trayTextRow.addView(
+            pillButton("＋ Text", accessibilityLabel = "Attach text files", compact = true) { chooseTextFiles() },
+            LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(5) },
+        )
+        trayTextRow.addView(
+            pillButton("＋ PDF", accessibilityLabel = "Attach a PDF document", compact = true) { choosePdf() },
+            LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(5) },
+        )
         toolsTray.addView(trayTextRow)
 
         val audioActionsRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        recordAudioButton = pillButton("🎙  Record audio", accessibilityLabel = "Record audio for local Whisper transcription") {
+        recordAudioButton = pillButton("🎙  Record audio", accessibilityLabel = "Record audio for local Whisper transcription", compact = true) {
             toggleInAppRecording()
         }.apply { isEnabled = false }
         audioActionsRow.addView(recordAudioButton, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(5) })
 
-        transcribeWavButton = pillButton("Transcribe WAV", accessibilityLabel = "Choose a WAV file for local transcription") {
+        transcribeWavButton = pillButton("Transcribe WAV", accessibilityLabel = "Choose a WAV file for local transcription", compact = true) {
             chooseWav()
         }.apply { isEnabled = false }
         audioActionsRow.addView(transcribeWavButton, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(5) })
-        toolsTray.addView(audioActionsRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(2) })
+        toolsTray.addView(audioActionsRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4) })
 
         // Whisper model management lives here instead of cluttering the chat canvas.
-        whisperModelText = text("No local Whisper model selected.", 11f, MUTED).apply {
+        whisperModelText = text("No local Whisper model selected.", 11f, palette.muted).apply {
             setPadding(dp(4), dp(9), dp(4), dp(2))
             accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
         }
         toolsTray.addView(whisperModelText)
         val whisperRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        whisperRow.addView(pillButton("Choose Whisper model", accessibilityLabel = "Choose a local whisper.cpp ggml model") {
-            chooseWhisperModel()
-        }, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(5) })
-        whisperRow.addView(pillButton("Remove", accessibilityLabel = "Remove the locally stored Whisper model") {
-            removeWhisperModel()
-        }, LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(5) })
-        toolsTray.addView(whisperRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(2) })
+        whisperRow.addView(
+            pillButton("Choose Whisper model", accessibilityLabel = "Choose a local whisper.cpp ggml model", compact = true) {
+                chooseWhisperModel()
+            },
+            LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(5) },
+        )
+        whisperRow.addView(
+            dangerButton(this, palette, "Remove", accessibilityLabel = "Remove the locally stored Whisper model", compact = true) {
+                removeWhisperModel()
+            },
+            LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(5) },
+        )
+        toolsTray.addView(whisperRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4) })
 
         // Compact attachment strip: summary plus preview and transcript review controls.
         attachmentCard = column().apply {
             visibility = View.GONE
             setPadding(0, dp(8), 0, 0)
         }
-        attachmentText = text("", 12f, MUTED)
+        attachmentText = text("", 12f, palette.muted)
         attachmentCard.addView(attachmentText)
-        attachmentPreview = text("", 12f, INK).apply {
+        attachmentPreview = text("", 12f, palette.ink).apply {
             setPadding(dp(10), dp(8), dp(10), dp(8))
-            background = shape(BG, 10)
+            background = shape(palette.bg, 10, palette.border)
             setTextIsSelectable(true)
-            maxLines = 4
-            ellipsize = android.text.TextUtils.TruncateAt.END
+            maxLines = 8
+            ellipsize = TextUtils.TruncateAt.END
         }
         attachmentCard.addView(attachmentPreview, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
         attachmentPreviewButton = textButton("Show full attachment text", accessibilityLabel = "Expand attachment text preview") {
@@ -634,7 +624,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             if (transcriptReviewPending && !isWhisperTranscribing) {
                 transcriptReviewPending = false
                 confirmTranscriptButton.visibility = View.GONE
-                suggestButton.isEnabled = true
+                syncComposerState()
                 updateStatus("Transcript confirmed. Ask your question when ready.")
             }
         }.apply { visibility = View.GONE }
@@ -644,6 +634,58 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
 
         composerCard.addView(toolsTray)
 
+        // Recording banner shown while in-app audio recording or dictation is active.
+        recordingBanner = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            visibility = View.GONE
+            background = roundedShape(
+                color = palette.dangerBg,
+                radiusPx = dp(12).toFloat(),
+                strokeWidthPx = maxOf(1, dp(1)),
+                strokeColor = palette.dangerBorder,
+            )
+            setPadding(dp(12), dp(6), dp(8), dp(6))
+        }
+        recordingDot = View(this).apply {
+            val dotSize = dp(10)
+            background = roundedShape(palette.stopCrimson, dotSize / 2f)
+            layoutParams = LinearLayout.LayoutParams(dotSize, dotSize).apply {
+                marginEnd = dp(8)
+            }
+        }
+        recordingBanner.addView(recordingDot)
+        recordingBannerText = styledText(
+            context = this,
+            text = "● Recording audio… Tap Stop",
+            sizeSp = 12.5f,
+            color = palette.dangerInk,
+            bold = true,
+        ).apply {
+            layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+        }
+        recordingBanner.addView(recordingBannerText)
+        recordingStopButton = dangerButton(
+            context = this,
+            palette = palette,
+            label = "Stop",
+            accessibilityLabel = "Stop audio recording",
+            compact = true,
+        ) {
+            if (inAppAudioRecorder.isRecordingActive) {
+                recordAudioButton.text = "Transcribing…"
+                recordAudioButton.isEnabled = false
+                inAppAudioRecorder.stopRecording()
+            } else if (isDictating) {
+                recognizer?.stopListening()
+                isDictating = false
+                updateStatus("Stopping dictation…")
+                updateRecordingBanner()
+            }
+        }
+        recordingBanner.addView(recordingStopButton)
+        composerCard.addView(recordingBanner, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
+
         // Main composer row: always visible, always thumb-reachable.
         composerRoot = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -651,33 +693,35 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         }
 
         toolsToggleButton = Button(this).apply {
+            val touchSize = dp(48)
             text = "＋"
             contentDescription = "Show attachment and audio tools"
             setAllCaps(false)
             textSize = 19f
             typeface = Typeface.create("sans-serif", Typeface.BOLD)
             gravity = Gravity.CENTER
-            setTextColor(TEAL)
+            setTextColor(palette.teal)
             setPadding(0, 0, 0, 0)
-            background = ripple(shape(MINT, 24), 0x33126B60)
+            minWidth = touchSize
+            minimumWidth = touchSize
+            minHeight = touchSize
+            minimumHeight = touchSize
+            background = rippleDrawable(roundedShape(palette.mint, dp(24).toFloat()), palette.rippleOnMint)
             backgroundTintList = null
+            stateListAnimator = null
             isFocusable = true
             setOnClickListener { toggleToolsTray(force = false) }
         }
-        composerRoot.addView(toolsToggleButton, LinearLayout.LayoutParams(dp(44), dp(44)).apply {
+        composerRoot.addView(toolsToggleButton, LinearLayout.LayoutParams(dp(48), dp(48)).apply {
             marginEnd = dp(7)
-            bottomMargin = dp(1)
         })
 
         taskInput = EditText(this).apply {
             id = View.generateViewId()
-            hint = "Ask Pockagent..."
-            setHintTextColor(MUTED)
-            setTextColor(INK)
+            hint = "Ask PocketAgent..."
             textSize = 15f
             gravity = Gravity.TOP or Gravity.START
-            setPadding(dp(12), dp(11), dp(12), dp(11))
-            background = shape(BG, 18)
+            styleEditText(this, palette, cornerDp = 18)
             // Line limits, height cap, and the scroll-intercept guard come from ComposerInputGuard.
             // Note: never set isSingleLine here, it resets maxLines to Int.MAX_VALUE.
             imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEND or
@@ -686,7 +730,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 val sends = actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEND ||
                     (event != null && event.keyCode == android.view.KeyEvent.KEYCODE_ENTER &&
                         event.action == android.view.KeyEvent.ACTION_DOWN && !event.isShiftPressed)
-                if (sends && suggestButton.isEnabled) {
+                if (sends && !isGeneratingUi && suggestButton.isEnabled) {
                     suggestSteps()
                     true
                 } else {
@@ -701,6 +745,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
                 override fun afterTextChanged(s: android.text.Editable?) {
                     isUserReadingUpwards = false
+                    syncComposerState()
                 }
             })
         }
@@ -713,32 +758,39 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         )
 
         composerMicButton = Button(this).apply {
+            val touchSize = dp(48)
             text = "🎙"
             contentDescription = "Dictate your question"
             setAllCaps(false)
             textSize = 17f
             gravity = Gravity.CENTER
-            setTextColor(TEAL)
+            setTextColor(palette.teal)
             setPadding(0, 0, 0, 0)
-            background = ripple(shape(MINT, 24), 0x33126B60)
+            minWidth = touchSize
+            minimumWidth = touchSize
+            minHeight = touchSize
+            minimumHeight = touchSize
+            background = rippleDrawable(roundedShape(palette.mint, dp(24).toFloat()), palette.rippleOnMint)
             backgroundTintList = null
+            stateListAnimator = null
             isFocusable = true
             setOnClickListener { startDictation() }
         }
-        composerRoot.addView(composerMicButton, LinearLayout.LayoutParams(dp(44), dp(44)).apply {
+        composerRoot.addView(composerMicButton, LinearLayout.LayoutParams(dp(48), dp(48)).apply {
             marginStart = dp(7)
-            bottomMargin = dp(1)
         })
 
         suggestButton = actionButton("Ask", accessibilityLabel = "Send your question and get an answer") {
             suggestSteps()
         }.apply {
             textSize = 15f
-            minHeight = dp(44)
+            minHeight = dp(48)
+            minimumHeight = dp(48)
             minWidth = dp(64)
+            minimumWidth = dp(64)
             setPadding(dp(18), dp(10), dp(18), dp(10))
         }
-        composerRoot.addView(suggestButton, LinearLayout.LayoutParams(-2, dp(44)).apply {
+        composerRoot.addView(suggestButton, LinearLayout.LayoutParams(-2, dp(48)).apply {
             marginStart = dp(7)
         })
 
@@ -748,12 +800,12 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         statusText = text(
             "Choose a compatible .litertlm model to get started.",
             11f,
-            MUTED
+            palette.muted,
         ).apply {
             gravity = Gravity.CENTER
             setPadding(dp(6), dp(7), dp(6), dp(0))
             maxLines = 2
-            ellipsize = android.text.TextUtils.TruncateAt.END
+            ellipsize = TextUtils.TruncateAt.END
             accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
         }
         composerDock.addView(statusText, LinearLayout.LayoutParams(-1, -2))
@@ -818,19 +870,44 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
      */
     private fun syncComposerState() {
         if (!::heroCard.isInitialized) return
-        val hasConversation = (::outputCard.isInitialized && outputCard.visibility == View.VISIBLE) ||
+        val hasThreadViews = ::chatThreadContainer.isInitialized && chatThreadContainer.childCount > 0
+        val hasConversation = hasThreadViews ||
             taskInput.text.isNotBlank() || attachedContext.isNotBlank() ||
             lastPrompt.isNotBlank() || currentSession?.messages?.isNotEmpty() == true
         val welcomeVisibility = if (hasConversation) View.GONE else View.VISIBLE
         heroCard.visibility = welcomeVisibility
         quickChips.visibility = welcomeVisibility
 
+        if (::heroModelCtaButton.isInitialized) {
+            val hasModel = File(filesDir, "model.litertlm").let { it.exists() && it.length() > 0L }
+            heroModelCtaButton.visibility = if (hasModel) View.GONE else View.VISIBLE
+        }
+
         val hasAttachment = attachedContext.isNotBlank()
-        attachmentChipBar.visibility = if (hasAttachment) View.VISIBLE else View.GONE
-        if (hasAttachment) {
-            attachmentChipText.text = attachedNames.joinToString(" · ").ifBlank { "Attachment ready" }
-            attachmentChipText.contentDescription =
-                "Attachments: ${attachedNames.joinToString(", ").ifBlank { "one attachment" }}"
+        if (::attachmentChipContainer.isInitialized) {
+            if (hasAttachment) {
+                val signature = attachedNames.joinToString("|") + ":" + attachedContext.length
+                attachmentChipContainer.visibility = View.VISIBLE
+                if (signature != lastAttachmentStripSignature) {
+                    lastAttachmentStripSignature = signature
+                    attachmentChipContainer.removeAllViews()
+                    attachmentChipContainer.addView(
+                        ComposerChromeViews.buildAttachmentChipsStrip(
+                            context = this,
+                            palette = palette,
+                            names = attachedNames,
+                            usedChars = attachedContext.length,
+                            maxChars = MAX_ATTACHMENT_CHARS,
+                            onInspect = { toggleToolsTray(force = true) },
+                            onClear = { clearAttachments() },
+                        )
+                    )
+                }
+            } else {
+                lastAttachmentStripSignature = null
+                attachmentChipContainer.removeAllViews()
+                attachmentChipContainer.visibility = View.GONE
+            }
         }
         if (!hasAttachment && ::attachmentCard.isInitialized) {
             attachmentCard.visibility = View.GONE
@@ -849,7 +926,40 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             transcribeWavButton.isEnabled = whisperContext != 0L && !isWhisperTranscribing
         }
         if (::suggestButton.isInitialized) {
-            suggestButton.alpha = if (suggestButton.isEnabled) 1f else .55f
+            val canSend = (taskInput.text.isNotBlank() || attachedContext.isNotBlank()) &&
+                !isWhisperTranscribing && !transcriptReviewPending
+            suggestButton.isEnabled = (isGeneratingUi && !isStoppingUi) || (!isGeneratingUi && canSend)
+            suggestButton.alpha = if (suggestButton.isEnabled) 1f else 0.5f
+        }
+        updateRecordingBanner()
+        updateJumpToBottomVisibility()
+    }
+
+    /** Updates the floating Jump-to-Bottom button based on scroll position and thread content. */
+    private fun updateJumpToBottomVisibility() {
+        if (!::jumpToBottomButton.isInitialized || !::chatScroll.isInitialized) return
+        val hasContent = ::chatThreadContainer.isInitialized && chatThreadContainer.childCount > 0
+        val show = hasContent && isUserReadingUpwards && chatScroll.canScrollVertically(1)
+        jumpToBottomButton.visibility = if (show) View.VISIBLE else View.GONE
+    }
+
+    /** Updates the visible recording banner and pulsing indicator inside the composer card. */
+    private fun updateRecordingBanner() {
+        if (!::recordingBanner.isInitialized) return
+        val isRec = inAppAudioRecorder.isRecordingActive
+        if (isRec || isDictating) {
+            recordingBannerText.text = if (isRec) {
+                "● Recording audio… Tap Stop"
+            } else {
+                "● Listening for dictation… Tap Stop"
+            }
+            if (recordingBanner.visibility != View.VISIBLE) {
+                recordingBanner.visibility = View.VISIBLE
+                recordingPulseAnimator.start(recordingDot)
+            }
+        } else {
+            recordingPulseAnimator.stop()
+            recordingBanner.visibility = View.GONE
         }
     }
 
@@ -860,6 +970,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         chatScroll.post {
             if (!force && isUserReadingUpwards) return@post
             chatScroll.fullScroll(View.FOCUS_DOWN)
+            updateJumpToBottomVisibility()
         }
     }
 
@@ -908,6 +1019,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
 
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString(STATE_PENDING_ANSWER_SAVE, pendingAnswerToSave)
+        outState.putString(STATE_ACTIVE_SESSION_ID, currentSession?.id)
         super.onSaveInstanceState(outState)
     }
 
@@ -959,7 +1071,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         updateStatus("Preparing to import ${cleanName ?: "model"}…")
         suggestButton.isEnabled = false
         maybeShowRefineAffordance = false
-        if (::refineButton.isInitialized) refineButton.visibility = View.GONE
+        activeAssistantHandle?.refineButton?.visibility = View.GONE
         if (duplexController.isActive) duplexController.stopSession()
 
         ioExecutor.execute {
@@ -1188,16 +1300,15 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                         "\nCombined attachment text limited to 12,000 characters. Temporary WAV cache file is deleted after processing."
                     showAttachmentPreview(attachedContext)
                     attachmentCard.visibility = View.VISIBLE
-                    syncComposerState()
                     isWhisperTranscribing = false
-                    suggestButton.isEnabled = false
+                    syncComposerState()
                     updateStatus("Transcript ready. Expand and review it, then tap Use reviewed transcript.")
                     updateWhisperActionButtons(true)
                 }
             } catch (e: Exception) {
                 mainHandler.post {
                     isWhisperTranscribing = false
-                    suggestButton.isEnabled = !transcriptReviewPending
+                    syncComposerState()
                     updateStatus("Could not transcribe WAV: ${e.message ?: "unsupported or unreadable audio"}")
                     updateWhisperActionButtons(whisperContext != 0L)
                 }
@@ -1255,11 +1366,13 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         transcribeWavButton.isEnabled = false
         recordAudioButton.text = "■  Stop recording"
         recordAudioButton.contentDescription = "Stop in-app audio recording"
+        updateRecordingBanner()
         updateStatus("Recording audio… speak your task (max 60 seconds). Tap Stop when done.")
 
         inAppAudioRecorder.startRecording(object : AudioRecorderListener {
             override fun onRecordingStarted() {
                 mainHandler.post {
+                    updateRecordingBanner()
                     updateStatus("Listening… audio is kept in memory (PCM 16-bit 16kHz mono).")
                 }
             }
@@ -1278,6 +1391,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
 
             override fun onRecordingComplete(samples: FloatArray) {
                 mainHandler.post {
+                    updateRecordingBanner()
                     recordAudioButton.text = "Transcribing…"
                     recordAudioButton.isEnabled = false
                 }
@@ -1289,7 +1403,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             override fun onError(error: Throwable) {
                 mainHandler.post {
                     resetRecordButton()
-                    suggestButton.isEnabled = !transcriptReviewPending
+                    syncComposerState()
                     updateWhisperActionButtons(whisperContext != 0L)
                     updateStatus("Recording error: ${error.message ?: "could not record audio"}")
                 }
@@ -1321,16 +1435,15 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                     "\nCombined attachment text limited to 12,000 characters. All recording memory is wiped after transcription."
                 showAttachmentPreview(attachedContext)
                 attachmentCard.visibility = View.VISIBLE
-                syncComposerState()
                 isWhisperTranscribing = false
-                suggestButton.isEnabled = false
+                syncComposerState()
                 updateStatus("Transcript ready. Expand and review it, then tap Use reviewed transcript.")
                 resetRecordButton()
             }
         } catch (e: Exception) {
             mainHandler.post {
                 isWhisperTranscribing = false
-                suggestButton.isEnabled = !transcriptReviewPending
+                syncComposerState()
                 updateStatus("Could not transcribe in-app audio: ${e.message ?: "unreadable audio"}")
                 resetRecordButton()
             }
@@ -1444,6 +1557,49 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
      * Any failure invalidates the cached conversation: after a timeout or a streaming error the
      * engine's context is in an unknown state, and reusing it would corrupt the next answer.
      */
+    @Volatile private var currentGenerationStageLabel: String = "Thinking"
+
+    private fun buildCallbacksForAnswer(answerProvider: () -> String): AssistantTurnCallbacks =
+        AssistantTurnCallbacks(
+            onCopyCode = { code, language ->
+                (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager)
+                    .setPrimaryClip(ClipData.newPlainText(language ?: "Code", code))
+                Toast.makeText(this, "Code copied", Toast.LENGTH_SHORT).show()
+            },
+            onCopyAnswer = { copyAnswerText(answerProvider()) },
+            onShareAnswer = { shareAnswerText(answerProvider()) },
+            onSpeakAnswer = { speakAnswerText(answerProvider()) },
+            onSaveAnswer = { saveAnswerToFile() },
+            onExportMarkdown = { exportCurrentAsMarkdown() },
+            onRegenerate = { regenerateAnswer() },
+            onRefine = { refineLastAnswer() },
+        )
+
+    private fun startGenerationIndicators(handle: ActiveAssistantCardHandle, initialStage: String) {
+        stopGenerationIndicators()
+        currentGenerationStageLabel = initialStage
+        generationStartElapsedMs = SystemClock.elapsedRealtime()
+        thinkingPulseAnimator.start(handle.statusDot)
+        handle.setStatusBadge("$initialStage · 0.0s", palette.teal)
+        val ticker = object : Runnable {
+            override fun run() {
+                if (!isGeneratingUi) return
+                val elapsed = SystemClock.elapsedRealtime() - generationStartElapsedMs
+                handle.statusLabel.text =
+                    "$currentGenerationStageLabel · ${ComposerChromeHelper.formatElapsedDuration(elapsed)}"
+                mainHandler.postDelayed(this, 250L)
+            }
+        }
+        generationTimerRunnable = ticker
+        mainHandler.postDelayed(ticker, 250L)
+    }
+
+    private fun stopGenerationIndicators() {
+        thinkingPulseAnimator.stop()
+        generationTimerRunnable?.let { mainHandler.removeCallbacks(it) }
+        generationTimerRunnable = null
+    }
+
     private fun runGuardedGeneration(
         convKey: String,
         prompt: String,
@@ -1456,7 +1612,13 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
 
         val guard = GuardedGeneration { partial ->
             val isFirst = firstChunk.compareAndSet(true, false)
-            if (isFirst) mainHandler.post { updateStatus("Response streaming locally…") }
+            if (isFirst) {
+                mainHandler.post {
+                    refreshModelStatus()
+                    currentGenerationStageLabel = "Streaming"
+                    updateStatus("Response streaming locally…")
+                }
+            }
             // Plain text at ~10 fps: no Markdown parsing on the UI thread while streaming.
             streamingRenderer.onPartial(partial)
         }
@@ -1529,30 +1691,70 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     // ------------------------------------------------ generation lifecycle & rendering helpers
 
     /**
-     * Formats and shows the finished answer.
-     *
-     * Markdown parsing happens once, on the IO executor, so the UI thread never pays for it. While
-     * it runs the plain streamed text stays visible, which means a long answer never flashes blank.
+     * Binds the completed raw markdown directly into [ActiveAssistantCardHandle] so rich headers,
+     * bold spans, and syntax-highlighted fenced code blocks render cleanly.
      */
-    private fun renderFinalAnswer(result: String, stoppedByUser: Boolean) {
+    private fun renderFinalAnswer(
+        handle: ActiveAssistantCardHandle,
+        result: String,
+        stoppedByUser: Boolean,
+        elapsedMs: Long,
+    ) {
+        streamingRenderer.cancel()
+        stopGenerationIndicators()
         if (result.isBlank()) {
-            answerText.text = if (stoppedByUser) "Generation stopped." else
-                "No answer was returned. Try rephrasing the request."
+            latestAssistantText = ""
+            answerIsComplete = false
+            handle.setStatusBadge(
+                if (stoppedByUser) "Stopped" else "No response",
+                if (stoppedByUser) palette.statusStandby else palette.statusMissing,
+            )
+            handle.bindCompletedMarkdown(
+                markdown = if (stoppedByUser) "Generation stopped." else "No answer was returned. Try rephrasing the request.",
+                isLatest = true,
+                showActions = false,
+            )
+            maybeFollowStreamingOutput()
             return
         }
-        streamingRenderer.onComplete(result) { formatted ->
-            answerText.text = formatted
-            maybeFollowStreamingOutput()
+
+        latestAssistantText = result
+        answerIsComplete = !stoppedByUser
+        val backendTag = when (engineManager.activeBackend) {
+            ActiveBackend.GPU -> "GPU"
+            ActiveBackend.CPU -> "CPU"
+            null -> "Local"
         }
+        val dotColor = when {
+            stoppedByUser -> palette.statusStandby
+            engineManager.activeBackend == ActiveBackend.GPU -> palette.statusLoadedGpu
+            engineManager.activeBackend == ActiveBackend.CPU -> palette.statusLoadedCpu
+            else -> palette.teal
+        }
+        val badgeText = if (stoppedByUser) {
+            "Stopped · partial"
+        } else {
+            "PocketAgent · $backendTag · ${ComposerChromeHelper.formatElapsedDuration(elapsedMs)}"
+        }
+        handle.setStatusBadge(badgeText, dotColor)
+        handle.timestampView.text = formatTimestampLabel(System.currentTimeMillis())
+        handle.timestampView.visibility = View.VISIBLE
+        handle.bindCompletedMarkdown(
+            markdown = result,
+            isLatest = true,
+            showActions = true,
+        )
+        maybeFollowStreamingOutput()
     }
 
     /** Switches the primary composer action from Ask to Stop while a generation is running. */
     private fun enterGeneratingState() {
         isGeneratingUi = true
+        isStoppingUi = false
         suggestButton.isEnabled = true
         suggestButton.text = "Stop"
         suggestButton.contentDescription = "Stop generating answer"
-        suggestButton.background = ripple(shape(STOP_CRIMSON, 16), 0x33FFFFFF)
+        suggestButton.background = ripple(shape(palette.stopCrimson, 16), palette.rippleOnAccent)
         suggestButton.setTextColor(WHITE)
         suggestButton.setOnClickListener { stopActiveGeneration() }
         syncComposerState()
@@ -1562,16 +1764,17 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     private fun exitGeneratingState() {
         if (!isGeneratingUi) return
         isGeneratingUi = false
-        val gradient = GradientDrawable(
-            GradientDrawable.Orientation.LEFT_RIGHT,
-            intArrayOf(0xFF167C6F.toInt(), 0xFF10574F.toInt())
-        ).apply { cornerRadius = dp(16).toFloat() }
+        isStoppingUi = false
+        val gradient = gradientPillDrawable(
+            palette.heroGradientStart,
+            palette.heroGradientEnd,
+            dp(16).toFloat(),
+        )
         suggestButton.text = "Ask"
         suggestButton.contentDescription = "Send your question and get an answer"
-        suggestButton.background = ripple(gradient, 0x33FFFFFF)
+        suggestButton.background = rippleDrawable(gradient, palette.rippleOnAccent)
         suggestButton.setTextColor(WHITE)
         suggestButton.setOnClickListener { suggestSteps() }
-        suggestButton.isEnabled = true
         syncComposerState()
     }
 
@@ -1583,15 +1786,16 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     private fun stopActiveGeneration() {
         if (!isGeneratingUi) return
         isGeneratingCancelled.set(true)
+        isStoppingUi = true
         streamingRenderer.cancel()
         engineManager.cancelActiveConversation()
         suggestButton.isEnabled = false
+        suggestButton.alpha = 0.5f
         suggestButton.text = "Stopping…"
         activeStreamLatch?.let { latch ->
             // The engine may never call onDone after a cancel, so release the waiter ourselves.
             latch.countDown()
         }
-        stopGeneratingButton.visibility = View.GONE
         updateStatus("Stopping generation…")
     }
 
@@ -1607,9 +1811,9 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
      * This replaces the old silent second inference pass: the user now chooses whether the extra
      * generation is worth it, instead of every vague answer costing two full runs.
      */
-    private fun updateRefineAffordance() {
-        if (!::refineButton.isInitialized) return
-        refineButton.visibility = if (maybeShowRefineAffordance && lastPrompt.isNotBlank()) {
+    private fun updateRefineAffordance(handle: ActiveAssistantCardHandle? = activeAssistantHandle) {
+        val btn = handle?.refineButton ?: return
+        btn.visibility = if (maybeShowRefineAffordance && lastPrompt.isNotBlank()) {
             View.VISIBLE
         } else {
             View.GONE
@@ -1624,6 +1828,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
      */
     private fun refineLastAnswer() {
         val task = lastPrompt
+        val handle = activeAssistantHandle ?: return
         if (task.isBlank() || isGeneratingUi || engineManager.isGenerationActive) return
         val modelFile = File(filesDir, "model.litertlm")
         if (!modelFile.exists()) {
@@ -1631,10 +1836,12 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             return
         }
         maybeShowRefineAffordance = false
-        updateRefineAffordance()
+        updateRefineAffordance(handle)
         isGeneratingCancelled.set(false)
         streamingRenderer.reset()
         enterGeneratingState()
+        handle.bindStreamingText("Refining answer…")
+        startGenerationIndicators(handle, "Refining")
         updateStatus("Refining the answer…")
 
         inferenceExecutor.execute {
@@ -1664,25 +1871,47 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                         retryBuild.estimatedTotalTokens + ChatMessage.estimateTextTokens(retried) + 8
                     )
                 }
+                val elapsedMs = SystemClock.elapsedRealtime() - generationStartElapsedMs
                 mainHandler.post {
                     exitGeneratingState()
+                    refreshModelStatus()
                     if (isGeneratingCancelled.get()) {
+                        renderFinalAnswer(handle, retried, stoppedByUser = true, elapsedMs = elapsedMs)
                         updateStatus("Generation stopped by user.")
                     } else if (retried.isNotBlank()) {
-                        answerIsComplete = true
-                        renderFinalAnswer(retried, stoppedByUser = false)
+                        renderFinalAnswer(handle, retried, stoppedByUser = false, elapsedMs = elapsedMs)
                         updateStatus("Answer refined.")
+                        try {
+                            val sess = currentSession
+                            if (sess != null) {
+                                val msgs = sess.messages.toMutableList()
+                                val lastIdx = msgs.indexOfLast { it.isAssistant }
+                                if (lastIdx >= 0) {
+                                    msgs[lastIdx] = ChatMessage.assistant(retried)
+                                    val updated = sess.copy(messages = msgs, updatedAt = System.currentTimeMillis())
+                                    sessionStore.saveSession(updated)
+                                    currentSession = updated
+                                }
+                            }
+                        } catch (_: Exception) {}
                     } else {
+                        stopGenerationIndicators()
+                        handle.setStatusBadge("No response", palette.statusMissing)
                         updateStatus("Refine did not produce a new answer.")
                     }
                 }
             } catch (e: Exception) {
                 mainHandler.post {
                     exitGeneratingState()
-                    updateStatus(
-                        if (isGeneratingCancelled.get()) "Generation stopped by user."
-                        else "Could not refine the answer: ${e.message ?: "unknown error"}"
-                    )
+                    stopGenerationIndicators()
+                    refreshModelStatus()
+                    if (isGeneratingCancelled.get()) {
+                        handle.setStatusBadge("Stopped", palette.statusStandby)
+                        updateStatus("Generation stopped by user.")
+                    } else {
+                        handle.setStatusBadge("Error", palette.statusMissing)
+                        updateStatus("Could not refine the answer: ${e.message ?: "unknown error"}")
+                    }
                 }
             }
         }
@@ -1730,8 +1959,11 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 val reason = gpuError.message ?: gpuError.javaClass.simpleName
                 if (engineManager.fallbackToCpuAfterRuntimeFailure(reason, modelFile, cacheDir)) {
                     mainHandler.post {
+                        refreshModelStatus()
+                        currentGenerationStageLabel = "Retrying on CPU"
                         updateStatus("GPU runtime failed; switched to CPU and retrying…")
-                        answerText.text = "Retrying on CPU…"
+                        activeAssistantHandle?.setStatusBadge("Retrying on CPU…", palette.statusLoadedCpu)
+                        activeAssistantHandle?.bindStreamingText("Retrying on CPU…")
                     }
                     streamingRenderer.reset()
                     onBeforeCpuRetry?.invoke()
@@ -1774,34 +2006,69 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         lastPrompt = task
         isGeneratingCancelled.set(false)
         streamingRenderer.reset()
+
+        val attachmentSummary = if (attachedContext.isNotBlank()) {
+            attachedNames.joinToString(" · ").ifBlank { "Attachment" }
+        } else {
+            null
+        }
+        val attachmentRefs = attachedNames.toList()
+        val userMsg = ChatMessage.user(
+            content = task,
+            attachmentContent = if (attachedContext.isNotBlank()) attachedContext else null,
+            attachmentSummary = attachmentSummary,
+            attachmentReferences = attachmentRefs,
+        )
+        val userCard = ChatMessageCardBuilder.buildUserCard(this, userMsg, palette)
+        chatThreadContainer.addView(userCard, marginBottom(10))
+
+        activeAssistantHandle?.setLatestTurn(false)
+        val handle = ChatMessageCardBuilder.buildAssistantCard(
+            context = this,
+            message = null,
+            palette = palette,
+            isLatest = true,
+            callbacks = buildCallbacksForAnswer { latestAssistantText },
+        )
+        chatThreadContainer.addView(handle.rootCard, marginBottom(12))
+        activeAssistantHandle = handle
+
+        taskInput.setText("")
         ComposerInputGuard.resetInputHeight(taskInput)
-        suggestButton.isEnabled = false
         answerIsComplete = false
-        outputCard.visibility = View.VISIBLE
-        stopGeneratingButton.visibility = View.GONE
+        latestAssistantText = ""
+        maybeShowRefineAffordance = false
+
+        val initialBackendLabel = if (engineManager.preference == BackendPreference.CPU_ONLY) {
+            "CPU"
+        } else {
+            engineManager.activeBackend?.name ?: "GPU"
+        }
         enterGeneratingState()
+        handle.bindStreamingText("Working on it…")
+        startGenerationIndicators(handle, "Thinking on $initialBackendLabel")
+        isUserReadingUpwards = false
         syncComposerState()
         scrollChatToBottom(force = true)
-        answerText.text = "Working on it…"
-        val initialBackendLabel = if (engineManager.preference == BackendPreference.CPU_ONLY) "CPU" else {
-            engineManager.activeBackend?.name ?: "GPU/auto"
-        }
         updateStatus("Answering on this device ($initialBackendLabel)…")
+
+        val attachmentSnapshot = attachedContext
         inferenceExecutor.execute {
             var localCitations = emptyList<LocalDocumentRetriever.DocumentCitation>()
             try {
                 ensureEngineInitialized(modelFile)
-                val intent = AnswerDirective.classify(task.ifBlank { attachedContext })
+                mainHandler.post { refreshModelStatus() }
+                val intent = AnswerDirective.classify(task.ifBlank { attachmentSnapshot })
                 val calculation = if (task.isNotBlank()) LocalCalculatorTool.tryEvaluate(task) else null
-                val boundedAttachment = if (attachedContext.isNotBlank()) {
+                val boundedAttachment = if (attachmentSnapshot.isNotBlank()) {
                     val retrieval = LocalDocumentRetriever.retrieveTextWithCitations(
                         query = task,
-                        documentText = attachedContext,
-                        sourceName = attachedNames.firstOrNull() ?: "attachment",
+                        documentText = attachmentSnapshot,
+                        sourceName = attachmentRefs.firstOrNull() ?: "attachment",
                         maxChars = MAX_ATTACHMENT_CHARS,
                     )
                     localCitations = retrieval.citations
-                    if (retrieval.promptContext.isNotBlank()) retrieval.promptContext else attachedContext
+                    if (retrieval.promptContext.isNotBlank()) retrieval.promptContext else attachmentSnapshot
                 } else {
                     localCitations = emptyList()
                     ""
@@ -1866,22 +2133,22 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                     (AnswerDirective.looksLikeDelegationRefusal(result, intent) ||
                         AnswerDirective.isUnsubstantive(result))
                 maybeShowRefineAffordance = needsRefineHint
+                val elapsedMs = SystemClock.elapsedRealtime() - generationStartElapsedMs
                 mainHandler.post {
                     exitGeneratingState()
-                    stopGeneratingButton.visibility = View.GONE
-                    suggestButton.isEnabled = true
+                    refreshModelStatus()
                     syncComposerState()
-                    scrollChatToBottom()
                     currentCitations = localCitations
-                    renderCitations(localCitations)
+                    renderCitations(localCitations, handle.citationsContainer)
                     if (isGeneratingCancelled.get()) {
-                        renderFinalAnswer(result, stoppedByUser = true)
+                        renderFinalAnswer(handle, result, stoppedByUser = true, elapsedMs = elapsedMs)
                         updateStatus("Generation stopped by user.")
+                        scrollChatToBottom()
                         return@post
                     }
-                    answerIsComplete = result.isNotBlank()
-                    renderFinalAnswer(result, stoppedByUser = false)
-                    updateRefineAffordance()
+                    renderFinalAnswer(handle, result, stoppedByUser = false, elapsedMs = elapsedMs)
+                    updateRefineAffordance(handle)
+                    scrollChatToBottom()
                     val stopped = runawayFragment
                     updateStatus(
                         when {
@@ -1895,10 +2162,6 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                     if (result.isNotBlank()) {
                         try {
                             val sess = currentSession ?: activeSession
-                            val userMsg = ChatMessage.user(
-                                content = task,
-                                attachmentContent = if (attachedContext.isNotBlank()) attachedContext else null
-                            )
                             val assistantMsg = ChatMessage.assistant(result)
                             val updated = sess.withMessage(userMsg).withMessage(assistantMsg)
                             sessionStore.saveSession(updated)
@@ -1908,12 +2171,12 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
 
                     // Safe actionable system intents review
                     val parsedActions = SystemActionTools.parseActions(result)
-                    systemActionContainer.removeAllViews()
+                    handle.systemActionContainer.removeAllViews()
                     if (parsedActions.isNotEmpty()) {
-                        systemActionContainer.visibility = View.VISIBLE
+                        handle.systemActionContainer.visibility = View.VISIBLE
                         for (action in parsedActions.take(3)) {
                             val reviewUi = SystemActionTools.getReviewUi(action)
-                            systemActionContainer.addView(
+                            handle.systemActionContainer.addView(
                                 pillButton(reviewUi.buttonLabel, accessibilityLabel = reviewUi.buttonLabel) {
                                     showActionReviewDialog(reviewUi)
                                 }.apply {
@@ -1922,25 +2185,31 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                             )
                         }
                     } else {
-                        systemActionContainer.visibility = View.GONE
+                        handle.systemActionContainer.visibility = View.GONE
                     }
                 }
             } catch (e: Exception) {
                 mainHandler.post {
                     exitGeneratingState()
-                    stopGeneratingButton.visibility = View.GONE
-                    suggestButton.isEnabled = true
+                    stopGenerationIndicators()
+                    refreshModelStatus()
                     syncComposerState()
                     if (isGeneratingCancelled.get()) {
+                        handle.setStatusBadge("Stopped", palette.statusStandby)
                         updateStatus("Generation stopped by user.")
                     } else {
                         currentCitations = localCitations
-                        renderCitations(localCitations)
+                        renderCitations(localCitations, handle.citationsContainer)
                         answerIsComplete = false
-                        answerText.text = ""
-                        outputCard.visibility = View.GONE
-                        systemActionContainer.removeAllViews()
-                        systemActionContainer.visibility = View.GONE
+                        latestAssistantText = ""
+                        handle.setStatusBadge("Error", palette.statusMissing)
+                        handle.bindCompletedMarkdown(
+                            markdown = "Could not generate an answer: ${e.message ?: "unknown error"}",
+                            isLatest = true,
+                            showActions = false,
+                        )
+                        handle.systemActionContainer.removeAllViews()
+                        handle.systemActionContainer.visibility = View.GONE
                         updateStatus("Could not generate an answer: ${e.message ?: "unknown error"}")
                     }
                 }
@@ -1949,13 +2218,17 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun regenerateAnswer() {
-        if (lastPrompt.isNotBlank() && suggestButton.isEnabled) {
+        if (lastPrompt.isNotBlank() && !isGeneratingUi && !engineManager.isGenerationActive) {
             taskInput.setText(lastPrompt)
             suggestSteps()
         }
     }
 
     private fun startNewConversation() {
+        if (isGeneratingUi || engineManager.isGenerationActive) {
+            updateStatus("Stop active generation before starting a new chat.")
+            return
+        }
         val newSession = ConversationSession.createWithInitialPrompt("New Conversation")
         try {
             sessionStore.saveSession(newSession)
@@ -1963,56 +2236,91 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         currentSession = newSession
         engineManager.invalidateConversation("new chat")
         maybeShowRefineAffordance = false
-        if (::refineButton.isInitialized) refineButton.visibility = View.GONE
+        currentCitations = emptyList()
+        activeAssistantHandle = null
+        latestAssistantText = ""
+        answerIsComplete = false
+        lastPrompt = ""
+        if (::chatThreadContainer.isInitialized) {
+            chatThreadContainer.removeAllViews()
+        }
         taskInput.setText("")
         ComposerInputGuard.resetInputHeight(taskInput)
-        answerText.text = ""
-        outputCard.visibility = View.GONE
-        systemActionContainer.removeAllViews()
-        systemActionContainer.visibility = View.GONE
-        lastPrompt = ""
+        isUserReadingUpwards = false
         syncComposerState()
         scrollChatToBottom(force = true)
         updateStatus("Started a new conversation.")
     }
 
     private fun loadSession(id: String) {
+        if (isGeneratingUi || engineManager.isGenerationActive) {
+            updateStatus("Stop active generation before switching conversations.")
+            return
+        }
         val s = sessionStore.getSession(id) ?: return
         currentSession = s
         // A different chat must not inherit the previous chat's KV cache.
         engineManager.invalidateConversation("session switched")
-        val lastUserMsg = s.messages.lastOrNull { it.isUser }
-        val lastAssistantMsg = s.messages.lastOrNull { it.isAssistant }
-        if (lastUserMsg != null) {
-            taskInput.setText(lastUserMsg.content)
-            ComposerInputGuard.resetInputHeight(taskInput)
-            lastPrompt = lastUserMsg.content
+        maybeShowRefineAffordance = false
+        currentCitations = emptyList()
+        activeAssistantHandle = null
+        latestAssistantText = ""
+        answerIsComplete = false
+        chatThreadContainer.removeAllViews()
+
+        val lastAssistantIndex = s.messages.indexOfLast { it.isAssistant }
+        for ((index, msg) in s.messages.withIndex()) {
+            when (msg.role) {
+                ChatMessage.Role.USER -> {
+                    val card = ChatMessageCardBuilder.buildUserCard(this, msg, palette)
+                    chatThreadContainer.addView(card, marginBottom(10))
+                }
+                ChatMessage.Role.ASSISTANT -> {
+                    val isLatest = (index == lastAssistantIndex)
+                    val handle = ChatMessageCardBuilder.buildAssistantCard(
+                        context = this,
+                        message = msg,
+                        palette = palette,
+                        isLatest = isLatest,
+                        callbacks = buildCallbacksForAnswer(
+                            if (isLatest) {
+                                { latestAssistantText }
+                            } else {
+                                { msg.content }
+                            }
+                        ),
+                    )
+                    chatThreadContainer.addView(handle.rootCard, marginBottom(12))
+                    if (isLatest) {
+                        activeAssistantHandle = handle
+                        latestAssistantText = msg.content
+                        answerIsComplete = msg.content.isNotBlank()
+                    }
+                }
+                ChatMessage.Role.SYSTEM -> Unit
+            }
         }
-        if (lastAssistantMsg != null) {
-            outputCard.visibility = View.VISIBLE
-            answerText.text = MarkdownFormatter.formatForDisplay(lastAssistantMsg.content)
-            answerIsComplete = true
-        } else {
-            outputCard.visibility = View.GONE
-            answerText.text = ""
-            answerIsComplete = false
-        }
+
+        lastPrompt = s.messages.lastOrNull { it.isUser }?.content.orEmpty()
+        taskInput.setText("")
+        ComposerInputGuard.resetInputHeight(taskInput)
+        isUserReadingUpwards = false
+        syncComposerState()
+        scrollChatToBottom(force = true)
         updateStatus("Loaded: ${s.title}")
     }
 
     private fun showHistoryDialog() {
-        val summaries = sessionStore.listSessionSummaries()
-        val dialogView = column().apply {
-            setPadding(dp(18), dp(12), dp(18), dp(18))
-        }
+        var allSessions = sessionStore.listSessions().sortedWith(
+            compareByDescending<ConversationSession> { it.isPinned }
+                .thenByDescending { it.updatedAt }
+        )
+        val dialogView = styleDialogContainer(this, palette, paddingDp = 16)
 
         val searchBox = EditText(this).apply {
             hint = "Search conversations…"
             textSize = 14f
-            background = shape(SURFACE, 12, BORDER)
-            setPadding(dp(12), dp(10), dp(12), dp(10))
-            setTextColor(INK)
-            setHintTextColor(MUTED)
+            styleEditText(this, palette)
         }
         dialogView.addView(searchBox, marginBottom(12))
 
@@ -2025,25 +2333,46 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
 
         lateinit var dialog: AlertDialog
 
-        fun populateList(query: String = "") {
+        fun populateList(query: String = "", reload: Boolean = false) {
+            if (reload) {
+                allSessions = sessionStore.listSessions().sortedWith(
+                    compareByDescending<ConversationSession> { it.isPinned }
+                        .thenByDescending { it.updatedAt }
+                )
+                dialog.setTitle("Conversations (${allSessions.size})")
+            }
             listContainer.removeAllViews()
-            val filtered = if (query.isBlank()) summaries else summaries.filter {
-                it.title.contains(query, ignoreCase = true)
+            val filtered = if (query.isBlank()) {
+                allSessions
+            } else {
+                allSessions.filter { sess ->
+                    sess.title.contains(query, ignoreCase = true) ||
+                        sess.messages.any { it.content.contains(query, ignoreCase = true) }
+                }
             }
             if (filtered.isEmpty()) {
-                listContainer.addView(text("No conversations found.", 13f, MUTED).apply {
-                    setPadding(0, dp(20), 0, dp(20))
+                listContainer.addView(text("No conversations found.", 13f, palette.muted).apply {
+                    setPadding(0, dp(24), 0, dp(24))
                     gravity = Gravity.CENTER
                 })
                 return
             }
 
+            val dateFormatter = java.text.SimpleDateFormat("MMM dd, yyyy · HH:mm", java.util.Locale.getDefault())
             for (s in filtered) {
                 val row = LinearLayout(this).apply {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
-                    setPadding(dp(10), dp(10), dp(10), dp(10))
-                    background = shape(SURFACE, 12, BORDER)
+                    setPadding(dp(12), dp(10), dp(6), dp(10))
+                    background = rippleDrawable(
+                        roundedShape(
+                            color = palette.surfaceElevated,
+                            radiusPx = dp(14).toFloat(),
+                            strokeWidthPx = maxOf(1, dp(1)),
+                            strokeColor = palette.border,
+                        ),
+                        palette.rippleOnSurface,
+                    )
                     isClickable = true
                     isFocusable = true
                     setOnClickListener {
@@ -2053,18 +2382,33 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 }
                 val info = column().apply {
                     val titlePrefix = if (s.isPinned) "📌 " else ""
-                    addView(text("$titlePrefix${s.title}", 14f, INK, true))
-                    val dateStr = java.text.SimpleDateFormat("MMM dd, yyyy · HH:mm", java.util.Locale.getDefault()).format(java.util.Date(s.updatedAt))
-                    addView(text("$dateStr · ${s.messageCount} turns", 11f, MUTED))
+                    addView(text("$titlePrefix${s.title}", 14.5f, palette.ink, true))
+                    val previewSnippet = s.messages.lastOrNull()?.content
+                        ?.trim()
+                        ?.replace(Regex("\\s+"), " ")
+                        .orEmpty()
+                    if (previewSnippet.isNotEmpty()) {
+                        addView(text(previewSnippet, 12.5f, palette.muted).apply {
+                            maxLines = 2
+                            ellipsize = TextUtils.TruncateAt.END
+                            setPadding(0, dp(3), 0, dp(3))
+                        })
+                    }
+                    val dateStr = dateFormatter.format(java.util.Date(s.updatedAt))
+                    addView(text("$dateStr · ${s.messageCount} turns", 11f, palette.teal))
                 }
                 row.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
 
-                val menuBtn = text("⋮", 18f, MUTED, true).apply {
-                    setPadding(dp(10), dp(4), dp(10), dp(4))
-                    setOnClickListener {
-                        showSessionOptionsMenu(s) {
-                            populateList(searchBox.text.toString())
-                        }
+                val menuBtn = iconTouchButton(
+                    context = this,
+                    palette = palette,
+                    iconText = "⋮",
+                    accessibilityLabel = "Options for ${s.title}",
+                    textColor = palette.muted,
+                    textSizeSp = 18f,
+                ) {
+                    showSessionOptionsMenu(s) {
+                        populateList(searchBox.text.toString(), reload = true)
                     }
                 }
                 row.addView(menuBtn)
@@ -2080,53 +2424,85 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             override fun afterTextChanged(s: android.text.Editable?) {}
         })
 
-        populateList()
-
         dialog = AlertDialog.Builder(this)
-            .setTitle("Conversations (${summaries.size})")
+            .setTitle("Conversations (${allSessions.size})")
             .setView(dialogView)
             .setPositiveButton("+ New Chat") { _, _ ->
                 startNewConversation()
             }
             .setNegativeButton("Close", null)
             .create()
-        dialog.show()
+        populateList()
+        showStyledAlertDialog(dialog, palette)
     }
 
-    private fun showSessionOptionsMenu(s: SessionSummary, onUpdated: () -> Unit) {
-        val pinLabel = if (s.isPinned) "Unpin" else "Pin to top"
-        val options = arrayOf(pinLabel, "Rename", "Export as Markdown", "Export as Text", "Delete")
-        AlertDialog.Builder(this)
-            .setTitle(s.title)
-            .setItems(options) { _, which ->
-                when (which) {
-                    0 -> {
-                        sessionStore.pinSession(s.id, !s.isPinned)
-                        onUpdated()
+    private fun showSessionOptionsMenu(s: ConversationSession, onUpdated: () -> Unit) {
+        val dialogView = styleDialogContainer(this, palette, paddingDp = 16)
+        lateinit var menuDialog: AlertDialog
+
+        val pinLabel = if (s.isPinned) "Unpin conversation" else "📌 Pin to top"
+        val actions = listOf(
+            pinLabel to false,
+            "✏️ Rename" to false,
+            "📄 Export as Markdown" to false,
+            "📝 Export as Text" to false,
+            "🗑️ Delete conversation" to true,
+        )
+        for ((index, spec) in actions.withIndex()) {
+            val (label, isDanger) = spec
+            val btn = if (isDanger) {
+                dangerButton(this, palette, label, accessibilityLabel = label) {
+                    menuDialog.dismiss()
+                    sessionStore.deleteSession(s.id)
+                    if (currentSession?.id == s.id) {
+                        startNewConversation()
                     }
-                    1 -> promptRenameSession(s, onUpdated)
-                    2 -> exportSessionToShare(s.id, asMarkdown = true)
-                    3 -> exportSessionToShare(s.id, asMarkdown = false)
-                    4 -> {
-                        sessionStore.deleteSession(s.id)
-                        if (currentSession?.id == s.id) {
-                            startNewConversation()
+                    onUpdated()
+                }
+            } else {
+                secondaryOutlineButton(this, palette, label, accessibilityLabel = label) {
+                    menuDialog.dismiss()
+                    when (index) {
+                        0 -> {
+                            sessionStore.pinSession(s.id, !s.isPinned)
+                            onUpdated()
                         }
-                        onUpdated()
+                        1 -> promptRenameSession(s, onUpdated)
+                        2 -> exportSessionToShare(s.id, asMarkdown = true)
+                        3 -> exportSessionToShare(s.id, asMarkdown = false)
                     }
                 }
             }
-            .show()
+            dialogView.addView(
+                btn,
+                LinearLayout.LayoutParams(-1, -2).apply {
+                    if (index < actions.lastIndex) bottomMargin = dp(8)
+                },
+            )
+        }
+
+        menuDialog = AlertDialog.Builder(this)
+            .setTitle(s.title)
+            .setView(dialogView)
+            .setNegativeButton("Cancel", null)
+            .create()
+        showStyledAlertDialog(menuDialog, palette)
     }
 
-    private fun promptRenameSession(s: SessionSummary, onUpdated: () -> Unit) {
+    private fun promptRenameSession(s: ConversationSession, onUpdated: () -> Unit) {
+        val container = styleDialogContainer(this, palette, paddingDp = 16)
         val input = EditText(this).apply {
+            hint = "Conversation title…"
+            textSize = 14f
+            styleEditText(this, palette)
             setText(s.title)
             setSelection(text.length)
         }
-        AlertDialog.Builder(this)
+        container.addView(input)
+
+        val dialog = AlertDialog.Builder(this)
             .setTitle("Rename Conversation")
-            .setView(input)
+            .setView(container)
             .setPositiveButton("Save") { _, _ ->
                 val newTitle = input.text.toString().trim()
                 if (newTitle.isNotBlank()) {
@@ -2138,7 +2514,8 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 }
             }
             .setNegativeButton("Cancel", null)
-            .show()
+            .create()
+        showStyledAlertDialog(dialog, palette)
     }
 
     private fun exportSessionToShare(id: String, asMarkdown: Boolean) {
@@ -2155,10 +2532,10 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
 
     private fun exportCurrentAsMarkdown() {
         val sess = currentSession
-        if (sess != null) {
+        if (sess != null && sess.messages.isNotEmpty()) {
             exportSessionToShare(sess.id, asMarkdown = true)
         } else {
-            val text = answerText.text.toString()
+            val text = latestAssistantText
             if (text.isNotBlank()) {
                 val shareIntent = Intent(Intent.ACTION_SEND).apply {
                     type = "text/markdown"
@@ -2173,38 +2550,61 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun showMemoryCenterDialog() {
-        val dialogView = column().apply {
-            setPadding(dp(18), dp(12), dp(18), dp(18))
-        }
+        val dialogView = styleDialogContainer(this, palette, paddingDp = 16)
 
         val headerRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        val toggleButton = pillButton(
-            if (isMemoryEnabled) "Memory: ON" else "Memory: OFF",
-            accessibilityLabel = "Toggle sovereign long-term memory"
+        val toggleButton = com.example.pocketagent.pillButton(
+            context = this,
+            palette = palette,
+            label = if (isMemoryEnabled) "Memory: ON" else "Memory: OFF",
+            accessibilityLabel = "Toggle sovereign long-term memory",
+            compact = true,
         ) {}.apply {
-            layoutParams = LinearLayout.LayoutParams(-2, dp(34)).apply { marginEnd = dp(8) }
+            layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(8) }
         }
         headerRow.addView(toggleButton)
 
-        val addFactBtn = pillButton("➕ Add Fact", accessibilityLabel = "Manually record a user preference or fact") {}.apply {
-            layoutParams = LinearLayout.LayoutParams(-2, dp(34)).apply { marginEnd = dp(8) }
+        val addFactBtn = com.example.pocketagent.pillButton(
+            context = this,
+            palette = palette,
+            label = "➕ Add Fact",
+            accessibilityLabel = "Manually record a user preference or fact",
+            compact = true,
+        ) {}.apply {
+            layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(8) }
         }
         headerRow.addView(addFactBtn)
 
-        val clearAllBtn = textButton("Clear All", accessibilityLabel = "Clear all sovereign memories") {}
+        val clearAllBtn = dangerButton(
+            context = this,
+            palette = palette,
+            label = "Clear All",
+            accessibilityLabel = "Clear all sovereign memories",
+            compact = true,
+        ) {}
         headerRow.addView(clearAllBtn)
-        dialogView.addView(headerRow, marginBottom(12))
 
-        val desc = text("100% on-device memory. PocketAgent remembers key facts and preferences across conversations without sending data anywhere.", 12f, MUTED)
+        val headerScroll = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            overScrollMode = View.OVER_SCROLL_NEVER
+            addView(headerRow)
+        }
+        dialogView.addView(headerScroll, marginBottom(10))
+
+        val desc = text(
+            "100% on-device memory. PocketAgent remembers key facts and preferences across conversations without sending data anywhere.",
+            12f,
+            palette.muted,
+        )
         dialogView.addView(desc, marginBottom(12))
 
         val listContainer = column()
         val scroll = ScrollView(this).apply {
             addView(listContainer)
-            layoutParams = LinearLayout.LayoutParams(-1, dp(320))
+            layoutParams = LinearLayout.LayoutParams(-1, dp(310))
         }
         dialogView.addView(scroll)
 
@@ -2212,10 +2612,12 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             listContainer.removeAllViews()
             val memories = userMemoryStore.listMemories()
             if (memories.isEmpty()) {
-                listContainer.addView(text("No memories recorded yet.\nAs you chat, preferences and facts will be remembered here.", 13f, MUTED).apply {
-                    setPadding(0, dp(30), 0, dp(30))
-                    gravity = Gravity.CENTER
-                })
+                listContainer.addView(
+                    text("No memories recorded yet.\nAs you chat, preferences and facts will be remembered here.", 13f, palette.muted).apply {
+                        setPadding(0, dp(30), 0, dp(30))
+                        gravity = Gravity.CENTER
+                    }
+                )
                 return
             }
 
@@ -2223,23 +2625,34 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 val card = LinearLayout(this).apply {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
-                    setPadding(dp(12), dp(10), dp(12), dp(10))
-                    background = shape(SURFACE, 12, BORDER)
+                    setPadding(dp(12), dp(10), dp(6), dp(10))
+                    background = roundedShape(
+                        color = palette.surfaceElevated,
+                        radiusPx = dp(14).toFloat(),
+                        strokeWidthPx = maxOf(1, dp(1)),
+                        strokeColor = palette.border,
+                    )
                 }
 
                 val info = column().apply {
                     val catBadge = "[${m.displayLabel}]"
-                    addView(text(catBadge, 11f, TEAL, true))
-                    addView(text(m.content, 13f, INK))
+                    addView(text(catBadge, 11f, palette.teal, true))
+                    addView(text(m.content, 13.5f, palette.ink).apply {
+                        setPadding(0, dp(2), 0, 0)
+                    })
                 }
                 card.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
 
-                val delBtn = text("✕", 16f, MUTED, true).apply {
-                    setPadding(dp(12), dp(6), dp(6), dp(6))
-                    setOnClickListener {
-                        userMemoryStore.deleteMemory(m.id)
-                        refreshList()
-                    }
+                val delBtn = iconTouchButton(
+                    context = this,
+                    palette = palette,
+                    iconText = "✕",
+                    accessibilityLabel = "Delete memory fact",
+                    textColor = palette.muted,
+                    textSizeSp = 16f,
+                ) {
+                    userMemoryStore.deleteMemory(m.id)
+                    refreshList()
                 }
                 card.addView(delBtn)
 
@@ -2258,7 +2671,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         }
 
         clearAllBtn.setOnClickListener {
-            AlertDialog.Builder(this)
+            val confirmDialog = AlertDialog.Builder(this)
                 .setTitle("Clear All Memories?")
                 .setMessage("Are you sure you want to permanently delete all stored memory facts?")
                 .setPositiveButton("Clear") { _, _ ->
@@ -2267,41 +2680,58 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                     Toast.makeText(this, "All memories cleared", Toast.LENGTH_SHORT).show()
                 }
                 .setNegativeButton("Cancel", null)
-                .show()
+                .create()
+            showStyledAlertDialog(confirmDialog, palette)
         }
 
         refreshList()
 
-        AlertDialog.Builder(this)
+        val dialog = AlertDialog.Builder(this)
             .setTitle("🧠 Sovereign Memory Vault")
             .setView(dialogView)
             .setPositiveButton("Close", null)
-            .show()
+            .create()
+        showStyledAlertDialog(dialog, palette)
     }
 
     private fun promptAddMemoryFact(onAdded: () -> Unit) {
         val input = EditText(this).apply {
             hint = "e.g., Prefers Kotlin, Speaks Bengali, Offline only…"
             textSize = 14f
-            background = shape(SURFACE, 12, BORDER)
-            setPadding(dp(12), dp(10), dp(12), dp(10))
-            setTextColor(INK)
-            setHintTextColor(MUTED)
+            styleEditText(this, palette)
         }
         val categories = arrayOf("Preference", "Profile", "Constraint", "Goal", "Custom")
         var selectedCategoryIndex = 0
 
-        val container = column().apply {
-            setPadding(dp(18), dp(12), dp(18), dp(12))
-            addView(input, marginBottom(10))
+        val container = styleDialogContainer(this, palette, paddingDp = 16).apply {
+            addView(input, marginBottom(12))
+            addView(text("Category", 12.5f, palette.muted, true), marginBottom(6))
         }
 
-        AlertDialog.Builder(this)
+        val radioGroup = RadioGroup(this).apply {
+            orientation = RadioGroup.VERTICAL
+        }
+        val radioButtons = categories.mapIndexed { idx, label ->
+            RadioButton(this).apply {
+                id = View.generateViewId()
+                text = label
+                textSize = 14f
+                setTextColor(palette.ink)
+                buttonTintList = ColorStateList.valueOf(palette.teal)
+                minHeight = dp(40)
+                setPadding(dp(6), dp(4), dp(6), dp(4))
+                isChecked = idx == 0
+                setOnClickListener { selectedCategoryIndex = idx }
+            }.also { radioGroup.addView(it) }
+        }
+        if (radioButtons.isNotEmpty()) {
+            radioGroup.check(radioButtons[0].id)
+        }
+        container.addView(radioGroup)
+
+        val dialog = AlertDialog.Builder(this)
             .setTitle("Add Memory Fact")
             .setView(container)
-            .setSingleChoiceItems(categories, 0) { _, which ->
-                selectedCategoryIndex = which
-            }
             .setPositiveButton("Save") { _, _ ->
                 val fact = input.text.toString().trim()
                 if (fact.isNotBlank()) {
@@ -2317,21 +2747,17 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 }
             }
             .setNegativeButton("Cancel", null)
-            .show()
+            .create()
+        showStyledAlertDialog(dialog, palette)
     }
 
     private fun showNotesManagerDialog() {
-        val dialogView = column().apply {
-            setPadding(dp(18), dp(12), dp(18), dp(18))
-        }
+        val dialogView = styleDialogContainer(this, palette, paddingDp = 16)
 
         val searchBox = EditText(this).apply {
             hint = "Search personal notes…"
             textSize = 14f
-            background = shape(SURFACE, 12, BORDER)
-            setPadding(dp(12), dp(10), dp(12), dp(10))
-            setTextColor(INK)
-            setHintTextColor(MUTED)
+            styleEditText(this, palette)
         }
         dialogView.addView(searchBox, marginBottom(12))
 
@@ -2346,30 +2772,43 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             listContainer.removeAllViews()
             val notes = notesStore.searchNotes(query)
             if (notes.isEmpty()) {
-                listContainer.addView(text("No notes found.", 13f, MUTED).apply {
+                listContainer.addView(text("No notes found.", 13f, palette.muted).apply {
                     setPadding(0, dp(30), 0, dp(30))
                     gravity = Gravity.CENTER
                 })
                 return
             }
 
+            val dateFormatter = java.text.SimpleDateFormat("MMM dd, yyyy", java.util.Locale.getDefault())
             for (n in notes) {
                 val card = LinearLayout(this).apply {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
-                    setPadding(dp(12), dp(10), dp(12), dp(10))
-                    background = shape(SURFACE, 12, BORDER)
+                    setPadding(dp(12), dp(10), dp(6), dp(10))
+                    background = rippleDrawable(
+                        roundedShape(
+                            color = palette.surfaceElevated,
+                            radiusPx = dp(14).toFloat(),
+                            strokeWidthPx = maxOf(1, dp(1)),
+                            strokeColor = palette.border,
+                        ),
+                        palette.rippleOnSurface,
+                    )
+                    isClickable = true
+                    isFocusable = true
                 }
 
                 val info = column().apply {
                     val pinPrefix = if (n.isPinned) "📌 " else ""
-                    addView(text("$pinPrefix${n.title}", 14f, INK, true))
+                    addView(text("$pinPrefix${n.title}", 14.5f, palette.ink, true))
                     if (n.content.isNotBlank()) {
-                        val preview = n.content.take(80).replace("\n", " ") + (if (n.content.length > 80) "…" else "")
-                        addView(text(preview, 12f, MUTED))
+                        val preview = n.content.take(90).replace("\n", " ") + (if (n.content.length > 90) "…" else "")
+                        addView(text(preview, 12.5f, palette.muted).apply {
+                            setPadding(0, dp(2), 0, dp(2))
+                        })
                     }
-                    val dateStr = java.text.SimpleDateFormat("MMM dd, yyyy", java.util.Locale.getDefault()).format(java.util.Date(n.updatedAt))
-                    addView(text(dateStr, 10f, TEAL))
+                    val dateStr = dateFormatter.format(java.util.Date(n.updatedAt))
+                    addView(text(dateStr, 11f, palette.teal))
                 }
                 card.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
 
@@ -2377,21 +2816,29 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                     promptEditNote(n) { refreshList(searchBox.text.toString()) }
                 }
 
-                val pinBtn = text(if (n.isPinned) "Unpin" else "Pin", 11f, TEAL, true).apply {
-                    setPadding(dp(8), dp(4), dp(8), dp(4))
-                    setOnClickListener {
-                        notesStore.pinNote(n.id, !n.isPinned)
-                        refreshList(searchBox.text.toString())
-                    }
+                val pinBtn = iconTouchButton(
+                    context = this,
+                    palette = palette,
+                    iconText = if (n.isPinned) "📌" else "📍",
+                    accessibilityLabel = if (n.isPinned) "Unpin note ${n.title}" else "Pin note ${n.title}",
+                    textColor = if (n.isPinned) palette.teal else palette.muted,
+                    textSizeSp = 15f,
+                ) {
+                    notesStore.pinNote(n.id, !n.isPinned)
+                    refreshList(searchBox.text.toString())
                 }
                 card.addView(pinBtn)
 
-                val delBtn = text("✕", 15f, MUTED, true).apply {
-                    setPadding(dp(8), dp(4), dp(8), dp(4))
-                    setOnClickListener {
-                        notesStore.deleteNote(n.id)
-                        refreshList(searchBox.text.toString())
-                    }
+                val delBtn = iconTouchButton(
+                    context = this,
+                    palette = palette,
+                    iconText = "✕",
+                    accessibilityLabel = "Delete note ${n.title}",
+                    textColor = palette.muted,
+                    textSizeSp = 16f,
+                ) {
+                    notesStore.deleteNote(n.id)
+                    refreshList(searchBox.text.toString())
                 }
                 card.addView(delBtn)
 
@@ -2409,7 +2856,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
 
         refreshList()
 
-        AlertDialog.Builder(this)
+        val dialog = AlertDialog.Builder(this)
             .setTitle("📝 Personal Notes (${notesStore.listNotes().size})")
             .setView(dialogView)
             .setPositiveButton("➕ New Note") { _, _ ->
@@ -2425,39 +2872,32 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 startActivity(Intent.createChooser(shareIntent, "Export Notes"))
             }
             .setNegativeButton("Close", null)
-            .show()
+            .create()
+        showStyledAlertDialog(dialog, palette)
     }
 
     private fun promptEditNote(existingNote: PersonalNotesStore.PersonalNote?, onSaved: () -> Unit) {
-        val container = column().apply {
-            setPadding(dp(18), dp(12), dp(18), dp(12))
-        }
+        val container = styleDialogContainer(this, palette, paddingDp = 16)
 
         val titleInput = EditText(this).apply {
             hint = "Note Title"
             textSize = 14f
-            background = shape(SURFACE, 12, BORDER)
-            setPadding(dp(12), dp(10), dp(12), dp(10))
-            setTextColor(INK)
-            setHintTextColor(MUTED)
+            styleEditText(this, palette)
             if (existingNote != null) setText(existingNote.title)
         }
         container.addView(titleInput, marginBottom(10))
 
         val contentInput = EditText(this).apply {
             hint = "Note Content…"
-            textSize = 13f
-            background = shape(SURFACE, 12, BORDER)
-            setPadding(dp(12), dp(10), dp(12), dp(10))
-            setTextColor(INK)
-            setHintTextColor(MUTED)
+            textSize = 13.5f
+            styleEditText(this, palette)
             minLines = 4
             gravity = Gravity.TOP or Gravity.START
             if (existingNote != null) setText(existingNote.content)
         }
-        container.addView(contentInput, marginBottom(10))
+        container.addView(contentInput, marginBottom(4))
 
-        AlertDialog.Builder(this)
+        val dialog = AlertDialog.Builder(this)
             .setTitle(if (existingNote == null) "➕ Create Note" else "✏️ Edit Note")
             .setView(container)
             .setPositiveButton("Save") { _, _ ->
@@ -2473,7 +2913,8 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 }
             }
             .setNegativeButton("Cancel", null)
-            .show()
+            .create()
+        showStyledAlertDialog(dialog, palette)
     }
 
     private fun showDuplexVoiceDialog() {
@@ -2498,7 +2939,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         val dialogView = column().apply {
             background = GradientDrawable(
                 GradientDrawable.Orientation.TL_BR,
-                intArrayOf(0xFF153B36.toInt(), 0xFF176B60.toInt())
+                intArrayOf(palette.heroGradientStart, palette.heroGradientEnd),
             ).apply { cornerRadius = dp(20).toFloat() }
             setPadding(dp(20), dp(20), dp(20), dp(20))
         }
@@ -2506,17 +2947,38 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         val title = text("🎙️ Continuous Voice Mode", 18f, WHITE, true)
         dialogView.addView(title)
 
-        val stateBadge = text("Initializing…", 13f, 0xFFD5EAE5.toInt(), true).apply {
-            setPadding(0, dp(6), 0, dp(10))
+        val stateBadge = text("Initializing…", 13f, palette.heroSubtitleInk, true).apply {
+            setPadding(0, dp(6), 0, dp(8))
         }
         dialogView.addView(stateBadge)
+
+        val audioLevelBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = 100
+            progress = 4
+            progressDrawable = android.graphics.drawable.LayerDrawable(
+                arrayOf(
+                    roundedShape(0x33FFFFFF, dp(4).toFloat()),
+                    android.graphics.drawable.ClipDrawable(
+                        roundedShape(WHITE, dp(4).toFloat()),
+                        Gravity.START,
+                        android.graphics.drawable.ClipDrawable.HORIZONTAL,
+                    ),
+                )
+            ).apply {
+                setId(0, android.R.id.background)
+                setId(1, android.R.id.progress)
+            }
+            contentDescription = "Microphone input audio level"
+        }
+        dialogView.addView(audioLevelBar, LinearLayout.LayoutParams(-1, dp(6)).apply { bottomMargin = dp(12) })
 
         val transcriptView = TextView(this).apply {
             textSize = 14f
             setTextColor(WHITE)
+            setLineSpacing(dp(3).toFloat(), 1f)
             text = "Say something to start speaking…"
             setPadding(dp(12), dp(12), dp(12), dp(12))
-            background = shape(0x33000000.toInt(), 12)
+            background = shape(0x33000000, 12)
         }
         val scroll = ScrollView(this).apply {
             addView(transcriptView)
@@ -2528,30 +2990,71 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
         }
-        val interruptBtn = pillButton("Interrupt / Next", accessibilityLabel = "Interrupt and listen again") {
-            duplexController.interrupt()
-        }.apply {
-            layoutParams = LinearLayout.LayoutParams(-2, dp(38)).apply { marginEnd = dp(10) }
+        val interruptBtn = Button(this).apply {
+            text = "Interrupt / Next"
+            contentDescription = "Interrupt and listen again"
+            setAllCaps(false)
+            textSize = 13f
+            typeface = Typeface.create("sans-serif", Typeface.BOLD)
+            setTextColor(WHITE)
+            gravity = Gravity.CENTER
+            minHeight = dp(48)
+            minimumHeight = dp(48)
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+            background = rippleDrawable(
+                roundedShape(0x2EFFFFFF, dp(24).toFloat(), maxOf(1, dp(1)), 0x55FFFFFF),
+                palette.rippleOnAccent,
+            )
+            backgroundTintList = null
+            stateListAnimator = null
+            setOnClickListener { duplexController.interrupt() }
         }
-        btnRow.addView(interruptBtn)
+        btnRow.addView(interruptBtn, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(10) })
 
         lateinit var dialog: AlertDialog
 
-        val endBtn = pillButton("End Session", accessibilityLabel = "End voice duplex mode") {
-            duplexController.stopSession()
-            dialog.dismiss()
-        }.apply {
-            layoutParams = LinearLayout.LayoutParams(-2, dp(38))
+        val endBtn = Button(this).apply {
+            text = "End Session"
+            contentDescription = "End voice duplex mode"
+            setAllCaps(false)
+            textSize = 13f
+            typeface = Typeface.create("sans-serif", Typeface.BOLD)
+            setTextColor(palette.heroGradientStart)
+            gravity = Gravity.CENTER
+            minHeight = dp(48)
+            minimumHeight = dp(48)
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+            background = rippleDrawable(
+                roundedShape(WHITE, dp(24).toFloat()),
+                palette.rippleOnMint,
+            )
+            backgroundTintList = null
+            stateListAnimator = null
+            setOnClickListener {
+                duplexController.stopSession()
+                dialog.dismiss()
+            }
         }
-        btnRow.addView(endBtn)
+        btnRow.addView(endBtn, LinearLayout.LayoutParams(0, -2, 1f))
         dialogView.addView(btnRow)
 
+        val messageCountBeforeVoice = currentSession?.messages?.size ?: 0
         dialog = AlertDialog.Builder(this)
             .setView(dialogView)
             .setCancelable(false)
             .create()
-
+        dialog.setOnDismissListener {
+            if (duplexController.isActive) duplexController.stopSession()
+            val updatedSess = currentSession
+            if (updatedSess != null && updatedSess.messages.size > messageCountBeforeVoice) {
+                loadSession(updatedSess.id)
+            }
+        }
+        dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
         dialog.show()
+
+        var duplexUserText = ""
+        val duplexAssistantStream = StringBuilder()
 
         duplexController.startSession(
             whisperContext = whisperContext,
@@ -2567,18 +3070,34 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                         DuplexVoiceController.DuplexState.IDLE -> "Idle"
                     }
                     stateBadge.text = label
+                    if (state != DuplexVoiceController.DuplexState.LISTENING) {
+                        audioLevelBar.progress = 0
+                    }
                 }
 
-                override fun onAmplitude(rms: Float) {}
+                override fun onAmplitude(rms: Float) {
+                    val scaled = (rms * 320f).toInt().coerceIn(4, 100)
+                    audioLevelBar.progress = scaled
+                }
 
                 override fun onUserTranscribed(text: String) {
+                    duplexUserText = text
+                    duplexAssistantStream.clear()
                     transcriptView.text = "You: $text\n\nAssistant: Thinking…"
+                    scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
                 }
 
-                override fun onAssistantChunk(chunk: String) {}
+                override fun onAssistantChunk(chunk: String) {
+                    duplexAssistantStream.append(chunk)
+                    transcriptView.text = "You: $duplexUserText\n\nAssistant: $duplexAssistantStream"
+                    scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
+                }
 
                 override fun onTurnComplete(userText: String, assistantText: String) {
+                    duplexUserText = userText
+                    duplexAssistantStream.clear()
                     transcriptView.text = "You: $userText\n\nAssistant: $assistantText"
+                    scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
 
                     try {
                         val sess = currentSession ?: ConversationSession.createWithInitialPrompt(userText)
@@ -2592,6 +3111,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
 
                 override fun onError(error: Throwable) {
                     stateBadge.text = "⚠️ Error: ${error.message}"
+                    audioLevelBar.progress = 0
                 }
             }
         )
@@ -2601,41 +3121,101 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         val permAudit = PrivacyAuditCenter.auditPermissions(this)
         val storageAudit = PrivacyAuditCenter.auditStorage(filesDir, cacheDir)
 
-        val dialogView = column().apply {
-            setPadding(dp(18), dp(12), dp(18), dp(18))
+        val dialogView = styleDialogContainer(this, palette, paddingDp = 16)
+        val bodyCol = column()
+        val bodyScroll = ScrollView(this).apply {
+            addView(bodyCol)
         }
+        dialogView.addView(bodyScroll, LinearLayout.LayoutParams(-1, -2))
 
-        // 1. Zero-Cloud Telemetry Guarantee Badge
-        val auditCard = column().apply {
-            val bg = if (isDarkTheme) 0xFF1B3A2F.toInt() else 0xFFE8F5E9.toInt()
-            val border = if (isDarkTheme) 0xFF2E5A4A.toInt() else 0xFFC8E6C9.toInt()
-            background = shape(bg, 12, border)
-            setPadding(dp(14), dp(12), dp(14), dp(12))
-        }
-        val auditTitle = text(
-            "🛡️ 100% Zero-Cloud Guarantee",
-            14f,
-            if (isDarkTheme) 0xFFB9F6CA.toInt() else 0xFF1B5E20.toInt(),
-            true,
+        var privacyDialog: AlertDialog? = null
+
+        // 1. Appearance (Theme: System / Light / Dark)
+        val currentThemeMode = ThemeMode.fromString(
+            settingsPrefs.getString(UiThemeResolver.PREF_THEME_MODE, null)
         )
-        auditCard.addView(auditTitle)
-        val auditDesc = text(
-            if (permAudit.isZeroCloudCompliant)
-                "Verified: Hardware-level zero cloud telemetry. PocketAgent does not request or hold 'android.permission.INTERNET'. All audio, documents, and inference run 100% locally on this device."
-            else
-                "Warning: Non-standard permissions detected.",
-            12f,
-            if (isDarkTheme) 0xFFA5D6A7.toInt() else 0xFF2E7D32.toInt(),
-        ).apply { setPadding(0, dp(4), 0, 0) }
-        auditCard.addView(auditDesc)
-        dialogView.addView(auditCard, marginBottom(12))
+        val appearanceCard = cardContainer(this, palette, cornerDp = 14, elevated = true, paddingDp = 14)
+        appearanceCard.addView(text("🎨 Appearance", 14f, palette.ink, true))
+        appearanceCard.addView(
+            text("Choose Light, Dark, or match your device theme", 11.5f, palette.muted).apply {
+                setPadding(0, dp(2), 0, dp(10))
+            }
+        )
+        val themeSegmentRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val themeModes = listOf(ThemeMode.SYSTEM, ThemeMode.LIGHT, ThemeMode.DARK)
+        for ((index, mode) in themeModes.withIndex()) {
+            val isSelected = (mode == currentThemeMode)
+            val segBtn = Button(this).apply {
+                text = mode.displayLabel
+                contentDescription = "Set appearance theme to ${mode.displayLabel}"
+                setAllCaps(false)
+                textSize = 12.5f
+                typeface = Typeface.create("sans-serif", Typeface.BOLD)
+                setTextColor(if (isSelected) palette.teal else palette.ink)
+                gravity = Gravity.CENTER
+                minHeight = dp(48)
+                minimumHeight = dp(48)
+                setPadding(dp(8), dp(8), dp(8), dp(8))
+                background = rippleDrawable(
+                    roundedShape(
+                        color = if (isSelected) palette.mint else palette.surface,
+                        radiusPx = dp(14).toFloat(),
+                        strokeWidthPx = maxOf(1, dp(if (isSelected) 2 else 1)),
+                        strokeColor = if (isSelected) palette.teal else palette.border,
+                    ),
+                    if (isSelected) palette.rippleOnMint else palette.rippleOnSurface,
+                )
+                backgroundTintList = null
+                stateListAnimator = null
+                setOnClickListener {
+                    if (engineManager.isGenerationActive || isGeneratingUi) {
+                        Toast.makeText(this@MainActivity, "Stop active generation before switching theme.", Toast.LENGTH_SHORT).show()
+                        return@setOnClickListener
+                    }
+                    settingsPrefs.edit().putString(UiThemeResolver.PREF_THEME_MODE, mode.name).apply()
+                    privacyDialog?.dismiss()
+                    recreate()
+                }
+            }
+            themeSegmentRow.addView(
+                segBtn,
+                LinearLayout.LayoutParams(0, -2, 1f).apply {
+                    if (index < themeModes.lastIndex) marginEnd = dp(6)
+                },
+            )
+        }
+        appearanceCard.addView(themeSegmentRow)
+        bodyCol.addView(appearanceCard, marginBottom(12))
 
-        // 2. Storage Audit Card
-        val storageCard = column().apply {
-            background = shape(SURFACE, 12, BORDER)
+        // 2. Zero-Cloud Telemetry Guarantee Badge
+        val auditCard = column().apply {
+            background = roundedShape(
+                color = palette.successBg,
+                radiusPx = dp(14).toFloat(),
+                strokeWidthPx = maxOf(1, dp(1)),
+                strokeColor = palette.successBorder,
+            )
             setPadding(dp(14), dp(12), dp(14), dp(12))
         }
-        storageCard.addView(text("💾 Local Storage Breakdown", 14f, INK, true), marginBottom(8))
+        auditCard.addView(text("🛡️ 100% Zero-Cloud Guarantee", 14f, palette.successInk, true))
+        auditCard.addView(
+            text(
+                if (permAudit.isZeroCloudCompliant)
+                    "Verified: Hardware-level zero cloud telemetry. PocketAgent does not request or hold 'android.permission.INTERNET'. All audio, documents, and inference run 100% locally on this device."
+                else
+                    "Warning: Non-standard permissions detected.",
+                12f,
+                palette.successInk,
+            ).apply { setPadding(0, dp(4), 0, 0) }
+        )
+        bodyCol.addView(auditCard, marginBottom(12))
+
+        // 3. Storage Audit Card
+        val storageCard = cardContainer(this, palette, cornerDp = 14, elevated = true, paddingDp = 14)
+        storageCard.addView(text("💾 Local Storage Breakdown", 14f, palette.ink, true), marginBottom(8))
 
         fun addStorageRow(label: String, value: String) {
             val row = LinearLayout(this).apply {
@@ -2643,8 +3223,8 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(0, dp(3), 0, dp(3))
             }
-            row.addView(text(label, 12f, MUTED), LinearLayout.LayoutParams(0, -2, 1f))
-            row.addView(text(value, 12f, INK, true))
+            row.addView(text(label, 12f, palette.muted), LinearLayout.LayoutParams(0, -2, 1f))
+            row.addView(text(value, 12f, palette.ink, true))
             storageCard.addView(row)
         }
 
@@ -2654,28 +3234,33 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         addStorageRow("Personal Notes:", storageAudit.notesDisplay)
         addStorageRow("Temporary Cache:", storageAudit.cacheDisplay)
         addStorageRow("Total Storage Used:", storageAudit.totalDisplay)
-        dialogView.addView(storageCard, marginBottom(12))
+        bodyCol.addView(storageCard, marginBottom(12))
 
-        // 3. Biometric App Lock Row
+        // 4. Biometric App Lock Row
         val lockCard = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            background = shape(SURFACE, 12, BORDER)
+            background = roundedShape(
+                color = palette.surfaceElevated,
+                radiusPx = dp(14).toFloat(),
+                strokeWidthPx = maxOf(1, dp(1)),
+                strokeColor = palette.border,
+            )
             setPadding(dp(14), dp(12), dp(14), dp(12))
         }
         val lockInfo = column().apply {
-            addView(text("🔒 Biometric App Lock", 14f, INK, true))
-            addView(text("Require device credential or biometric on resume", 11f, MUTED))
+            addView(text("🔒 Biometric App Lock", 14f, palette.ink, true))
+            addView(text("Require device credential or biometric on resume", 11.5f, palette.muted))
         }
-        lockCard.addView(lockInfo, LinearLayout.LayoutParams(0, -2, 1f))
+        lockCard.addView(lockInfo, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(8) })
 
-        var privacyDialog: AlertDialog? = null
-        val lockToggleBtn = pillButton(
-            if (biometricLockManager.isLockEnabled) "Enabled" else "Disabled",
-            accessibilityLabel = "Toggle biometric app lock"
-        ) {}.apply {
-            layoutParams = LinearLayout.LayoutParams(-2, dp(32))
-        }
+        val lockToggleBtn = com.example.pocketagent.pillButton(
+            context = this,
+            palette = palette,
+            label = if (biometricLockManager.isLockEnabled) "Enabled" else "Disabled",
+            accessibilityLabel = "Toggle biometric app lock",
+            compact = true,
+        ) {}
         lockToggleBtn.setOnClickListener {
             val enabling = !biometricLockManager.isLockEnabled
             if (enabling) {
@@ -2697,11 +3282,16 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             }
         }
         lockCard.addView(lockToggleBtn)
-        dialogView.addView(lockCard, marginBottom(12))
+        bodyCol.addView(lockCard, marginBottom(12))
 
-        // 4. Panic Wipe Button
-        val panicBtn = pillButton("⚠️ Panic Wipe All User Data", accessibilityLabel = "Emergency delete all personal data") {
-            AlertDialog.Builder(this)
+        // 5. Panic Wipe Button
+        val panicBtn = dangerButton(
+            context = this,
+            palette = palette,
+            label = "⚠️ Panic Wipe All User Data",
+            accessibilityLabel = "Emergency delete all personal data",
+        ) {
+            val wipeDialog = AlertDialog.Builder(this)
                 .setTitle("🚨 Panic Data Wipe")
                 .setMessage("This will permanently delete all conversation history, memories, and personal notes on this device. (AI models will be kept).\n\nProceed?")
                 .setPositiveButton("Erase Everything") { _, _ ->
@@ -2710,20 +3300,18 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                     Toast.makeText(this, "All personal data has been erased.", Toast.LENGTH_LONG).show()
                 }
                 .setNegativeButton("Cancel", null)
-                .show()
-        }.apply {
-            val bg = if (isDarkTheme) 0xFF3A1F1F.toInt() else 0xFFFFEBEE.toInt()
-            val border = if (isDarkTheme) 0xFF5C2A2A.toInt() else 0xFFFFCDD2.toInt()
-            background = shape(bg, 12, border)
-            setTextColor(if (isDarkTheme) 0xFFFF8A80.toInt() else 0xFFC62828.toInt())
+                .create()
+            showStyledAlertDialog(wipeDialog, palette)
         }
-        dialogView.addView(panicBtn)
+        bodyCol.addView(panicBtn, LinearLayout.LayoutParams(-1, -2))
 
-        privacyDialog = AlertDialog.Builder(this)
-            .setTitle("🛡️ Privacy & Sovereign Security")
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("🛡️ Privacy & Appearance")
             .setView(dialogView)
             .setPositiveButton("Close", null)
-            .show()
+            .create()
+        privacyDialog = dialog
+        showStyledAlertDialog(dialog, palette)
     }
 
     override fun onResume() {
@@ -2748,26 +3336,29 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            setBackgroundColor(if (isDarkTheme) 0xF2121816.toInt() else 0xF2F4F7F6.toInt())
+            setBackgroundColor(palette.scrimOverlay)
             isClickable = true
             isFocusable = true
             visibility = View.GONE
             setPadding(dp(24), dp(24), dp(24), dp(24))
 
-            val card = LinearLayout(context).apply {
-                orientation = LinearLayout.VERTICAL
-                background = shape(SURFACE, 20, BORDER)
-                setPadding(dp(24), dp(24), dp(24), dp(24))
-            }
-            card.addView(text("PocketAgent is locked", 22f, INK).apply {
-                typeface = Typeface.DEFAULT_BOLD
-            })
-            card.addView(text("Authenticate to access your local conversations, memories, and notes.", 14f, MUTED).apply {
-                setPadding(0, dp(10), 0, dp(18))
-            })
-            card.addView(pillButton("Unlock", accessibilityLabel = "Unlock PocketAgent") {
-                promptBiometricUnlock()
-            }, LinearLayout.LayoutParams(-1, -2))
+            val card = cardContainer(context, palette, cornerDp = 20, elevated = true, paddingDp = 24)
+            card.addView(text("PocketAgent is locked", 22f, palette.ink, true))
+            card.addView(
+                text(
+                    "Authenticate to access your local conversations, memories, and notes.",
+                    14f,
+                    palette.muted,
+                ).apply {
+                    setPadding(0, dp(10), 0, dp(18))
+                }
+            )
+            card.addView(
+                pillButton("Unlock", accessibilityLabel = "Unlock PocketAgent") {
+                    promptBiometricUnlock()
+                },
+                LinearLayout.LayoutParams(-1, -2),
+            )
             addView(card, LinearLayout.LayoutParams(-1, -2))
         }
     }
@@ -2815,7 +3406,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun showActionReviewDialog(reviewUi: SystemActionTools.ActionReviewUi) {
-        AlertDialog.Builder(this)
+        val dialog = AlertDialog.Builder(this)
             .setTitle(reviewUi.dialogTitle)
             .setMessage(reviewUi.dialogMessage)
             .setPositiveButton("Open in ${reviewUi.targetAppCategory}") { _, _ ->
@@ -2827,7 +3418,8 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 }
             }
             .setNegativeButton("Cancel", null)
-            .show()
+            .create()
+        showStyledAlertDialog(dialog, palette)
     }
 
     private fun startDictation() {
@@ -2843,19 +3435,30 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         recognizer?.destroy()
         val speech = SpeechRecognizer.createSpeechRecognizer(this)
         recognizer = speech
+        isDictating = true
+        updateRecordingBanner()
         speech.setRecognitionListener(object : RecognitionListener {
-            override fun onReadyForSpeech(params: Bundle?) { updateStatus("Listening… speak your task now.") }
+            override fun onReadyForSpeech(params: Bundle?) {
+                isDictating = true
+                updateRecordingBanner()
+                updateStatus("Listening… speak your task now.")
+            }
             override fun onResults(results: Bundle?) {
+                isDictating = false
+                updateRecordingBanner()
                 val transcript = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
                 if (transcript != null) {
                     taskInput.setText(transcript)
                     taskInput.setSelection(taskInput.text.length)
+                    syncComposerState()
                     updateStatus("Transcript ready. Review it, then confirm.")
                 } else updateStatus("No speech was recognized. You can type instead.")
                 speech.destroy()
                 if (recognizer === speech) recognizer = null
             }
             override fun onError(error: Int) {
+                isDictating = false
+                updateRecordingBanner()
                 updateStatus("Speech recognition failed ($error). You can type instead.")
                 speech.destroy()
                 if (recognizer === speech) recognizer = null
@@ -2863,7 +3466,10 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             override fun onBeginningOfSpeech() {}
             override fun onRmsChanged(rmsdB: Float) {}
             override fun onBufferReceived(buffer: ByteArray?) {}
-            override fun onEndOfSpeech() {}
+            override fun onEndOfSpeech() {
+                isDictating = false
+                updateRecordingBanner()
+            }
             override fun onPartialResults(partialResults: Bundle?) {}
             override fun onEvent(eventType: Int, params: Bundle?) {}
         })
@@ -2890,7 +3496,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             updateStatus("Wait until a complete answer is available before saving it.")
             return
         }
-        val answer = answerText.text.toString().trim()
+        val answer = latestAssistantText.trim()
         if (answer.isBlank()) {
             updateStatus("Generate an answer before saving it.")
             return
@@ -2932,21 +3538,24 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         }
     }
 
-    private fun copyAnswer() {
-        val text = answerText.text.toString()
+    private fun copyAnswerText(text: String) {
         if (text.isBlank()) return
-        (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("PocketAgent answer", text))
+        (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager)
+            .setPrimaryClip(ClipData.newPlainText("PocketAgent answer", text))
         Toast.makeText(this, "Answer copied", Toast.LENGTH_SHORT).show()
     }
 
-    private fun shareAnswer() {
-        val text = answerText.text.toString()
+    private fun shareAnswerText(text: String) {
         if (text.isBlank()) return
-        startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text), "Share answer"))
+        startActivity(
+            Intent.createChooser(
+                Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text),
+                "Share answer",
+            )
+        )
     }
 
-    private fun speakAnswer() {
-        val raw = answerText.text.toString()
+    private fun speakAnswerText(raw: String) {
         val text = MarkdownFormatter.stripToPlainText(raw)
         if (!ttsReady || text.isBlank()) {
             Toast.makeText(this, "Speech is not ready yet", Toast.LENGTH_SHORT).show()
@@ -2961,18 +3570,22 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun refreshModelStatus() {
+        if (!::modelStatusPill.isInitialized) return
         val model = File(filesDir, "model.litertlm")
-        if (!::modelPill.isInitialized) return
-        if (model.exists() && model.length() > 0) {
-            val savedName = settingsPrefs.getString(PREF_MODEL_DISPLAY_NAME, null)
-            val shortName = savedName?.removeSuffix(".litertlm")?.take(16)
-            val sizeLabel = formatStorageSize(model.length())
-            modelPill.text = if (!shortName.isNullOrBlank()) "$shortName · $sizeLabel" else "MODEL READY · $sizeLabel"
-            modelPill.contentDescription =
-                "Active model ${savedName ?: ""}, $sizeLabel. Tap to configure backend, unload from RAM, or switch model"
-        } else {
-            modelPill.text = "Choose model"
-            modelPill.contentDescription = "No active model. Tap to choose a LiteRT-LM model"
+        val hasModel = model.exists() && model.length() > 0L
+        val savedName = if (hasModel) settingsPrefs.getString(PREF_MODEL_DISPLAY_NAME, null) else null
+        val sizeBytes = if (hasModel) model.length() else 0L
+        val formattedSize = if (hasModel) formatStorageSize(sizeBytes) else ""
+        val badgeState = ComposerChromeHelper.formatModelBadge(
+            displayName = savedName,
+            sizeBytes = sizeBytes,
+            activeBackend = if (hasModel) engineManager.activeBackend else null,
+            preference = engineManager.preference,
+            formattedSize = formattedSize,
+        )
+        modelStatusPill.update(badgeState, palette)
+        if (::heroModelCtaButton.isInitialized) {
+            heroModelCtaButton.visibility = if (hasModel) View.GONE else View.VISIBLE
         }
     }
 
@@ -2990,61 +3603,124 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             ActiveBackend.CPU -> "Loaded in RAM (CPU)"
             null -> "Stored on disk (standby · 0 RAM)"
         }
-        val dialogView = column().apply {
-            setPadding(dp(20), dp(14), dp(20), dp(12))
-        }
-        dialogView.addView(text(modelName, 15f, INK, true))
-        dialogView.addView(text("Size: $sizeStr  ·  $runtimeState", 12f, MUTED).apply {
+
+        val dialogView = styleDialogContainer(this, palette, paddingDp = 16)
+        val bodyCol = column()
+        val bodyScroll = ScrollView(this).apply { addView(bodyCol) }
+        dialogView.addView(bodyScroll, LinearLayout.LayoutParams(-1, -2))
+
+        val infoCard = cardContainer(this, palette, cornerDp = 14, elevated = true, paddingDp = 14)
+        infoCard.addView(text(modelName, 15f, palette.ink, true))
+        infoCard.addView(text("Size: $sizeStr  ·  $runtimeState", 12.5f, palette.muted).apply {
             setPadding(0, dp(4), 0, dp(8))
         })
-        dialogView.addView(
+        infoCard.addView(
             text(
                 "Note: Multimodal (.litertlm Omni) weights occupy storage & memory for their bundle, while PocketAgent runs text inference only (vision/audio towers kept disabled) to save RAM.",
-                11f,
-                MUTED,
-            ).apply { setPadding(0, 0, 0, dp(12)) }
+                11.5f,
+                palette.muted,
+            )
         )
+        bodyCol.addView(infoCard, marginBottom(12))
 
         lateinit var dialog: AlertDialog
 
-        val backendLabel = if (isCpuOnly) {
-            "Backend: CPU Only (Tap to allow GPU)"
-        } else {
-            "Backend: GPU + Auto CPU Fallback (Tap for CPU Only)"
-        }
-        dialogView.addView(
-            pillButton(backendLabel, accessibilityLabel = "Toggle GPU or CPU inference backend") {
-                if (engineManager.isGenerationActive || isGeneratingUi) {
-                    Toast.makeText(this, "Stop generation before changing backend.", Toast.LENGTH_SHORT).show()
-                    return@pillButton
-                }
-                val next = if (isCpuOnly) BackendPreference.GPU_PREFERRED else BackendPreference.CPU_ONLY
-                settingsPrefs.edit()
-                    .putString(PREF_BACKEND_MODE, next.name)
-                    .putBoolean(PREF_GPU_LOADING_GUARD, false)
-                    .apply()
-                dialog.dismiss()
-                updateStatus("Switching backend to ${if (next == BackendPreference.CPU_ONLY) "CPU Only" else "GPU (auto fallback)"}…")
-                inferenceExecutor.execute {
-                    engineManager.switchBackend(next)
-                    mainHandler.post {
-                        updateStatus("Backend set to ${if (next == BackendPreference.CPU_ONLY) "CPU Only" else "GPU (auto fallback)"}. Ready for your next question.")
-                    }
-                }
-            },
-            marginBottom(8),
-        )
+        bodyCol.addView(text("Inference Backend", 12.5f, palette.muted, true), marginBottom(6))
 
-        dialogView.addView(
-            pillButton("🧹 Unload Model from RAM (Keep File)", accessibilityLabel = "Release model memory from RAM") {
+        fun switchBackendPreference(next: BackendPreference) {
+            if (engineManager.preference == next) return
+            if (engineManager.isGenerationActive || isGeneratingUi) {
+                Toast.makeText(this, "Stop generation before changing backend.", Toast.LENGTH_SHORT).show()
+                return
+            }
+            settingsPrefs.edit()
+                .putString(PREF_BACKEND_MODE, next.name)
+                .putBoolean(PREF_GPU_LOADING_GUARD, false)
+                .apply()
+            dialog.dismiss()
+            updateStatus("Switching backend to ${if (next == BackendPreference.CPU_ONLY) "CPU Only" else "GPU (auto fallback)"}…")
+            inferenceExecutor.execute {
+                engineManager.switchBackend(next)
+                mainHandler.post {
+                    refreshModelStatus()
+                    updateStatus("Backend set to ${if (next == BackendPreference.CPU_ONLY) "CPU Only" else "GPU (auto fallback)"}. Ready for your next question.")
+                }
+            }
+        }
+
+        fun buildBackendCard(
+            title: String,
+            subtitle: String,
+            selected: Boolean,
+            onSelect: () -> Unit,
+        ): LinearLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            minimumHeight = dp(48)
+            setPadding(dp(14), dp(10), dp(14), dp(10))
+            background = rippleDrawable(
+                roundedShape(
+                    color = if (selected) palette.mint else palette.surface,
+                    radiusPx = dp(14).toFloat(),
+                    strokeWidthPx = maxOf(1, dp(if (selected) 2 else 1)),
+                    strokeColor = if (selected) palette.teal else palette.border,
+                ),
+                if (selected) palette.rippleOnMint else palette.rippleOnSurface,
+            )
+            isClickable = true
+            isFocusable = true
+            contentDescription = "$title. $subtitle"
+            addView(
+                text(
+                    if (selected) "✓ $title" else title,
+                    13.5f,
+                    if (selected) palette.teal else palette.ink,
+                    true,
+                )
+            )
+            addView(text(subtitle, 11.5f, palette.muted).apply {
+                setPadding(0, dp(2), 0, 0)
+            })
+            setOnClickListener { onSelect() }
+        }
+
+        val backendRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        backendRow.addView(
+            buildBackendCard(
+                title = "GPU + Auto Fallback",
+                subtitle = "Fastest when supported",
+                selected = !isCpuOnly,
+            ) { switchBackendPreference(BackendPreference.GPU_PREFERRED) },
+            LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(8) },
+        )
+        backendRow.addView(
+            buildBackendCard(
+                title = "CPU Only",
+                subtitle = "Maximum compatibility",
+                selected = isCpuOnly,
+            ) { switchBackendPreference(BackendPreference.CPU_ONLY) },
+            LinearLayout.LayoutParams(0, -2, 1f),
+        )
+        bodyCol.addView(backendRow, marginBottom(12))
+
+        bodyCol.addView(
+            secondaryOutlineButton(
+                context = this,
+                palette = palette,
+                label = "🧹 Unload Model from RAM (Keep File)",
+                accessibilityLabel = "Release model memory from RAM",
+            ) {
                 if (engineManager.isGenerationActive || isGeneratingUi) {
                     Toast.makeText(this, "Stop generation before unloading model.", Toast.LENGTH_SHORT).show()
-                    return@pillButton
+                    return@secondaryOutlineButton
                 }
                 dialog.dismiss()
                 inferenceExecutor.execute {
                     engineManager.close()
                     mainHandler.post {
+                        refreshModelStatus()
                         updateStatus("Model unloaded from RAM ($sizeStr file kept on disk). Will reload on next prompt.")
                     }
                 }
@@ -3052,7 +3728,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             marginBottom(8),
         )
 
-        dialogView.addView(
+        bodyCol.addView(
             pillButton("📂 Switch / Choose Different .litertlm File", accessibilityLabel = "Pick a different LiteRT-LM model file") {
                 dialog.dismiss()
                 chooseModel()
@@ -3060,14 +3736,19 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             marginBottom(8),
         )
 
-        dialogView.addView(
-            pillButton("🗑️ Remove Stored Model ($sizeStr)", accessibilityLabel = "Delete stored model file to free space") {
+        bodyCol.addView(
+            dangerButton(
+                context = this,
+                palette = palette,
+                label = "🗑️ Remove Stored Model ($sizeStr)",
+                accessibilityLabel = "Delete stored model file to free space",
+            ) {
                 if (engineManager.isGenerationActive || isGeneratingUi) {
                     Toast.makeText(this, "Stop generation before removing model.", Toast.LENGTH_SHORT).show()
-                    return@pillButton
+                    return@dangerButton
                 }
                 dialog.dismiss()
-                AlertDialog.Builder(this)
+                val confirmDialog = AlertDialog.Builder(this)
                     .setTitle("Remove Local Model?")
                     .setMessage("Delete $modelName ($sizeStr) from app private storage to free disk space?")
                     .setPositiveButton("Remove") { _, _ ->
@@ -3087,11 +3768,10 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                         }
                     }
                     .setNegativeButton("Cancel", null)
-                    .show()
-            }.apply {
-                background = shape(0xFFFFEBEE.toInt(), 12, 0xFFFFCDD2.toInt())
-                setTextColor(0xFFC62828.toInt())
-            }
+                    .create()
+                showStyledAlertDialog(confirmDialog, palette)
+            },
+            LinearLayout.LayoutParams(-1, -2),
         )
 
         dialog = AlertDialog.Builder(this)
@@ -3099,7 +3779,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             .setView(dialogView)
             .setNegativeButton("Close", null)
             .create()
-        dialog.show()
+        showStyledAlertDialog(dialog, palette)
     }
 
     private fun cleanupStagedInputFiles() {
@@ -3147,64 +3827,59 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
 
     private fun formatBytes(bytes: Long): String = if (bytes >= 1024L * 1024) "${bytes / (1024 * 1024)} MB" else "${bytes / 1024} KB"
     private fun formatStorageSize(bytes: Long): String = PrivacyAuditCenter.StorageAudit.formatBytes(bytes)
-    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+    private fun dp(value: Int): Int = com.example.pocketagent.dp(this, value)
 
     private fun column() = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
     private fun marginBottom(value: Int) = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(value) }
-    private fun text(value: String, size: Float, color: Int, bold: Boolean = false) = TextView(this).apply {
-        text = value
-        textSize = size
-        setTextColor(color)
-        if (bold) typeface = Typeface.create("sans-serif", Typeface.BOLD)
-    }
+    private fun text(value: String, size: Float, color: Int, bold: Boolean = false) =
+        styledText(this, value, size, color, bold)
 
-    private fun shape(color: Int, radius: Int, stroke: Int? = null) = GradientDrawable().apply {
-        setColor(color)
-        cornerRadius = dp(radius).toFloat()
-        if (stroke != null) setStroke(dp(1), stroke)
-    }
+    private fun shape(color: Int, radius: Int, stroke: Int? = null) =
+        roundedShape(
+            color = color,
+            radiusPx = dp(radius).toFloat(),
+            strokeWidthPx = if (stroke != null) maxOf(1, dp(1)) else 0,
+            strokeColor = stroke,
+        )
 
     private fun sectionHeading(title: String, subtitle: String): LinearLayout = column().apply {
-        addView(text(title, 18f, INK, true))
-        addView(text(subtitle, 12f, MUTED).apply { setPadding(0, dp(3), 0, 0) })
+        addView(text(title, 18f, palette.ink, true))
+        addView(text(subtitle, 12f, palette.muted).apply { setPadding(0, dp(3), 0, 0) })
     }
 
     private fun pillButton(
         label: String,
         accessibilityLabel: String = label,
+        compact: Boolean = false,
         onClick: () -> Unit,
-    ): Button = Button(this).apply {
-        text = label
-        contentDescription = accessibilityLabel
-        setAllCaps(false)
-        textSize = 13f
-        typeface = Typeface.create("sans-serif", Typeface.BOLD)
-        gravity = Gravity.CENTER
-        setTextColor(TEAL)
-        setPadding(dp(13), dp(8), dp(13), dp(8))
-        minHeight = dp(48)
-        minWidth = dp(48)
-        background = ripple(shape(MINT, 30), 0x33126B60)
-        backgroundTintList = null
-        isFocusable = true
-        setOnClickListener { onClick() }
-    }
+    ): Button = com.example.pocketagent.pillButton(
+        context = this,
+        palette = palette,
+        label = label,
+        accessibilityLabel = accessibilityLabel,
+        compact = compact,
+        onClick = onClick,
+    )
 
     private fun textButton(
         label: String,
         accessibilityLabel: String = label,
         onClick: () -> Unit,
     ): Button = Button(this).apply {
+        val touchSize = dp(48)
         text = label
         contentDescription = accessibilityLabel
         setAllCaps(false)
         textSize = 12f
-        setTextColor(TEAL)
+        setTextColor(palette.teal)
         setPadding(dp(10), dp(8), dp(10), dp(8))
-        minHeight = dp(48)
-        minWidth = dp(48)
-        background = ripple(shape(Color.TRANSPARENT, 8), 0x22126B60)
+        minHeight = touchSize
+        minimumHeight = touchSize
+        minWidth = touchSize
+        minimumWidth = touchSize
+        background = rippleDrawable(shape(Color.TRANSPARENT, 8), palette.rippleOnMint)
         backgroundTintList = null
+        stateListAnimator = null
         isFocusable = true
         setOnClickListener { onClick() }
     }
@@ -3214,6 +3889,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         accessibilityLabel: String = label,
         onClick: () -> Unit,
     ): Button = Button(this).apply {
+        val touchSize = dp(48)
         text = label
         contentDescription = accessibilityLabel
         setAllCaps(false)
@@ -3222,21 +3898,30 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         gravity = Gravity.CENTER
         setTextColor(WHITE)
         setPadding(dp(16), dp(10), dp(16), dp(10))
-        val gradient = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(0xFF167C6F.toInt(), 0xFF10574F.toInt())).apply {
-            cornerRadius = dp(16).toFloat()
-        }
-        background = ripple(gradient, 0x33FFFFFF)
+        val gradient = gradientPillDrawable(
+            palette.heroGradientStart,
+            palette.heroGradientEnd,
+            dp(16).toFloat(),
+        )
+        background = rippleDrawable(gradient, palette.rippleOnAccent)
         backgroundTintList = null
-        minHeight = dp(56)
-        minWidth = dp(48)
+        stateListAnimator = null
+        minHeight = touchSize
+        minimumHeight = touchSize
+        minWidth = touchSize
+        minimumWidth = touchSize
         isFocusable = true
         setOnClickListener { onClick() }
     }
 
     private fun ripple(content: GradientDrawable, color: Int) =
-        RippleDrawable(ColorStateList.valueOf(color), content, null)
+        rippleDrawable(content, color)
 
     override fun onDestroy() {
+        thinkingPulseAnimator.stop()
+        recordingPulseAnimator.stop()
+        generationTimerRunnable?.let { mainHandler.removeCallbacks(it) }
+        generationTimerRunnable = null
         recognizer?.destroy()
         tts?.stop()
         tts?.shutdown()
@@ -3256,14 +3941,17 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         super.onDestroy()
     }
 
-    private fun renderCitations(citations: List<LocalDocumentRetriever.DocumentCitation>) {
-        citationsContainer.removeAllViews()
+    private fun renderCitations(
+        citations: List<LocalDocumentRetriever.DocumentCitation>,
+        container: LinearLayout,
+    ) {
+        container.removeAllViews()
         if (citations.isEmpty()) {
-            citationsContainer.visibility = View.GONE
+            container.visibility = View.GONE
             return
         }
-        citationsContainer.visibility = View.VISIBLE
-        citationsContainer.addView(text("📌 Document Citations", 12f, TEAL, true).apply {
+        container.visibility = View.VISIBLE
+        container.addView(text("📌 Document Citations", 12f, palette.teal, true).apply {
             setPadding(0, 0, 0, dp(4))
         })
         val wrapRow = LinearLayout(this).apply {
@@ -3271,13 +3959,12 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             gravity = Gravity.CENTER_VERTICAL
         }
         for (cit in citations) {
-            val pill = textButton("📄 ${cit.citationLabel}", accessibilityLabel = "View citation from ${cit.citationLabel}") {
+            val pill = pillButton(
+                label = "📄 ${cit.citationLabel}",
+                accessibilityLabel = "View citation from ${cit.citationLabel}",
+                compact = true,
+            ) {
                 showCitationDialog(cit)
-            }.apply {
-                background = shape(MINT, 12, TEAL)
-                setPadding(dp(8), dp(4), dp(8), dp(4))
-                textSize = 11f
-                setTextColor(TEAL)
             }
             wrapRow.addView(pill, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(6) })
         }
@@ -3285,22 +3972,22 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             addView(wrapRow)
             isHorizontalScrollBarEnabled = false
         }
-        citationsContainer.addView(hScroll)
+        container.addView(hScroll)
     }
 
     private fun showCitationDialog(citation: LocalDocumentRetriever.DocumentCitation) {
-        val dialogView = column().apply {
-            setPadding(dp(18), dp(16), dp(18), dp(16))
-            addView(text(citation.citationLabel, 16f, INK, true))
+        val dialogView = styleDialogContainer(this, palette, paddingDp = 16).apply {
+            addView(text(citation.citationLabel, 16f, palette.ink, true))
             val snippetText = citation.excerptSnippet.ifBlank { "No excerpt snippet available." }
-            addView(text("\"$snippetText…\"", 13f, MUTED).apply {
-                setPadding(0, dp(10), 0, dp(12))
+            addView(text("\"$snippetText…\"", 13.5f, palette.muted).apply {
+                setPadding(0, dp(10), 0, dp(4))
                 setLineSpacing(dp(3).toFloat(), 1.0f)
             })
         }
-        AlertDialog.Builder(this)
+        val dialog = AlertDialog.Builder(this)
             .setView(dialogView)
             .setPositiveButton("Close", null)
-            .show()
+            .create()
+        showStyledAlertDialog(dialog, palette)
     }
 }

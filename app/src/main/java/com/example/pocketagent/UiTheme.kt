@@ -1,0 +1,201 @@
+package com.example.pocketagent
+
+import android.content.res.Configuration
+import java.util.Locale
+
+/**
+ * User-selectable appearance mode for PocketAgent.
+ */
+enum class ThemeMode(val displayLabel: String) {
+    SYSTEM("System"),
+    LIGHT("Light"),
+    DARK("Dark");
+
+    companion object {
+        /**
+         * Parses a persisted preference string into a [ThemeMode], defaulting safely to [SYSTEM].
+         */
+        fun fromString(raw: String?): ThemeMode {
+            return when (raw?.trim()?.uppercase(Locale.ROOT)) {
+                "LIGHT" -> LIGHT
+                "DARK" -> DARK
+                "SYSTEM", "AUTO", "DEFAULT" -> SYSTEM
+                else -> SYSTEM
+            }
+        }
+    }
+}
+
+/**
+ * Immutable semantic color palette used to style PocketAgent views consistently across light and
+ * dark modes without requiring AppCompat or Compose.
+ */
+data class UiPalette(
+    val isDark: Boolean,
+    val bg: Int,
+    val surface: Int,
+    val surfaceElevated: Int,
+    val ink: Int,
+    val muted: Int,
+    val teal: Int,
+    val tealDark: Int,
+    val mint: Int,
+    val border: Int,
+    val rippleOnMint: Int,
+    val rippleOnSurface: Int,
+    val rippleOnAccent: Int,
+    val stopCrimson: Int,
+    val userBubbleBg: Int,
+    val userBubbleBorder: Int,
+    val assistantBubbleBg: Int,
+    val assistantBubbleBorder: Int,
+    val inlineCodeBg: Int,
+    val inlineCodeInk: Int,
+    val codeBg: Int,
+    val codeHeaderBg: Int,
+    val codeBorder: Int,
+    val codeText: Int,
+    val codeKeyword: Int,
+    val codeString: Int,
+    val codeComment: Int,
+    val codeNumber: Int,
+    val successBg: Int,
+    val successBorder: Int,
+    val successInk: Int,
+    val dangerBg: Int,
+    val dangerBorder: Int,
+    val dangerInk: Int,
+    val warningBg: Int,
+    val warningBorder: Int,
+    val warningInk: Int,
+    val statusLoadedGpu: Int,
+    val statusLoadedCpu: Int,
+    val statusStandby: Int,
+    val statusMissing: Int,
+    val scrimOverlay: Int,
+    val heroGradientStart: Int,
+    val heroGradientEnd: Int,
+    val heroSubtitleInk: Int,
+)
+
+/**
+ * Resolves the active [UiPalette] from [ThemeMode] and system night configuration.
+ */
+object UiThemeResolver {
+    const val PREF_THEME_MODE = "pref_theme_mode"
+
+    private val LIGHT_PALETTE = UiPalette(
+        isDark = false,
+        bg = 0xFFF4F7F6.toInt(),
+        surface = 0xFFFFFFFF.toInt(),
+        surfaceElevated = 0xFFFAFCFB.toInt(),
+        ink = 0xFF162D2A.toInt(),
+        muted = 0xFF5A6B66.toInt(),
+        teal = 0xFF126B60.toInt(),
+        tealDark = 0xFF0D524A.toInt(),
+        mint = 0xFFE2F3ED.toInt(),
+        border = 0xFFDCE6E3.toInt(),
+        rippleOnMint = 0x33126B60,
+        rippleOnSurface = 0x1F126B60,
+        rippleOnAccent = 0x33FFFFFF,
+        stopCrimson = 0xFFB91C1C.toInt(),
+        userBubbleBg = 0xFFE2F3ED.toInt(),
+        userBubbleBorder = 0xFFB9DFD3.toInt(),
+        assistantBubbleBg = 0xFFFFFFFF.toInt(),
+        assistantBubbleBorder = 0xFFDCE6E3.toInt(),
+        inlineCodeBg = 0xFFEAF2EF.toInt(),
+        inlineCodeInk = 0xFF0F4C43.toInt(),
+        codeBg = 0xFF101917.toInt(),
+        codeHeaderBg = 0xFF182522.toInt(),
+        codeBorder = 0xFF263834.toInt(),
+        codeText = 0xFFE7F2EE.toInt(),
+        codeKeyword = 0xFF7DD3FC.toInt(),
+        codeString = 0xFF86EFAC.toInt(),
+        codeComment = 0xFF889E98.toInt(),
+        codeNumber = 0xFFFDBA74.toInt(),
+        successBg = 0xFFE8F5E9.toInt(),
+        successBorder = 0xFFC8E6C9.toInt(),
+        successInk = 0xFF1B5E20.toInt(),
+        dangerBg = 0xFFFFEBEE.toInt(),
+        dangerBorder = 0xFFFFCDD2.toInt(),
+        dangerInk = 0xFFB91C1C.toInt(),
+        warningBg = 0xFFFFF8E1.toInt(),
+        warningBorder = 0xFFFFE082.toInt(),
+        warningInk = 0xFF8D5700.toInt(),
+        statusLoadedGpu = 0xFF10B981.toInt(),
+        statusLoadedCpu = 0xFF0EA5E9.toInt(),
+        statusStandby = 0xFFF59E0B.toInt(),
+        statusMissing = 0xFFDC2626.toInt(),
+        scrimOverlay = 0x80091210.toInt(),
+        heroGradientStart = 0xFF153B36.toInt(),
+        heroGradientEnd = 0xFF176B60.toInt(),
+        heroSubtitleInk = 0xFFD5EAE5.toInt(),
+    )
+
+    private val DARK_PALETTE = UiPalette(
+        isDark = true,
+        bg = 0xFF0E1412.toInt(),
+        surface = 0xFF17211E.toInt(),
+        surfaceElevated = 0xFF1F2D29.toInt(),
+        ink = 0xFFE9F1EF.toInt(),
+        muted = 0xFFA0B2AD.toInt(),
+        teal = 0xFF4EC4B2.toInt(),
+        tealDark = 0xFF2E9A8A.toInt(),
+        mint = 0xFF1B3530.toInt(),
+        border = 0xFF2B3E39.toInt(),
+        rippleOnMint = 0x334EC4B2,
+        rippleOnSurface = 0x24E9F1EF,
+        rippleOnAccent = 0x33FFFFFF,
+        stopCrimson = 0xFFEF5350.toInt(),
+        userBubbleBg = 0xFF1A342F.toInt(),
+        userBubbleBorder = 0xFF2D5950.toInt(),
+        assistantBubbleBg = 0xFF17211E.toInt(),
+        assistantBubbleBorder = 0xFF2B3E39.toInt(),
+        inlineCodeBg = 0xFF22332E.toInt(),
+        inlineCodeInk = 0xFF7BE0D0.toInt(),
+        codeBg = 0xFF0B1110.toInt(),
+        codeHeaderBg = 0xFF131D1B.toInt(),
+        codeBorder = 0xFF263834.toInt(),
+        codeText = 0xFFE4EFEA.toInt(),
+        codeKeyword = 0xFF7DD3FC.toInt(),
+        codeString = 0xFF86EFAC.toInt(),
+        codeComment = 0xFF7D938D.toInt(),
+        codeNumber = 0xFFFDBA74.toInt(),
+        successBg = 0xFF152E24.toInt(),
+        successBorder = 0xFF2A5845.toInt(),
+        successInk = 0xFF86EFAC.toInt(),
+        dangerBg = 0xFF331B1B.toInt(),
+        dangerBorder = 0xFF5E2B2B.toInt(),
+        dangerInk = 0xFFFF8A80.toInt(),
+        warningBg = 0xFF312612.toInt(),
+        warningBorder = 0xFF5C4720.toInt(),
+        warningInk = 0xFFFCD34D.toInt(),
+        statusLoadedGpu = 0xFF34D399.toInt(),
+        statusLoadedCpu = 0xFF38BDF8.toInt(),
+        statusStandby = 0xFFFBBF24.toInt(),
+        statusMissing = 0xFFF87171.toInt(),
+        scrimOverlay = 0xB3050908.toInt(),
+        heroGradientStart = 0xFF12302C.toInt(),
+        heroGradientEnd = 0xFF19584F.toInt(),
+        heroSubtitleInk = 0xFFCDE5DF.toInt(),
+    )
+
+    /** Returns true when dark mode should be rendered for [mode] and [systemNightActive]. */
+    fun isDarkActive(mode: ThemeMode, systemNightActive: Boolean): Boolean {
+        return when (mode) {
+            ThemeMode.SYSTEM -> systemNightActive
+            ThemeMode.LIGHT -> false
+            ThemeMode.DARK -> true
+        }
+    }
+
+    /** Returns the [UiPalette] corresponding to [mode] and [systemNightActive]. */
+    fun paletteFor(mode: ThemeMode, systemNightActive: Boolean): UiPalette {
+        return if (isDarkActive(mode, systemNightActive)) DARK_PALETTE else LIGHT_PALETTE
+    }
+
+    /** Returns true if Android configuration [uiMode] has night mode enabled. */
+    fun isDarkFromConfiguration(uiMode: Int): Boolean {
+        return (uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+    }
+}

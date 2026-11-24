@@ -961,7 +961,6 @@ class MainViewModel internal constructor(
                 .withDuplexState(DuplexVoiceController.DuplexState.IDLE, "")
         }
     }
-    }
 
     private fun saveTurnToSession(task: String, attachedContext: String, answer: String) {
         try {

@@ -304,4 +304,22 @@ class ContextBudgetManager(
             hasDemarcatedAttachments = hasDemarcated,
         )
     }
+
+    /**
+     * Integrates stored user memory facts into the system instruction
+     * while respecting the reserved system token budget.
+     */
+    fun enrichSystemInstructionWithMemory(
+        baseInstruction: String,
+        memoryContext: String,
+        maxMemoryTokens: Int = 100,
+    ): String {
+        if (memoryContext.isBlank()) return baseInstruction
+        val boundedMemory = if (estimateTokens(memoryContext) > maxMemoryTokens) {
+            memoryContext.take(maxMemoryTokens * 3)
+        } else {
+            memoryContext
+        }
+        return "$baseInstruction\n\n$boundedMemory"
+    }
 }

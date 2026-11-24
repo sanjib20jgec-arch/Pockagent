@@ -198,6 +198,9 @@ class MainViewModel internal constructor(
     private val isGenerationCancelled = AtomicBoolean(false)
     @Volatile private var activeSession: ConversationSession? = null
 
+    /** Set by the runaway guard so the UI can explain why generation stopped. */
+    @Volatile private var runawayFragment: String? = null
+
     /**
      * Subscribes a listener to UI state changes. Dispatches the current state immediately.
      * Returns an unsubscribe function.
@@ -546,26 +549,34 @@ class MainViewModel internal constructor(
                     }
 
                     val prompt = answerPrompt(task = task, attachment = attached, intent = intent, isRetry = isRetry, history = history)
-                    result = llmRunner.runInference(
+                    // The guard stops a model that locks onto a phrase and repeats it forever.
+                    val guard = GuardedGeneration { currentText ->
+                        val isFirst = firstChunk.compareAndSet(true, false)
+                        val formatted = MarkdownFormatter.formatForDisplay(currentText)
+                        val plain = MarkdownFormatter.stripToPlainText(currentText)
+                        updateState {
+                            it.withStreamChunk(currentText, formatted, plain, isFirst)
+                        }
+                    }
+                    val raw = llmRunner.runInference(
                         prompt = prompt,
                         systemInstruction = AnswerDirective.systemInstructionFor(intent),
                         maxTokens = MainUiState.MAX_RESPONSE_TOKENS,
                         onChunk = { chunk ->
-                            if (isGenerationCancelled.get()) return@runInference
-                            val currentText = synchronized(accumulated) {
-                                accumulated.append(chunk)
-                                accumulated.toString()
+                            if (isGenerationCancelled.get()) {
+                                guard.cancel()
                             }
-                            val isFirst = firstChunk.compareAndSet(true, false)
-                            val formatted = MarkdownFormatter.formatForDisplay(currentText)
-                            val plain = MarkdownFormatter.stripToPlainText(currentText)
-                            updateState {
-                                it.withStreamChunk(currentText, formatted, plain, isFirst)
-                            }
+                            guard.accept(accumulated, chunk)
                         },
-                    ).trim()
+                    )
+                    runawayFragment = guard.runawayFragment
+                    result = AnswerFinalizer.finalize(
+                        if (guard.runawayFragment != null) guard.text(accumulated) else raw
+                    ).text
 
                     if (isGenerationCancelled.get()) break
+                    // A runaway answer is already the best we can get from this attempt.
+                    if (guard.runawayFragment != null) break
 
                     val dodged = AnswerDirective.looksLikeDelegationRefusal(result, intent) ||
                         AnswerDirective.isUnsubstantive(result)
@@ -585,6 +596,14 @@ class MainViewModel internal constructor(
                 val finalPlain = MarkdownFormatter.stripToPlainText(result)
                 updateState {
                     it.withGenerationCompleted(result, finalFormatted, finalPlain)
+                        .let { done ->
+                            val stopped = runawayFragment
+                            if (stopped != null && result.isNotBlank()) {
+                                done.withStatus(RunawayGuard.stoppedNotice(stopped))
+                            } else {
+                                done
+                            }
+                        }
                 }
 
                 // Persist turns to the active session

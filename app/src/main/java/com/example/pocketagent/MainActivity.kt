@@ -38,6 +38,7 @@ import com.google.ai.edge.litertlm.MessageCallback
 import java.io.File
 import java.util.Locale
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
@@ -55,6 +56,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         private const val STATE_PENDING_ANSWER_SAVE = "pending_answer_to_save"
         private const val MAX_ATTACHMENT_CHARS = 12_000
         private const val MAX_RESPONSE_TOKENS = MainUiState.MAX_RESPONSE_TOKENS
+        /** Hard ceiling so a stalled engine cannot block the worker thread forever. */
+        private const val GENERATION_TIMEOUT_SECONDS = 120L
         private val SYSTEM_INSTRUCTION: String get() = AnswerDirective.SYSTEM_INSTRUCTION
         private const val BG = 0xFFF4F7F6.toInt()
         private const val INK = 0xFF162D2A.toInt()
@@ -101,6 +104,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var currentSession: ConversationSession? = null
     private var lastPrompt: String = ""
     private val isGeneratingCancelled = AtomicBoolean(false)
+
+    /** Set by the runaway guard so the UI can explain why generation stopped. */
+    @Volatile private var runawayFragment: String? = null
     private lateinit var stopGeneratingButton: Button
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -321,6 +327,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         outputCard.addView(outputHeader)
         stopGeneratingButton = pillButton("■ Stop Generating", accessibilityLabel = "Stop in-progress generation") {
             isGeneratingCancelled.set(true)
+            suggestButton.isEnabled = true
             updateStatus("Stopping generation…")
         }.apply {
             visibility = View.GONE
@@ -866,6 +873,75 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         history: List<ChatMessage>,
     ): String = promptContext.answerPrompt(task, attachment, intent, isRetry, history)
 
+    /**
+     * Runs one inference pass with the runaway guard applied.
+     *
+     * Stops as soon as the model begins repeating itself, and never blocks the worker thread
+     * forever if the engine never signals completion.
+     */
+    private fun runGuardedGeneration(
+        engine: Engine,
+        prompt: String,
+        intent: AnswerDirective.Intent,
+    ): String {
+        val accumulated = StringBuilder()
+        val firstChunk = AtomicBoolean(true)
+        val streamFinished = CountDownLatch(1)
+        val streamError = AtomicReference<Throwable?>(null)
+
+        val guard = GuardedGeneration { partial ->
+            val isFirst = firstChunk.compareAndSet(true, false)
+            mainHandler.post {
+                answerText.text = MarkdownFormatter.formatForDisplay(partial)
+                if (isFirst) updateStatus("Response streaming locally…")
+            }
+        }
+
+        engine.createConversation(
+            ConversationConfig(
+                systemInstruction = Contents.of(AnswerDirective.systemInstructionFor(intent))
+            )
+        ).use { conversation ->
+            conversation.sendMessageAsync(
+                prompt,
+                object : MessageCallback {
+                    override fun onMessage(message: Message) {
+                        if (isGeneratingCancelled.get() && !guard.wasCancelled) {
+                            guard.cancel()
+                        }
+                        guard.accept(accumulated, message.toString())
+                    }
+
+                    override fun onDone() {
+                        streamFinished.countDown()
+                    }
+
+                    override fun onError(throwable: Throwable) {
+                        streamError.set(throwable)
+                        streamFinished.countDown()
+                    }
+                },
+                maxOutputToken = MAX_RESPONSE_TOKENS,
+            )
+
+            // Bounded wait: a stalled engine must not wedge the single worker thread, which
+            // would make every later request look frozen with the last answer on screen.
+            val finished = streamFinished.await(GENERATION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            if (!finished) {
+                guard.cancel()
+                throw IllegalStateException(
+                    "Generation timed out after ${GENERATION_TIMEOUT_SECONDS}s. Try a shorter request."
+                )
+            }
+            streamError.get()?.let { throw IllegalStateException("Streaming inference failed.", it) }
+        }
+
+        runawayFragment = guard.runawayFragment
+        val raw = guard.text(accumulated)
+        val finalised = AnswerFinalizer.finalize(raw)
+        return finalised.text
+    }
+
     private fun suggestSteps() {
         if (isWhisperTranscribing) {
             updateStatus("Wait for transcription to finish before asking.")
@@ -911,89 +987,18 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     ""
                 }
                 val prompt = answerPrompt(task = task, attachment = boundedAttachment, intent = intent, isRetry = false, history = history)
-                val generated = StringBuilder()
-                val firstChunk = AtomicBoolean(true)
-                val streamFinished = CountDownLatch(1)
-                val streamError = AtomicReference<Throwable?>(null)
-                localEngine.createConversation(
-                    ConversationConfig(
-                        systemInstruction = Contents.of(AnswerDirective.systemInstructionFor(intent))
-                    )
-                ).use { conversation ->
-                    conversation.sendMessageAsync(
-                        prompt,
-                        object : MessageCallback {
-                            override fun onMessage(message: Message) {
-                                if (isGeneratingCancelled.get()) return
-                                val partial = synchronized(generated) {
-                                    generated.append(message.toString())
-                                    generated.toString()
-                                }
-                                val isFirstChunk = firstChunk.compareAndSet(true, false)
-                                mainHandler.post {
-                                    answerText.text = MarkdownFormatter.formatForDisplay(partial)
-                                    if (isFirstChunk) updateStatus("Response streaming locally…")
-                                }
-                            }
-
-                            override fun onDone() {
-                                streamFinished.countDown()
-                            }
-
-                            override fun onError(throwable: Throwable) {
-                                streamError.set(throwable)
-                                streamFinished.countDown()
-                            }
-                        },
-                        maxOutputToken = MAX_RESPONSE_TOKENS,
-                    )
-                    streamFinished.await()
-                    streamError.get()?.let { throw IllegalStateException("Streaming inference failed.", it) }
-                }
-                var result = synchronized(generated) { generated.toString().trim() }
+                runawayFragment = null
+                var result = runGuardedGeneration(localEngine, prompt, intent)
                 // If the model dodged the request ("open Google Maps to measure it"), retry once
                 // with a corrective instruction instead of showing the user a non-answer.
-                if (!isGeneratingCancelled.get() &&
+                if (!isGeneratingCancelled.get() && runawayFragment == null &&
                     (AnswerDirective.looksLikeDelegationRefusal(result, intent) ||
                         AnswerDirective.isUnsubstantive(result))
                 ) {
                     val retryPrompt = answerPrompt(task = task, attachment = boundedAttachment, intent = intent, isRetry = true, history = history)
-                    synchronized(generated) { generated.setLength(0) }
                     mainHandler.post { answerText.text = "Refining the answer…" }
                     val retryEngine = engineManager.getOrInitializeEngine(modelFile, cacheDir)
-                    retryEngine.createConversation(
-                        ConversationConfig(
-                            systemInstruction = Contents.of(AnswerDirective.systemInstructionFor(intent))
-                        )
-                    ).use { retryConversation ->
-                        val retryLatch = CountDownLatch(1)
-                        retryConversation.sendMessageAsync(
-                            retryPrompt,
-                            object : MessageCallback {
-                                override fun onMessage(message: Message) {
-                                    if (isGeneratingCancelled.get()) return
-                                    val partial = synchronized(generated) {
-                                        generated.append(message.toString())
-                                        generated.toString()
-                                    }
-                                    mainHandler.post {
-                                        answerText.text = MarkdownFormatter.formatForDisplay(partial)
-                                    }
-                                }
-
-                                override fun onDone() {
-                                    retryLatch.countDown()
-                                }
-
-                                override fun onError(throwable: Throwable) {
-                                    retryLatch.countDown()
-                                }
-                            },
-                            maxOutputToken = MAX_RESPONSE_TOKENS,
-                        )
-                        retryLatch.await()
-                    }
-                    val retried = synchronized(generated) { generated.toString().trim() }
+                    val retried = runGuardedGeneration(retryEngine, retryPrompt, intent)
                     if (retried.isNotBlank()) result = retried
                 }
                 mainHandler.post {
@@ -1009,7 +1014,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     answerIsComplete = result.isNotBlank()
                     val formatted = MarkdownFormatter.formatForDisplay(result)
                     answerText.text = if (formatted.isNotBlank()) formatted else "No answer was returned. Try rephrasing the request."
-                    updateStatus(if (answerIsComplete) "Answer ready." else "No answer was returned. Try rephrasing the request.")
+                    val stopped = runawayFragment
+                    updateStatus(
+                        when {
+                            stopped != null -> RunawayGuard.stoppedNotice(stopped)
+                            answerIsComplete -> "Answer ready."
+                            else -> "No answer was returned. Try rephrasing the request."
+                        }
+                    )
 
                     // Auto-save turn to local conversation session
                     if (result.isNotBlank()) {

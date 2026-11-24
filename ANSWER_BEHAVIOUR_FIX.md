@@ -141,3 +141,64 @@ and *give* an answer for things it knows or can estimate, and it will say so whe
 a request needs a live feed. It cannot fetch current weather or today's prices —
 that is a data limitation, not a behaviour bug, and the prompt now handles it
 gracefully instead of dumping the chore on you.
+
+---
+
+# Second bug: infinite repetition loop (reported after installing the first build)
+
+## Symptom
+
+After two or three good answers, the third reply printed the same two lines
+forever and generation never stopped. Every later request then appeared frozen.
+
+## Root causes
+
+All four are in the streaming path:
+
+1. **No runaway detection.** Nothing looked at the accumulating text. A small
+   on-device model that locks onto a phrase is streamed indefinitely, and the UI
+   re-renders the whole buffer per token — so you see two lines repeating.
+2. **The previous fix made it more visible.** Raising `MAX_RESPONSE_TOKENS` from
+   256 to 1024 (necessary so real answers were not truncated) also gave a
+   degenerating model ~4x more tokens to loop for.
+3. **`streamFinished.await()` had no timeout.** If the engine never fires
+   `onDone`, the single worker thread blocks forever: no error is shown and every
+   later request queues behind the dead one. This is why it looked like the app
+   had hung rather than failed.
+4. **Stop only set a flag.** It could not interrupt the blocking `await`, and the
+   Ask button stayed disabled, so the only escape was killing the app.
+
+## Fix
+
+* **`RunawayGuard`** — detects a repeated line, a looping block of text
+  (including loops with no newline), endless blank-line padding, and absolute
+  size overflow. It inspects only the trailing window and requires at least 4
+  repeats *plus* real length, so normal long answers and legitimate 10-step lists
+  are never flagged.
+* **`AnswerFinalizer`** — collapses a looping tail to a single copy while keeping
+  the meaningful text the model looped on, and ends a cut-off answer on a clean
+  boundary instead of mid-word.
+* **`GuardedGeneration`** — shared chunk accumulator that stops accepting chunks
+  the moment output stops being new. Both inference paths use it.
+* **Bounded waits** — every `await` now has `GENERATION_TIMEOUT_SECONDS` (120s),
+  so a stalled engine surfaces an error instead of wedging the worker thread.
+* **Stop is immediate** — re-enables Ask straight away; completion reports why it
+  stopped and names the repeated fragment, so a truncated answer is not mistaken
+  for a complete one.
+
+## Verification
+
+```
+=== 129 passed, 0 failed ===
+```
+
+17 of those are new and reproduce the exact report: two lines repeating forever
+must be detected, collapsed to one copy, and terminated. `Build APK` CI passes,
+confirming the Activity and ViewModel wiring compiles against the real SDK.
+
+## Note on model behaviour
+
+This is now bounded at the app level. It does not change the model's tendency to
+degenerate on the 1B INT4 build — it makes the app survive it. Loops are most
+likely on long, open-ended requests; regenerating a shorter, more specific
+question is the best workaround.

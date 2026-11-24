@@ -173,6 +173,7 @@ class MainViewModel internal constructor(
     private val notesStore: PersonalNotesStore = PersonalNotesStore(PersonalNotesStore.defaultDir(filesDir)),
     private val llmRunner: LlmInferenceRunner = DefaultLlmInferenceRunner(filesDir, cacheDir),
     private val whisperTranscriber: WhisperTranscriber = DefaultWhisperTranscriber(),
+    private val ttsSpeaker: TtsSpeaker = AndroidTtsSpeaker({ null }, { false }),
     private val workerExecutor: Executor = Executors.newSingleThreadExecutor(),
     private val mainDispatcher: (Runnable) -> Unit = { it.run() },
 ) : Closeable {
@@ -194,6 +195,17 @@ class MainViewModel internal constructor(
     @Volatile private var whisperContext: Long = 0L
     private val isGenerationCancelled = AtomicBoolean(false)
     @Volatile private var activeSession: ConversationSession? = null
+    private val audioRecorder by lazy { InAppAudioRecorder() }
+    val duplexVoiceController by lazy {
+        DuplexVoiceController(
+            audioRecorder = audioRecorder,
+            whisperTranscriber = whisperTranscriber,
+            llmRunner = llmRunner,
+            ttsSpeaker = ttsSpeaker,
+            workerExecutor = workerExecutor,
+            mainDispatcher = mainDispatcher,
+        )
+    }
 
     /**
      * Subscribes a listener to UI state changes. Dispatches the current state immediately.
@@ -873,6 +885,84 @@ class MainViewModel internal constructor(
         updateState { it.withActiveCalculation(null) }
     }
 
+    /**
+     * Starts continuous hands-free voice duplex mode.
+     */
+    fun startDuplexVoiceSession(
+        onStateChanged: ((DuplexVoiceController.DuplexState, String) -> Unit)? = null,
+        onAmplitude: ((Float) -> Unit)? = null,
+    ) {
+        val context = whisperContext
+        if (context == 0L) {
+            updateState { it.withStatus("Select a local Whisper model first.") }
+            return
+        }
+        if (!llmRunner.isAvailable()) {
+            updateState { it.withStatus("Select a local LiteRT-LM model first.") }
+            return
+        }
+
+        updateState {
+            it.withDuplexActive(true)
+                .withDuplexState(DuplexVoiceController.DuplexState.LISTENING, "Listening for speech…")
+        }
+
+        duplexVoiceController.startSession(
+            whisperContext = context,
+            systemInstruction = MainUiState.SYSTEM_INSTRUCTION,
+            listener = object : DuplexVoiceController.Listener {
+                override fun onStateChanged(state: DuplexVoiceController.DuplexState, statusMessage: String) {
+                    updateState { it.withDuplexState(state, statusMessage) }
+                    onStateChanged?.invoke(state, statusMessage)
+                }
+
+                override fun onAmplitude(rms: Float) {
+                    onAmplitude?.invoke(rms)
+                }
+
+                override fun onUserTranscribed(text: String) {
+                    updateState { it.withTaskInput(text) }
+                }
+
+                override fun onAssistantChunk(chunk: String) {}
+
+                override fun onTurnComplete(userText: String, assistantText: String) {
+                    saveTurnToSession(userText, "", assistantText)
+                    val formatted = MarkdownFormatter.formatForDisplay(assistantText)
+                    val plain = MarkdownFormatter.stripToPlainText(assistantText)
+                    updateState {
+                        it.withGenerationCompleted(assistantText, formatted, plain)
+                    }
+                }
+
+                override fun onError(error: Throwable) {
+                    updateState {
+                        it.withDuplexState(DuplexVoiceController.DuplexState.ERROR, error.message ?: "Voice error")
+                    }
+                }
+            }
+        )
+    }
+
+    /**
+     * Interrupts active voice playback or thinking in duplex mode.
+     */
+    fun interruptDuplex() {
+        duplexVoiceController.interrupt()
+    }
+
+    /**
+     * Stops continuous voice duplex mode.
+     */
+    fun stopDuplexVoiceSession() {
+        duplexVoiceController.stopSession()
+        updateState {
+            it.withDuplexActive(false)
+                .withDuplexState(DuplexVoiceController.DuplexState.IDLE, "")
+        }
+    }
+    }
+
     private fun saveTurnToSession(task: String, attachedContext: String, answer: String) {
         try {
             val current = activeSession ?: ConversationSession.createWithInitialPrompt(task.ifBlank { "Conversation" })
@@ -964,6 +1054,7 @@ class MainViewModel internal constructor(
 
     override fun close() {
         workerExecutor.execute {
+            duplexVoiceController.stopSession()
             llmRunner.close()
             val context = whisperContext
             whisperContext = 0L

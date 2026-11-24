@@ -109,7 +109,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val brand = column().apply {
             setPadding(dp(11), 0, 0, 0)
             addView(text("PocketAgent", 18f, INK, true))
-            addView(text("PRIVATE · ON-DEVICE", 10f, MUTED, true).apply { letterSpacing = .12f })
+            addView(text("LOCAL MODEL INFERENCE", 10f, MUTED, true).apply { letterSpacing = .12f })
         }
         brandRow.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))
         brandRow.addView(text("MANUAL ASSISTANT", 10f, TEAL, true).apply {
@@ -156,6 +156,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         actionRow.addView(pillButton("＋  Add text file") { chooseTextFiles() }, LinearLayout.LayoutParams(0, dp(44), 1f).apply { marginEnd = dp(7) })
         actionRow.addView(pillButton("◉  Dictate") { startDictation() }, LinearLayout.LayoutParams(0, dp(44), 1f).apply { marginStart = dp(7) })
         promptCard.addView(actionRow)
+        promptCard.addView(text("Dictation uses your device's speech service; offline availability depends on that provider.", 11f, MUTED).apply {
+            setPadding(dp(2), dp(8), dp(2), dp(2))
+        })
         attachmentCard = column().apply { visibility = View.GONE; setPadding(0, dp(9), 0, 0) }
         attachmentText = text("", 12f, MUTED)
         attachmentCard.addView(attachmentText)
@@ -252,19 +255,20 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun importModel(uri: Uri) {
+        val displayName = queryDisplayName(uri)
+        if (displayName != null && !displayName.endsWith(".litertlm", ignoreCase = true)) {
+            updateStatus("Choose a LiteRT-LM model file ending in .litertlm.")
+            return
+        }
         updateStatus("Importing model into app storage…")
         suggestButton.isEnabled = false
         worker.execute {
             try {
-                val target = File(filesDir, "model.litertlm")
-                val temporary = File(filesDir, "model.litertlm.part")
-                contentResolver.openInputStream(uri)?.use { input -> temporary.outputStream().use { output -> input.copyTo(output) } }
-                    ?: error("Could not open the selected file.")
-                require(temporary.length() > 0) { "The selected model file is empty." }
-                if (target.exists() && !target.delete()) error("Could not replace the previous model.")
-                if (!temporary.renameTo(target)) error("Could not save the model in app storage.")
                 engine?.close()
                 engine = null
+                val target = contentResolver.openInputStream(uri)?.use { input ->
+                    ModelFileStore(filesDir).importModel(input)
+                } ?: error("Could not open the selected file.")
                 mainHandler.post {
                     modelText.text = "MODEL READY  ·  ${formatBytes(target.length())}"
                     updateStatus("Model ready. Type a task, dictate, or attach text.")
@@ -290,7 +294,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     if (content.length >= MAX_ATTACHMENT_CHARS) break
                     val name = queryDisplayName(uri) ?: "Attached text"
                     val remaining = MAX_ATTACHMENT_CHARS - content.length
-                    val text = contentResolver.openInputStream(uri)?.bufferedReader()?.use { reader -> readBounded(reader, remaining) }
+                    val text = contentResolver.openInputStream(uri)?.bufferedReader()?.use { reader -> BoundedTextReader.read(reader, remaining) }
                         ?: error("Could not read $name")
                     names.add(name)
                     content.append("\n\n--- $name ---\n").append(text)
@@ -307,17 +311,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 mainHandler.post { updateStatus("Could not attach text: ${e.message ?: "unknown error"}") }
             }
         }
-    }
-
-    private fun readBounded(reader: java.io.Reader, limit: Int): String {
-        val out = StringBuilder(minOf(limit, 8_192))
-        val buffer = CharArray(minOf(limit.coerceAtLeast(1), 8_192))
-        while (out.length < limit) {
-            val count = reader.read(buffer, 0, minOf(buffer.size, limit - out.length))
-            if (count < 0) break
-            out.append(buffer, 0, count)
-        }
-        return out.toString()
     }
 
     private fun queryDisplayName(uri: Uri): String? = try {

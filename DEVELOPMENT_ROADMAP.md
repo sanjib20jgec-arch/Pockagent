@@ -1,40 +1,139 @@
-# PocketAgent development roadmap
+# PocketAgent Development Roadmap
 
-This roadmap separates the work into independent workstreams so UI, model/runtime, input modalities, and quality can be developed and verified separately. A multi-agent runner is not available in this workspace; the work is being tracked as parallel review streams rather than pretending separate agents were launched.
+This is the persistent task ledger for the current product direction. It is grounded in the repository review in [`PROJECT_AUDIT.md`](PROJECT_AUDIT.md). The user approved M0 after reviewing the audit; M0 is now in progress. Later milestones still require separate review.
 
-## Product principles
+## Governance and product constraints
 
-- The user remains in control. PocketAgent suggests; it never reads other apps' screens or executes taps, typing, gestures, launches, or settings changes.
-- Be honest about the selected model's capabilities. The current Gemma 3 1B LiteRT-LM file is text-oriented; a polished attachment picker must not imply that it can understand images or arbitrary audio.
-- Keep local-first behavior clear. Speech recognition may use the device's configured provider; ask for microphone permission only when the user chooses dictation.
-- Keep attachment contents user-selected, bounded, and visible to the user before use.
+- Current product: local model proposes steps for a human to review and perform manually.
+- Standing decision: **do not restore AccessibilityService-based screen inspection/control or automatic phone actions**, and do not attempt to hide behavior or bypass Play Protect.
+- Do not add cloud providers, telemetry, paid services, or persistent memory without explicit approval and clear privacy behavior.
+- No native sub-agent runner is available in this workspace. Role assignments below are simulated review lenses, not claims that independent agents were launched. The current single agent remains accountable for review and tests.
+- A task is not complete merely because code exists: acceptance requires evidence. `CI BUILD` does not mean on-device behavior has been tested.
 
-## Workstreams
+## Status definitions
 
-### A — Product design and interaction
-- [x] Replace the bare form with a structured, responsive-feeling assistant screen, clear hierarchy, branded color palette, model state, quick prompts, and readable suggestion card.
-- [x] Add copy, share, and text-to-speech actions for generated guidance.
-- [ ] Add accessibility review (TalkBack labels, font scaling, contrast, touch targets) and small-screen/landscape verification.
+- **COMPLETED** — acceptance evidence recorded.
+- **IN PROGRESS** — active work with a defined scope.
+- **BLOCKED** — prerequisite/environment unavailable.
+- **PROPOSED** — awaiting user approval; implementation has not started.
+- **OUT OF SCOPE** — rejected or intentionally excluded by product decision.
 
-### B — Model runtime and answer quality
-- [x] Improve prompt guidance for concise manual steps, untrusted attachment text, assumptions, and safety reminders.
-- [x] Surface model readiness and import progress; reset the engine when the model is replaced.
-- [ ] Verify model compatibility/error cases on real Android hardware and improve long-inference cancellation/progress handling.
-- [ ] Add model metadata/capability detection before presenting image/audio understanding as supported.
+## Current baseline
 
-### C — Input modalities and attachments
-- [x] Typed text input and device speech-to-text dictation.
-- [x] Import one or more selected plain text, Markdown, or CSV files as bounded prompt context.
-- [ ] Add image attachments with actual on-device OCR/vision support; a text-only model must not be described as vision-capable.
-- [ ] Add audio-file ingestion/transcription (separate from live dictation) with an explicitly chosen on-device or privacy-reviewed provider.
-- [ ] Evaluate PDF/document extraction, clipboard/paste, camera capture, and share-to-PocketAgent flows.
+- Audit commit: `b86f420` on `arena/85d065bd-pockagent`; base `main` is `f579f52`.
+- GitHub Actions run `45342681795` built and uploaded the debug APK successfully.
+- No automated tests/lint or device/emulator tests exist. Local build unavailable (no Java/Gradle executable or wrapper).
+- User-reported: app launches and loads the Gemma 3 1B INT4 model; generated output/UI need improvement.
+- Current app supports typed prompts, live system speech-to-text, bounded text/Markdown/CSV attachments, local CPU inference, and answer copy/share/TTS. Image input, imported audio transcription, PDF extraction, chat history and tool execution are not implemented.
+- The original `PocketAgent.zip` was confirmed stale and contained removed AccessibilityService/control code. M0 is regenerating it from current source with a guard/check script; archive verification passed locally, and CI verification is pending.
 
-### D — Reliability, privacy, and release quality
-- [x] Bound text attachment context to 12,000 characters and allow removal before generation.
-- [x] Document current capabilities and unsupported modalities.
-- [ ] Add automated tests for import, permission denial, missing model, empty response, attachment size, and inference failure.
-- [ ] Run build/lint on CI and perform real-device QA before release.
+## Task ledger
 
-## Current milestone
+| ID | Task | Owner lens (simulated) | Status | Dependencies | Risk |
+| --- | --- | --- | --- | --- | --- |
+| AUD-001 | Repository, feature, privacy, build and architecture audit | Repository Auditor + QA + Security | **COMPLETED** | None | Low; report in `PROJECT_AUDIT.md` |
+| ARC-001 | Confirm incremental architecture and dependency boundaries | System Architect | **COMPLETED (M0 scope)** | AUD-001 | Narrow pure helpers; no broad rewrite |
+| SAFE-001 | Regenerate stale source ZIP; verify no legacy service/control remains | Security + Release | **IN PROGRESS** | AUD-001; M0 approved | Script and archive check pass locally; CI pending |
+| TEST-001 | Add focused unit tests for bounded text extraction and import rollback | QA + Implementation | **IN PROGRESS** | ARC-001; small testable seam | Tests added; CI execution pending |
+| AI-001 | Harden model import (bounds, free space, atomic replace/rollback, retry/error states) | AI Engine + Implementation | **IN PROGRESS** | ARC-001, TEST-001 | Preserve existing model; CI pending |
+| UX-001 | Accessibility, responsive layout, and accurate speech-privacy disclosure review | UI/UX + Security + QA | **IN PROGRESS** | AUD-001 | Privacy wording updated; device/emulator review remains blocked |
+| AI-002 | Model status/capability metadata and inference progress/cancel feasibility | AI Engine + QA | **PROPOSED** | AI-001; LiteRT-LM API review | Medium; no unsupported capability promises |
+| DOC-001 | Safe PDF/document text extraction and source display | Document/Knowledge + Security | **PROPOSED** | M0 gates, input abstraction, TEST-001 | Medium-high; size/context limits and prompt injection |
+| VOICE-001 | Imported audio transcription | Voice + Security + QA | **PROPOSED** | M0 gates; choose ASR/provider and privacy policy | High; offline/network and language availability |
+| VIS-001 | Image input with a compatible multimodal model/runtime | AI Engine + UI/UX + QA + Security | **PROPOSED** | M0 gates, AI-002, model/API/hardware compatibility review | High; memory, preprocessing, model license/size |
+| STATE-001 | Optional local conversation history with user deletion controls | Memory/Knowledge + Security + QA | **PROPOSED** | M0 gates; explicit retention approval | Medium-high; data lifecycle and migrations |
+| TOOL-001 | Safe local utilities (e.g. calculator) | Tooling + Security + QA | **OUT OF SCOPE** | Requires separate product approval | High if expanded into action/execution |
+| AUTO-001 | Accessibility-driven screen inspection/control or autonomous phone actions | Tooling + Security | **OUT OF SCOPE** | Explicitly rejected direction | Prohibited by product constraint |
 
-**Milestone 1 — Better daily-use experience:** UI refresh, task dictation, readable local model state, plain-text attachment context, and answer copy/share/read-aloud actions. This does not yet provide image understanding or audio-file transcription. The default recommended Gemma 3 1B INT4 model should be treated as text-first; further modalities need model/runtime capability work rather than UI-only promises.
+## Dependency map
+
+```text
+AUD-001 (complete)
+  └── ARC-001 (review proposed boundaries)
+       ├── SAFE-001 (archive/release integrity) ──┐
+       ├── TEST-001 (test seam and regression tests) ──┐
+       ├── AI-001 (reliable model import) ─────────────┤
+       └── UX-001 (accessibility/privacy review) ───────┤
+                                                       └── M0 quality gate
+M0 quality gate
+  ├── AI-002 (runtime capability/progress review)
+  │    └── VIS-001 (image/multimodal; only if compatible)
+  ├── input abstraction + TEST-001
+  │    ├── DOC-001 (PDF/doc extraction)
+  │    └── VOICE-001 (audio-file transcription)
+  └── explicit privacy/retention approval ── STATE-001
+```
+
+## Milestones and acceptance gates
+
+### M0 — Safe, verifiable baseline (P0/P1) — IN PROGRESS (user approved)
+
+**Objective:** correct release/source integrity, add first regression evidence, protect model and user data before adding more formats.
+
+**Tasks:** SAFE-001, TEST-001, AI-001, UX-001. Confirm architecture recommendations through ARC-001.
+
+**Likely files:** `PocketAgent.zip` (remove/regenerate only after approval), `MainActivity.kt` or extracted pure helpers, test build configuration, manifest/UI strings, workflow/docs.
+
+**Acceptance criteria:**
+- Any distributed source archive matches the current manual-only source; scan proves no `AccessibilityService`, `AgentService`, screen-node reading, taps/typing/gestures or automatic app launches.
+- Import success and failure/rollback are tested. Known non-`.litertlm` filenames, empty streams, size-limit and low-storage paths are handled; old valid model remains intact after a failed replacement. The LiteRT runtime remains the definitive validator of model contents at inference time.
+- Attachment extraction respects a tested total limit, supports removal, and treats contents as untrusted.
+- At least missing model, permission denied, unavailable speech recognizer, empty output and inference error states have regression tests or documented device checks.
+- CI debug APK and tests pass. Device checks are reported separately.
+- Speech recognition provider limitations are described without implying guaranteed offline processing.
+
+**Risks:** adding abstractions can overgrow a small app; keep seams minimal and avoid broad rewrite.
+
+### M1 — Usability and accessibility hardening (P1) — PROPOSED
+
+**Objective:** make current manual-assistant flows clearer and accessible without a redesign for redesign's sake.
+
+**Tasks:** UX-001, targeted parts of AI-002.
+
+**Acceptance criteria:** TalkBack can identify controls and state; touch targets and contrast pass review; large text and narrow/landscape layouts do not truncate essential actions; import, listening, generating, failure and ready states are distinguishable; privacy copy clearly separates on-device inference from OS speech-recognition services. Test on emulator and at least one real device if available.
+
+**Risks:** platform/provider differences; no device QA can be claimed without a device.
+
+### M2 — Documents and audio input (P2) — PROPOSED
+
+**Objective:** accept more user-selected material while converting it to a bounded, inspectable representation the current text model can use.
+
+**Tasks:** DOC-001 and VOICE-001 after M0.
+
+**Acceptance criteria:** supported types are explicit; file size/page/duration and extracted context are bounded; user can preview/remove before inference; extraction failures are recoverable; document sources/pages are attributable where possible; imported audio uses a documented ASR path and disclosure; no audio bytes are silently sent to a text-only model. Test corrupt, empty, oversized and multilingual files/audio, plus offline behavior if promised.
+
+**Risks:** licensing/dependencies, scanned-document OCR quality, memory and offline ASR availability.
+
+### M3 — True multimodal vision (P3 / feasibility gate) — PROPOSED
+
+**Objective:** allow image questions only if a LiteRT-LM Android model and runtime API supported by this app can actually receive images on target hardware.
+
+**Tasks:** AI-002 then VIS-001.
+
+**Feasibility gate before implementation:** verify official model format/license, LiteRT-LM Android version/API, image `Contents` construction, CPU/GPU/accelerator compatibility, device RAM/storage, model loading/inference and supported input resolutions. Do not ask users to download a new multi-GB model until this gate passes.
+
+**Acceptance criteria:** UI preview/remove; image decode/resize limits; user-approved local input; honest capability reporting; no crashes/OOM on tested devices; image/text and unsupported-model tests; manual-only boundary maintained.
+
+**Risks:** multi-GB artifacts, runtime/API mismatch, hardware memory and model license/terms.
+
+### M4 — User-controlled continuity (P2, separate approval) — PROPOSED
+
+**Objective:** provide optional local conversation history without silently creating long-term memory.
+
+**Tasks:** STATE-001.
+
+**Acceptance criteria:** explicit opt-in, visible history, per-conversation and all-data deletion, storage/retention explanation, no hidden cross-conversation memory, migration tests, and prompt-injection-resistant separation of retrieved context. Not a prerequisite for M0–M3.
+
+**Risks:** sensitive data persistence, backup/migration behavior, retrieval mistakes.
+
+### M5 — Safe local tools (P3, separate product approval) — OUT OF SCOPE FOR NOW
+
+Only consider user-approved, low-risk utilities such as a calculator or selected-file summarizer. Read/prepare/confirm/restricted action classes and explicit confirmation would be mandatory. No general phone automation, AccessibilityService, or destructive operations.
+
+## Implementation and verification workflow
+
+For each approved task: inspect relevant code and dependencies; document a narrow plan; implement the smallest testable change; review the diff for privacy/safety and regressions; run unit/integration/build tests; report device-only limits; update this ledger with evidence. Do not mark tasks complete based on code presence alone.
+
+## Current decision and next gate
+
+**M0 is approved and in progress.** To preserve the existing source-bundle workflow without carrying legacy behavior, the stale ZIP is being regenerated from the current manual-only source and guarded by `scripts/package_source.py`. No later feature milestone (documents, audio-file transcription, vision, persistent memory or tools) has been approved yet. After M0's CI and device-verification limitations are reported, request review before starting M1/M2.

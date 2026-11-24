@@ -33,11 +33,14 @@ jobs:
         with:
           gradle-version: '8.14.4'
 
-      - name: Assemble debug APK
+      - name: Verify source archive
+        run: python3 scripts/package_source.py --check
+
+      - name: Run unit tests and assemble debug APK
         shell: bash
         run: |
           set -o pipefail
-          gradle --no-daemon --stacktrace --console=plain assembleDebug 2>&1 | tee gradle-build.log
+          gradle --no-daemon --stacktrace --console=plain testDebugUnitTest assembleDebug 2>&1 | tee gradle-build.log
 
       - name: Summarize Gradle failure
         if: failure()

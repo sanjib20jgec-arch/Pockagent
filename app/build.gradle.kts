@@ -15,4 +15,5 @@ kotlin {
 }
 dependencies {
     implementation("com.google.ai.edge.litertlm:litertlm-android:0.19.1")
+    testImplementation("junit:junit:4.13.2")
 }

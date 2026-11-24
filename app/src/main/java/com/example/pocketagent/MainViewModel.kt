@@ -170,6 +170,7 @@ class MainViewModel internal constructor(
     private val whisperModelStore: WhisperModelStore = WhisperModelStore(filesDir),
     private val sessionStore: SessionStore = SessionStore(SessionStore.defaultDir(filesDir)),
     private val userMemoryStore: UserMemoryStore = UserMemoryStore(UserMemoryStore.defaultDir(filesDir)),
+    private val notesStore: PersonalNotesStore = PersonalNotesStore(PersonalNotesStore.defaultDir(filesDir)),
     private val llmRunner: LlmInferenceRunner = DefaultLlmInferenceRunner(filesDir, cacheDir),
     private val whisperTranscriber: WhisperTranscriber = DefaultWhisperTranscriber(),
     private val workerExecutor: Executor = Executors.newSingleThreadExecutor(),
@@ -183,6 +184,7 @@ class MainViewModel internal constructor(
         whisperModelStore = WhisperModelStore(filesDir),
         sessionStore = SessionStore(SessionStore.defaultDir(filesDir)),
         userMemoryStore = UserMemoryStore(UserMemoryStore.defaultDir(filesDir)),
+        notesStore = PersonalNotesStore(PersonalNotesStore.defaultDir(filesDir)),
     )
 
     private val promptContext = AnswerPromptComposer()
@@ -227,6 +229,7 @@ class MainViewModel internal constructor(
     fun initModels() {
         refreshSessions()
         refreshMemories()
+        refreshNotes()
         val model = modelFileStore.modelFile
         if (model.exists() && model.length() > 0) {
             updateState { it.withModelReady(model.length()) }
@@ -528,8 +531,9 @@ class MainViewModel internal constructor(
         }
 
         isGenerationCancelled.set(false)
+        val calculation = if (task.isNotBlank()) LocalCalculatorTool.tryEvaluate(task) else null
         updateState {
-            it.withLastUserPrompt(task).withThinking()
+            it.withLastUserPrompt(task).withThinking().withActiveCalculation(calculation)
         }
 
         workerExecutor.execute {
@@ -539,6 +543,7 @@ class MainViewModel internal constructor(
             try {
                 val intent = AnswerDirective.classify(task.ifBlank { attached })
                 val history = conversationHistoryFor(task)
+                val calculation = if (task.isNotBlank()) LocalCalculatorTool.tryEvaluate(task) else null
                 val contextToInject = if (attached.isNotBlank()) {
                     val retrieval = LocalDocumentRetriever.retrieveTextWithCitations(
                         query = task,
@@ -588,7 +593,7 @@ class MainViewModel internal constructor(
                         updateState { it.withStatus("Answer needs more detail. Refining on this device…") }
                     }
 
-                    val prompt = answerPrompt(task = task, attachment = contextToInject, intent = intent, isRetry = isRetry, history = history)
+                    val prompt = answerPrompt(task = task, attachment = contextToInject, intent = intent, isRetry = isRetry, history = history, calculation = calculation)
                     // The guard stops a model that locks onto a phrase and repeats it forever.
                     val guard = GuardedGeneration { currentText ->
                         val isFirst = firstChunk.compareAndSet(true, false)
@@ -681,7 +686,8 @@ class MainViewModel internal constructor(
         intent: AnswerDirective.Intent,
         isRetry: Boolean,
         history: List<ChatMessage>,
-    ): String = promptContext.answerPrompt(task, attachment, intent, isRetry, history)
+        calculation: LocalCalculatorTool.CalculationResult? = null,
+    ): String = promptContext.answerPrompt(task, attachment, intent, isRetry, history, calculation)
 
     /**
      * Halts an in-progress token generation loop cleanly.
@@ -872,6 +878,69 @@ class MainViewModel internal constructor(
      */
     fun setMemoryEnabled(enabled: Boolean) {
         updateState { it.withMemoryEnabled(enabled) }
+    }
+
+    /**
+     * Refreshes personal notes from sovereign local storage into UI state.
+     */
+    fun refreshNotes() {
+        try {
+            val notes = notesStore.listNotes()
+            updateState { it.withPersonalNotes(notes) }
+        } catch (_: Exception) {}
+    }
+
+    /**
+     * Creates or updates a personal note locally.
+     */
+    fun saveNote(
+        title: String,
+        content: String,
+        tags: List<String> = emptyList(),
+        isPinned: Boolean = false,
+    ): PersonalNotesStore.PersonalNote {
+        val note = notesStore.createNote(title, content, tags, isPinned)
+        refreshNotes()
+        return note
+    }
+
+    /**
+     * Deletes a personal note by ID.
+     */
+    fun deleteNote(id: String): Boolean {
+        val result = notesStore.deleteNote(id)
+        refreshNotes()
+        return result
+    }
+
+    /**
+     * Toggles pin status for a personal note.
+     */
+    fun pinNote(id: String, pinned: Boolean): PersonalNotesStore.PersonalNote? {
+        val result = notesStore.pinNote(id, pinned)
+        refreshNotes()
+        return result
+    }
+
+    /**
+     * Filters stored notes by search query.
+     */
+    fun searchNotes(query: String): List<PersonalNotesStore.PersonalNote> {
+        val results = notesStore.searchNotes(query)
+        updateState { it.withPersonalNotes(results) }
+        return results
+    }
+
+    /**
+     * Exports all personal notes as Markdown text.
+     */
+    fun exportNotesAsMarkdown(): String = notesStore.exportNotesAsMarkdown()
+
+    /**
+     * Clears active calculation result.
+     */
+    fun clearActiveCalculation() {
+        updateState { it.withActiveCalculation(null) }
     }
 
     private fun saveTurnToSession(task: String, attachedContext: String, answer: String) {

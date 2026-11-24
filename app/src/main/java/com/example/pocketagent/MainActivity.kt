@@ -103,6 +103,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var pendingAnswerToSave: String? = null
     private val sessionStore by lazy { SessionStore(SessionStore.defaultDir(filesDir)) }
     private val userMemoryStore by lazy { UserMemoryStore(UserMemoryStore.defaultDir(filesDir)) }
+    private val notesStore by lazy { PersonalNotesStore(PersonalNotesStore.defaultDir(filesDir)) }
     private var isMemoryEnabled = true
     private var currentSession: ConversationSession? = null
     private var lastPrompt: String = ""
@@ -167,6 +168,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         brandRow.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))
         brandRow.addView(pillButton("🧠 Memory", accessibilityLabel = "Manage sovereign long-term memory") {
             showMemoryCenterDialog()
+        }.apply {
+            layoutParams = LinearLayout.LayoutParams(-2, dp(34)).apply { marginEnd = dp(6) }
+        })
+        brandRow.addView(pillButton("📝 Notes", accessibilityLabel = "Manage sovereign personal notes") {
+            showNotesManagerDialog()
         }.apply {
             layoutParams = LinearLayout.LayoutParams(-2, dp(34)).apply { marginEnd = dp(6) }
         })
@@ -889,7 +895,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         intent: AnswerDirective.Intent,
         isRetry: Boolean,
         history: List<ChatMessage>,
-    ): String = promptContext.answerPrompt(task, attachment, intent, isRetry, history)
+        calculation: LocalCalculatorTool.CalculationResult? = null,
+    ): String = promptContext.answerPrompt(task, attachment, intent, isRetry, history, calculation)
 
     /**
      * Runs one inference pass with the runaway guard applied.
@@ -993,6 +1000,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 val localEngine = engineManager.getOrInitializeEngine(modelFile, cacheDir)
                 val intent = AnswerDirective.classify(task.ifBlank { attachedContext })
                 val history = conversationHistoryFor(task)
+                val calculation = if (task.isNotBlank()) LocalCalculatorTool.tryEvaluate(task) else null
                 val boundedAttachment = if (attachedContext.isNotBlank()) {
                     val retrieval = LocalDocumentRetriever.retrieveTextWithCitations(
                         query = task,
@@ -1034,6 +1042,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     intent = intent,
                     isRetry = false,
                     history = history,
+                    calculation = calculation,
                 )
                 runawayFragment = null
                 var result = runGuardedGeneration(localEngine, prompt, effectiveInstruction)
@@ -1043,7 +1052,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     (AnswerDirective.looksLikeDelegationRefusal(result, intent) ||
                         AnswerDirective.isUnsubstantive(result))
                 ) {
-                    val retryPrompt = answerPrompt(task = task, attachment = boundedAttachment, intent = intent, isRetry = true, history = history)
+                    val retryPrompt = answerPrompt(task = task, attachment = boundedAttachment, intent = intent, isRetry = true, history = history, calculation = calculation)
                     mainHandler.post { answerText.text = "Refining the answer…" }
                     val retryEngine = engineManager.getOrInitializeEngine(modelFile, cacheDir)
                     val retried = runGuardedGeneration(retryEngine, retryPrompt, effectiveInstruction)
@@ -1484,6 +1493,162 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     }
                     userMemoryStore.addFact(fact, category)
                     onAdded()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun showNotesManagerDialog() {
+        val dialogView = column().apply {
+            setPadding(dp(18), dp(12), dp(18), dp(18))
+        }
+
+        val searchBox = EditText(this).apply {
+            hint = "Search personal notes…"
+            textSize = 14f
+            background = shape(WHITE, 12, BORDER)
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            setTextColor(INK)
+            setHintTextColor(MUTED)
+        }
+        dialogView.addView(searchBox, marginBottom(12))
+
+        val listContainer = column()
+        val scroll = ScrollView(this).apply {
+            addView(listContainer)
+            layoutParams = LinearLayout.LayoutParams(-1, dp(340))
+        }
+        dialogView.addView(scroll)
+
+        fun refreshList(query: String = "") {
+            listContainer.removeAllViews()
+            val notes = notesStore.searchNotes(query)
+            if (notes.isEmpty()) {
+                listContainer.addView(text("No notes found.", 13f, MUTED).apply {
+                    setPadding(0, dp(30), 0, dp(30))
+                    gravity = Gravity.CENTER
+                })
+                return
+            }
+
+            for (n in notes) {
+                val card = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(dp(12), dp(10), dp(12), dp(10))
+                    background = shape(WHITE, 12, BORDER)
+                }
+
+                val info = column().apply {
+                    val pinPrefix = if (n.isPinned) "📌 " else ""
+                    addView(text("$pinPrefix${n.title}", 14f, INK, true))
+                    if (n.content.isNotBlank()) {
+                        val preview = n.content.take(80).replace("\n", " ") + (if (n.content.length > 80) "…" else "")
+                        addView(text(preview, 12f, MUTED))
+                    }
+                    val dateStr = java.text.SimpleDateFormat("MMM dd, yyyy", java.util.Locale.getDefault()).format(java.util.Date(n.updatedAt))
+                    addView(text(dateStr, 10f, TEAL))
+                }
+                card.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
+
+                card.setOnClickListener {
+                    promptEditNote(n) { refreshList(searchBox.text.toString()) }
+                }
+
+                val pinBtn = text(if (n.isPinned) "Unpin" else "Pin", 11f, TEAL, true).apply {
+                    setPadding(dp(8), dp(4), dp(8), dp(4))
+                    setOnClickListener {
+                        notesStore.pinNote(n.id, !n.isPinned)
+                        refreshList(searchBox.text.toString())
+                    }
+                }
+                card.addView(pinBtn)
+
+                val delBtn = text("✕", 15f, MUTED, true).apply {
+                    setPadding(dp(8), dp(4), dp(8), dp(4))
+                    setOnClickListener {
+                        notesStore.deleteNote(n.id)
+                        refreshList(searchBox.text.toString())
+                    }
+                }
+                card.addView(delBtn)
+
+                listContainer.addView(card, marginBottom(8))
+            }
+        }
+
+        searchBox.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                refreshList(s?.toString() ?: "")
+            }
+            override fun afterTextChanged(s: android.text.Editable?) {}
+        })
+
+        refreshList()
+
+        AlertDialog.Builder(this)
+            .setTitle("📝 Personal Notes (${notesStore.listNotes().size})")
+            .setView(dialogView)
+            .setPositiveButton("➕ New Note") { _, _ ->
+                promptEditNote(null) { refreshList(searchBox.text.toString()) }
+            }
+            .setNeutralButton("Export All") { _, _ ->
+                val md = notesStore.exportNotesAsMarkdown()
+                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                    type = "text/markdown"
+                    putExtra(Intent.EXTRA_TEXT, md)
+                    putExtra(Intent.EXTRA_SUBJECT, "PocketAgent Notes Export")
+                }
+                startActivity(Intent.createChooser(shareIntent, "Export Notes"))
+            }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
+    private fun promptEditNote(existingNote: PersonalNotesStore.PersonalNote?, onSaved: () -> Unit) {
+        val container = column().apply {
+            setPadding(dp(18), dp(12), dp(18), dp(12))
+        }
+
+        val titleInput = EditText(this).apply {
+            hint = "Note Title"
+            textSize = 14f
+            background = shape(WHITE, 12, BORDER)
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            setTextColor(INK)
+            setHintTextColor(MUTED)
+            if (existingNote != null) setText(existingNote.title)
+        }
+        container.addView(titleInput, marginBottom(10))
+
+        val contentInput = EditText(this).apply {
+            hint = "Note Content…"
+            textSize = 13f
+            background = shape(WHITE, 12, BORDER)
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            setTextColor(INK)
+            setHintTextColor(MUTED)
+            minLines = 4
+            gravity = Gravity.TOP or Gravity.START
+            if (existingNote != null) setText(existingNote.content)
+        }
+        container.addView(contentInput, marginBottom(10))
+
+        AlertDialog.Builder(this)
+            .setTitle(if (existingNote == null) "➕ Create Note" else "✏️ Edit Note")
+            .setView(container)
+            .setPositiveButton("Save") { _, _ ->
+                val title = titleInput.text.toString().trim()
+                val content = contentInput.text.toString().trim()
+                if (title.isNotBlank()) {
+                    if (existingNote == null) {
+                        notesStore.createNote(title = title, content = content)
+                    } else {
+                        notesStore.saveNote(existingNote.withUpdatedContent(title, content))
+                    }
+                    onSaved()
                 }
             }
             .setNegativeButton("Cancel", null)

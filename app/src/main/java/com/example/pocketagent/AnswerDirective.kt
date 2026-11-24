@@ -241,11 +241,19 @@ class AnswerPromptComposer(
         intent: AnswerDirective.Intent,
         isRetry: Boolean,
         history: List<ChatMessage>,
+        /** Verified offline arithmetic, when the request contained a calculation. */
+        calculation: LocalCalculatorTool.CalculationResult? = null,
     ): String {
-        val userContent = AnswerDirective.userPromptFor(
-            question = task.ifBlank { "Use the attached text to answer my request." },
-            intent = intent,
-        )
+        val baseQuestion = task.ifBlank { "Use the attached text to answer my request." }
+        // Give the model the computed result so it reports the number instead of guessing or
+        // telling the user to work it out, which is the whole point of the offline tool.
+        val withCalculation = if (calculation != null) {
+            "Offline Calculation Verification:\n" +
+                "${calculation.expression} = ${calculation.displayOutput}\n\n" + baseQuestion
+        } else {
+            baseQuestion
+        }
+        val userContent = AnswerDirective.userPromptFor(question = withCalculation, intent = intent)
         val latest = ChatMessage.user(
             content = userContent,
             attachmentContent = attachment.ifBlank { null },

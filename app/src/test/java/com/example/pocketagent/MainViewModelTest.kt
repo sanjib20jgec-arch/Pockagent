@@ -472,4 +472,42 @@ class MainViewModelTest {
         assertTrue(viewModel.uiState.value.userMemories.isEmpty())
         assertEquals(MainUiState.SYSTEM_INSTRUCTION, fakeLlmRunner.lastSystemInstruction)
     }
+
+    @Test
+    fun mathExpressionTriggersActiveCalculationAndGroundTruthInPrompt() {
+        fakeLlmRunner.available = true
+        fakeLlmRunner.responseToReturn = "1. The result of 25 * 4 is 100."
+
+        viewModel.updateTaskInput("25 * 4 + 10")
+        viewModel.suggestSteps()
+
+        val state = viewModel.uiState.value
+        assertNotNull(state.activeCalculation)
+        assertEquals(110.0, state.activeCalculation!!.numericValue, 0.0001)
+
+        val prompt = fakeLlmRunner.lastPrompt
+        assertNotNull(prompt)
+        assertTrue(prompt!!.contains("Offline Calculation Verification:"))
+        assertTrue(prompt.contains("25 * 4 + 10 = 110"))
+    }
+
+    @Test
+    fun personalNotesManagement() {
+        val note = viewModel.saveNote("Offline Architecture", "Sovereign on-device processing", listOf("core"))
+        assertEquals(1, viewModel.uiState.value.personalNotes.size)
+        assertEquals("Offline Architecture", viewModel.uiState.value.personalNotes[0].title)
+
+        viewModel.pinNote(note.id, true)
+        assertTrue(viewModel.uiState.value.personalNotes[0].isPinned)
+
+        val searchResult = viewModel.searchNotes("Architecture")
+        assertEquals(1, searchResult.size)
+
+        val exported = viewModel.exportNotesAsMarkdown()
+        assertTrue(exported.contains("Offline Architecture"))
+
+        val deleted = viewModel.deleteNote(note.id)
+        assertTrue(deleted)
+        assertTrue(viewModel.uiState.value.personalNotes.isEmpty())
+    }
 }

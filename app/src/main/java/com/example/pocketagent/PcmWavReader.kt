@@ -33,6 +33,7 @@ internal object PcmWavReader {
         var dataSize = -1L
 
         while (wav.filePointer + 8 <= riffEnd) {
+            if (riffEnd - wav.filePointer < 8) throw IOException("WAV contains an incomplete chunk header.")
             val chunkId = readAscii(wav, 4)
             val chunkSize = readUInt32(wav)
             val chunkStart = wav.filePointer

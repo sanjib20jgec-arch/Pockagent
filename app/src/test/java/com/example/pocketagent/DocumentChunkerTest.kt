@@ -151,8 +151,8 @@ class DocumentChunkerTest {
     @Test
     fun chunksPdfPagesWithExactPageAttribution() {
         val pages = listOf(
-            PdfTextExtractor.ExtractedPdfPage(pageNumber = 1, text = "Page one content with introductory facts."),
-            PdfTextExtractor.ExtractedPdfPage(pageNumber = 2, text = "Page two content with advanced architectural analysis."),
+            DocumentChunker.DocumentPage(pageNumber = 1, text = "Page one content with introductory facts."),
+            DocumentChunker.DocumentPage(pageNumber = 2, text = "Page two content with advanced architectural analysis."),
         )
         val chunks = DocumentChunker.chunkPdfPages(pages, source = "report.pdf", chunkSize = 200, chunkOverlap = 50)
 

@@ -162,10 +162,19 @@ object DocumentChunker {
     }
 
     /**
+     * Represents a single page extracted from a multi-page document (e.g. PDF).
+     */
+    data class DocumentPage(
+        val pageNumber: Int,
+        val text: String,
+        val charCount: Int = text.length,
+    )
+
+    /**
      * Splits extracted PDF pages into chunks with page-level attribution.
      */
     fun chunkPdfPages(
-        pages: List<PdfTextExtractor.ExtractedPdfPage>,
+        pages: List<DocumentPage>,
         source: String = "document.pdf",
         chunkSize: Int = DEFAULT_CHUNK_SIZE,
         chunkOverlap: Int = DEFAULT_CHUNK_OVERLAP,

@@ -9,7 +9,7 @@ import java.io.InputStream
 import java.io.Writer
 
 /** Extracts selectable PDF text only. Scanned-page OCR is intentionally not provided. */
-internal object PdfTextExtractor {
+object PdfTextExtractor {
     const val MAX_PDF_BYTES = 20L * 1024 * 1024
     const val MAX_PDF_PAGES = 100
 
@@ -57,11 +57,7 @@ internal object PdfTextExtractor {
         }
     }
 
-    data class ExtractedPdfPage(
-        val pageNumber: Int,
-        val text: String,
-        val charCount: Int = text.length,
-    )
+    typealias ExtractedPdfPage = DocumentChunker.DocumentPage
 
     data class Extraction(
         val text: String,

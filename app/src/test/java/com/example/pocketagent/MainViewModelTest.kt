@@ -510,4 +510,25 @@ class MainViewModelTest {
         assertTrue(deleted)
         assertTrue(viewModel.uiState.value.personalNotes.isEmpty())
     }
+
+    @Test
+    fun duplexVoiceSessionLifecycle() {
+        // Without ready model, does not start
+        viewModel.startDuplexVoiceSession()
+        assertFalse(viewModel.uiState.value.isDuplexActive)
+
+        // Make whisper & llm ready
+        fakeLlmRunner.available = true
+        viewModel.importWhisperModel("whisper.bin") {
+            ByteArrayInputStream("ggml valid whisper model bytes".toByteArray())
+        }
+
+        viewModel.startDuplexVoiceSession()
+        assertTrue(viewModel.uiState.value.isDuplexActive)
+        assertEquals(DuplexVoiceController.DuplexState.LISTENING, viewModel.uiState.value.duplexState)
+
+        viewModel.stopDuplexVoiceSession()
+        assertFalse(viewModel.uiState.value.isDuplexActive)
+        assertEquals(DuplexVoiceController.DuplexState.IDLE, viewModel.uiState.value.duplexState)
+    }
 }

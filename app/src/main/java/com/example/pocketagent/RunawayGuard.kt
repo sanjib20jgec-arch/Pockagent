@@ -42,6 +42,7 @@ object RunawayGuard {
     /** Absolute backstop on answer size, independent of repetition. */
     const val MAX_ANSWER_CHARS = 12000
 
+
     /**
      * True when [text] shows degenerate repetition and generation should be stopped.
      */
@@ -143,6 +144,15 @@ object RunawayGuard {
  */
 object AnswerFinalizer {
 
+    /** Upper bound on repeated collapse passes when trimming a long looped answer. */
+    private const val MAX_COLLAPSE_PASSES = 64
+
+    /** Most identical copies of a block still recognised as degenerate output. */
+    private const val MAX_TILING_COPIES = 4096
+
+    /** Shortest repeating block treated as a loop rather than legitimate short phrasing. */
+    private const val MIN_TILING_PERIOD = 12
+
     const val STOPPED_MARKER = "…"
     const val SENTENCE_END_MARKER = "…"
 
@@ -170,29 +180,88 @@ object AnswerFinalizer {
      * once instead of dozens of times.
      */
     fun collapseLoopingTail(text: String): String {
+        // A degenerate answer can be one long loop whose tail window slides right as earlier
+        // copies are trimmed, so repeat the collapse until the text stops shrinking.
+        var current = text
+        var passes = 0
+        while (passes < MAX_COLLAPSE_PASSES) {
+            val next = collapseLoopingTailOnce(current)
+            if (next.length >= current.length) break
+            current = next
+            passes++
+        }
+        return current
+    }
+
+    private fun collapseLoopingTailOnce(text: String): String {
         val tailWindow = minOf(text.length, 2000)
         val tailStart = text.length - tailWindow
         val tail = text.substring(tailStart)
         val maxPeriod = minOf(220, tail.length / 4)
-        if (maxPeriod < 12) return text
 
-        for (period in 12..maxPeriod) {
-            val unit = tail.substring(tail.length - period)
-            if (unit.isBlank()) continue
+        // A short text has no room for a 12-character period, but it can still be nothing but the
+        // same line a few times, so the fallbacks run either way.
+        if (maxPeriod >= 12) {
+            for (period in 12..maxPeriod) {
+                val unit = tail.substring(tail.length - period)
+                if (unit.isBlank()) continue
 
-            var repeats = 1
-            var end = tail.length - period
-            while (end - period >= 0 && tail.regionMatches(end - period, unit, 0, period)) {
-                repeats++
-                end -= period
-            }
-            if (repeats >= 4) {
-                // Keep everything before the loop plus exactly one copy of the repeated unit, so
-                // meaningful text the model looped on is not thrown away.
-                return text.substring(0, tailStart + end + period).trimEnd()
+                var repeats = 1
+                var end = tail.length - period
+                while (end - period >= 0 && tail.regionMatches(end - period, unit, 0, period)) {
+                    repeats++
+                    end -= period
+                }
+                if (repeats >= 4) {
+                    // Keep everything before the loop plus exactly one copy of the repeated
+                    // unit, so meaningful text the model looped on is not thrown away.
+                    return text.substring(0, tailStart + end + period).trimEnd()
+                }
             }
         }
+        return collapseExactTiling(text)
+    }
+
+    /**
+     * Reduces a text that is nothing but N exact copies of the same block down to one copy.
+     *
+     * The period search above needs a period of at least [MIN_TILING_PERIOD] and whole repeats, so
+     * a short residue such as two leftover copies of a single line survives it. That residue is
+     * still degenerate output, and it is exactly what the user sees as "the same lines again".
+     */
+    private fun collapseExactTiling(text: String): String {
+        val body = text.trimEnd()
+        // Same line repeated: one line is the whole answer.
+        collapseRepeatedLines(body)?.let { return it }
+        if (body.length < MIN_TILING_PERIOD * 2) return text
+        for (copies in 2..MAX_TILING_COPIES) {
+            if (body.length % copies != 0) continue
+            val period = body.length / copies
+            if (period < MIN_TILING_PERIOD) return text
+            val unit = body.substring(0, period)
+            if (unit.isBlank()) return text
+            var tiled = true
+            for (index in 1 until copies) {
+                if (!body.regionMatches(index * period, unit, 0, period)) {
+                    tiled = false
+                    break
+                }
+            }
+            if (tiled) return unit
+        }
         return text
+    }
+
+    /**
+     * Reduces a text whose remaining non-blank lines are all identical down to one line, which is
+     * the shape the user reported: the same line printed again and again.
+     */
+    private fun collapseRepeatedLines(body: String): String? {
+        val lines = body.lines().filter { it.isNotBlank() }
+        if (lines.size < 2) return null
+        val first = lines.first()
+        if (lines.any { it != first }) return null
+        return first
     }
 
     /**
@@ -250,8 +319,20 @@ class GuardedGeneration(
     fun accept(accumulated: StringBuilder, chunk: String): Boolean {
         if (isStopped) return false
         val text = synchronized(accumulated) {
-            accumulated.append(chunk)
+            // Some engines deliver a whole generation as a single oversized chunk, so the buffer
+            // is clamped here as well: memory stays bounded even if repetition detection never
+            // gets an intermediate look at the text.
+            val budget = RunawayGuard.MAX_ANSWER_CHARS - accumulated.length
+            if (budget <= 0) {
+                runawayFragment = ""
+                return false
+            }
+            accumulated.append(if (chunk.length <= budget) chunk else chunk.substring(0, budget))
             accumulated.toString()
+        }
+        if (text.length >= RunawayGuard.MAX_ANSWER_CHARS) {
+            runawayFragment = RunawayGuard.stuckFragment(text) ?: ""
+            return false
         }
         if (RunawayGuard.shouldStop(text)) {
             runawayFragment = RunawayGuard.stuckFragment(text) ?: ""

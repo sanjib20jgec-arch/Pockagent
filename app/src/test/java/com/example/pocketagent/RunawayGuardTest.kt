@@ -198,4 +198,64 @@ class RunawayGuardTest {
         assertFalse(guard.text(accumulated).contains("Should be ignored"))
         assertTrue(guard.wasCancelled)
     }
+
+    @Test
+    fun oversizedSingleChunkIsBoundedInsteadOfAccumulatedWholesale() {
+        val accumulated = StringBuilder()
+        val guard = GuardedGeneration()
+
+        // An engine that streams an entire degenerate generation as one chunk.
+        guard.accept(accumulated, "Checking the weather.\n".repeat(5_000))
+
+        assertTrue(guard.isStopped)
+        assertTrue(
+            "accumulated text must never exceed the answer budget, was ${accumulated.length}",
+            accumulated.length <= RunawayGuard.MAX_ANSWER_CHARS
+        )
+        assertFalse(guard.accept(accumulated, "More text after a stop."))
+    }
+
+    @Test
+    fun collapseTrimsLongLoopThatSlidesPastTheTailWindow() {
+        val looped = "Checking the weather.\n".repeat(2_000)
+        assertEquals(44_000, looped.length)
+
+        val collapsed = AnswerFinalizer.collapseLoopingTail(looped)
+
+        assertTrue("was <<<$collapsed>>>", collapsed.startsWith("Checking the weather."))
+        assertEquals("was <<<$collapsed>>>", 1, collapsed.split("Checking the weather.").size - 1)
+    }
+
+    @Test
+    fun collapseKeepsGenuineTextBeforeALoop() {
+        val answer = "The distance is 42 km.\n" + "Checking the weather.\n".repeat(400)
+
+        val collapsed = AnswerFinalizer.collapseLoopingTail(answer)
+
+        assertTrue(collapsed.startsWith("The distance is 42 km."))
+        assertEquals(1, collapsed.split("Checking the weather.").size - 1)
+    }
+
+    @Test
+    fun collapseKeepsOrdinaryMultiParagraphAnswersIntact() {
+        val answer = """
+            Kolkata to Jangipur is about 260 km by road.
+            It takes roughly 5 hours by car.
+
+            The fastest route is via NH12 and Berhampore.
+        """.trimIndent()
+
+        assertEquals(answer, AnswerFinalizer.collapseLoopingTail(answer))
+
+        val result = AnswerFinalizer.finalize(answer)
+        assertEquals(answer, result.text)
+        assertFalse(result.wasTruncated)
+    }
+
+    @Test
+    fun collapseKeepsRepeatedStructureThatIsNotALoop() {
+        // Three short bullet lines that happen to be equal are legitimate formatting, not a loop.
+        val answer = "Done.\n- ok\n- ok\n- ok"
+        assertEquals(answer, AnswerFinalizer.collapseLoopingTail(answer))
+    }
 }

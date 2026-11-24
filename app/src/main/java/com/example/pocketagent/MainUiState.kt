@@ -58,6 +58,9 @@ data class MainUiState(
     val isMemoryEnabled: Boolean = true,
     val activeCalculation: LocalCalculatorTool.CalculationResult? = null,
     val personalNotes: List<PersonalNotesStore.PersonalNote> = emptyList(),
+    val isDuplexActive: Boolean = false,
+    val duplexState: DuplexVoiceController.DuplexState = DuplexVoiceController.DuplexState.IDLE,
+    val duplexStatusMessage: String = "",
 ) {
     companion object {
         const val MAX_ATTACHMENT_CHARS = 12_000
@@ -354,5 +357,14 @@ data class MainUiState(
 
     fun withPersonalNotes(notes: List<PersonalNotesStore.PersonalNote>): MainUiState = copy(
         personalNotes = notes,
+    )
+
+    fun withDuplexState(state: DuplexVoiceController.DuplexState, message: String): MainUiState = copy(
+        duplexState = state,
+        duplexStatusMessage = message,
+    )
+
+    fun withDuplexActive(active: Boolean): MainUiState = copy(
+        isDuplexActive = active,
     )
 }

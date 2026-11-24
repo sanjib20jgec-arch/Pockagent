@@ -104,6 +104,22 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private val sessionStore by lazy { SessionStore(SessionStore.defaultDir(filesDir)) }
     private val userMemoryStore by lazy { UserMemoryStore(UserMemoryStore.defaultDir(filesDir)) }
     private val notesStore by lazy { PersonalNotesStore(PersonalNotesStore.defaultDir(filesDir)) }
+    private val ttsSpeaker by lazy {
+        AndroidTtsSpeaker(
+            ttsProvider = { tts },
+            isReadyProvider = { ttsReady }
+        )
+    }
+    private val duplexController by lazy {
+        DuplexVoiceController(
+            audioRecorder = inAppAudioRecorder,
+            whisperTranscriber = DefaultWhisperTranscriber(),
+            llmRunner = DefaultLlmInferenceRunner(filesDir, cacheDir),
+            ttsSpeaker = ttsSpeaker,
+            workerExecutor = worker,
+            mainDispatcher = { mainHandler.post(it) },
+        )
+    }
     private var isMemoryEnabled = true
     private var currentSession: ConversationSession? = null
     private var lastPrompt: String = ""
@@ -166,6 +182,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             addView(text("LOCAL MODEL INFERENCE", 10f, MUTED, true).apply { letterSpacing = .12f })
         }
         brandRow.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))
+        brandRow.addView(pillButton("🎙️ Voice", accessibilityLabel = "Start continuous hands-free voice duplex mode") {
+            showDuplexVoiceDialog()
+        }.apply {
+            layoutParams = LinearLayout.LayoutParams(-2, dp(34)).apply { marginEnd = dp(6) }
+        })
         brandRow.addView(pillButton("🧠 Memory", accessibilityLabel = "Manage sovereign long-term memory") {
             showMemoryCenterDialog()
         }.apply {
@@ -1653,6 +1674,123 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    private fun showDuplexVoiceDialog() {
+        if (whisperContext == 0L) {
+            Toast.makeText(this, "Select a local Whisper model first.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val model = File(filesDir, "model.litertlm")
+        if (!model.exists() || model.length() == 0L) {
+            Toast.makeText(this, "Select a local LiteRT-LM model first.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (!InAppAudioRecorder.hasMicrophonePermission(this)) {
+            requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_RECORD_MIC)
+            return
+        }
+
+        val dialogView = column().apply {
+            background = GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                intArrayOf(0xFF153B36.toInt(), 0xFF176B60.toInt())
+            ).apply { cornerRadius = dp(20).toFloat() }
+            setPadding(dp(20), dp(20), dp(20), dp(20))
+        }
+
+        val title = text("🎙️ Continuous Voice Mode", 18f, WHITE, true)
+        dialogView.addView(title)
+
+        val stateBadge = text("Initializing…", 13f, 0xFFD5EAE5.toInt(), true).apply {
+            setPadding(0, dp(6), 0, dp(10))
+        }
+        dialogView.addView(stateBadge)
+
+        val transcriptView = TextView(this).apply {
+            textSize = 14f
+            setTextColor(WHITE)
+            text = "Say something to start speaking…"
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+            background = shape(0x33000000.toInt(), 12)
+        }
+        val scroll = ScrollView(this).apply {
+            addView(transcriptView)
+            layoutParams = LinearLayout.LayoutParams(-1, dp(220))
+        }
+        dialogView.addView(scroll, marginBottom(16))
+
+        val btnRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        val interruptBtn = pillButton("Interrupt / Next", accessibilityLabel = "Interrupt and listen again") {
+            duplexController.interrupt()
+        }.apply {
+            layoutParams = LinearLayout.LayoutParams(-2, dp(38)).apply { marginEnd = dp(10) }
+        }
+        btnRow.addView(interruptBtn)
+
+        lateinit var dialog: AlertDialog
+
+        val endBtn = pillButton("End Session", accessibilityLabel = "End voice duplex mode") {
+            duplexController.stopSession()
+            dialog.dismiss()
+        }.apply {
+            layoutParams = LinearLayout.LayoutParams(-2, dp(38))
+        }
+        btnRow.addView(endBtn)
+        dialogView.addView(btnRow)
+
+        dialog = AlertDialog.Builder(this)
+            .setView(dialogView)
+            .setCancelable(false)
+            .create()
+
+        dialog.show()
+
+        duplexController.startSession(
+            whisperContext = whisperContext,
+            systemInstruction = SYSTEM_INSTRUCTION,
+            listener = object : DuplexVoiceController.Listener {
+                override fun onStateChanged(state: DuplexVoiceController.DuplexState, statusMessage: String) {
+                    val label = when (state) {
+                        DuplexVoiceController.DuplexState.LISTENING -> "🎙️ Listening for speech…"
+                        DuplexVoiceController.DuplexState.TRANSCRIBING -> "⚡ Transcribing audio locally…"
+                        DuplexVoiceController.DuplexState.GENERATING -> "🧠 Thinking on-device…"
+                        DuplexVoiceController.DuplexState.SPEAKING -> "🔊 Speaking response…"
+                        DuplexVoiceController.DuplexState.ERROR -> "⚠️ $statusMessage"
+                        DuplexVoiceController.DuplexState.IDLE -> "Idle"
+                    }
+                    stateBadge.text = label
+                }
+
+                override fun onAmplitude(rms: Float) {}
+
+                override fun onUserTranscribed(text: String) {
+                    transcriptView.text = "You: $text\n\nAssistant: Thinking…"
+                }
+
+                override fun onAssistantChunk(chunk: String) {}
+
+                override fun onTurnComplete(userText: String, assistantText: String) {
+                    transcriptView.text = "You: $userText\n\nAssistant: $assistantText"
+
+                    try {
+                        val sess = currentSession ?: ConversationSession.createWithInitialPrompt(userText)
+                        val uMsg = ChatMessage.user(userText)
+                        val aMsg = ChatMessage.assistant(assistantText)
+                        val updated = sess.withMessage(uMsg).withMessage(aMsg)
+                        sessionStore.saveSession(updated)
+                        currentSession = updated
+                    } catch (_: Exception) {}
+                }
+
+                override fun onError(error: Throwable) {
+                    stateBadge.text = "⚠️ Error: ${error.message}"
+                }
+            }
+        )
     }
 
     private fun showActionReviewDialog(reviewUi: SystemActionTools.ActionReviewUi) {

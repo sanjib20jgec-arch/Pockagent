@@ -67,7 +67,7 @@ class DuplexVoiceControllerTest {
     fun setUp() {
         val fakeSource = FakeAudioSource()
         fakeRecorder = InAppAudioRecorder(
-            buffer = AudioRecordingBuffer(maxSeconds = 5),
+            buffer = AudioRecordingBuffer(maxDurationSeconds = 5),
             sourceFactory = { fakeSource }
         )
         fakeWhisper = MainViewModelTest.FakeWhisperTranscriber()

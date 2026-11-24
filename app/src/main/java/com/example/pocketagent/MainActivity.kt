@@ -1614,6 +1614,31 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             citationsContainer.visibility = View.GONE
             return
         }
+        citationsContainer.visibility = View.VISIBLE
+        citationsContainer.addView(text("📌 Document Citations", 12f, TEAL, true).apply {
+            setPadding(0, 0, 0, dp(4))
+        })
+        val wrapRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        for (cit in citations) {
+            val pill = textButton("📄 ${cit.citationLabel}", accessibilityLabel = "View citation from ${cit.citationLabel}") {
+                showCitationDialog(cit)
+            }.apply {
+                background = shape(MINT, 12, TEAL)
+                setPadding(dp(8), dp(4), dp(8), dp(4))
+                textSize = 11f
+                setTextColor(TEAL)
+            }
+            wrapRow.addView(pill, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(6) })
+        }
+        val hScroll = HorizontalScrollView(this).apply {
+            addView(wrapRow)
+            isHorizontalScrollBarEnabled = false
+        }
+        citationsContainer.addView(hScroll)
+    }
 
     private fun showCitationDialog(citation: LocalDocumentRetriever.DocumentCitation) {
         val dialogView = column().apply {
@@ -1625,6 +1650,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 setLineSpacing(dp(3).toFloat(), 1.0f)
             })
         }
-
-}
+        AlertDialog.Builder(this)
+            .setView(dialogView)
+            .setPositiveButton("Close", null)
+            .show()
+    }
 }

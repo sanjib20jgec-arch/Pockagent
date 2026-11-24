@@ -25,6 +25,7 @@ object DocumentChunker {
         val startOffset: Int = 0,
         val endOffset: Int = 0,
         val charCount: Int = content.length,
+        val pageNumber: Int? = null,
     ) {
         init {
             require(id.isNotBlank()) { "Chunk ID cannot be blank." }
@@ -32,6 +33,9 @@ object DocumentChunker {
             require(chunkIndex >= 0) { "Chunk index must be non-negative." }
             require(startOffset >= 0) { "Start offset must be non-negative." }
             require(endOffset >= startOffset) { "End offset cannot precede start offset." }
+            if (pageNumber != null) {
+                require(pageNumber > 0) { "Page number must be positive (got $pageNumber)." }
+            }
         }
     }
 
@@ -150,6 +154,41 @@ object DocumentChunker {
                     chunk.copy(
                         id = "${source}_$globalIndex",
                         chunkIndex = globalIndex++,
+                    )
+                )
+            }
+        }
+        return allChunks
+    }
+
+    /**
+     * Represents a single page extracted from a multi-page document (e.g. PDF).
+     */
+    data class DocumentPage(
+        val pageNumber: Int,
+        val text: String,
+        val charCount: Int = text.length,
+    )
+
+    /**
+     * Splits extracted PDF pages into chunks with page-level attribution.
+     */
+    fun chunkPdfPages(
+        pages: List<DocumentPage>,
+        source: String = "document.pdf",
+        chunkSize: Int = DEFAULT_CHUNK_SIZE,
+        chunkOverlap: Int = DEFAULT_CHUNK_OVERLAP,
+    ): List<DocumentChunk> {
+        val allChunks = mutableListOf<DocumentChunk>()
+        var globalIndex = 0
+        for (page in pages) {
+            val pageChunks = chunkText(page.text, source, chunkSize, chunkOverlap)
+            for (chunk in pageChunks) {
+                allChunks.add(
+                    chunk.copy(
+                        id = formatChunkId(source, globalIndex),
+                        chunkIndex = globalIndex++,
+                        pageNumber = page.pageNumber,
                     )
                 )
             }

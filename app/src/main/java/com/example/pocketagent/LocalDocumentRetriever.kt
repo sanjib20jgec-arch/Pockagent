@@ -82,4 +82,76 @@ object LocalDocumentRetriever {
         val index = OfflineKeywordIndex(chunks)
         return index.retrieveWithinBudget(query = query, maxChars = maxChars, topK = topK)
     }
+
+    data class DocumentCitation(
+        val documentName: String,
+        val pageNumber: Int? = null,
+        val excerptSnippet: String = "",
+    ) {
+        val citationLabel: String
+            get() = if (pageNumber != null) "$documentName · Page $pageNumber" else documentName
+    }
+
+    data class RetrievalResult(
+        val promptContext: String,
+        val citations: List<DocumentCitation> = emptyList(),
+        val totalChunksRetrieved: Int = 0,
+    )
+
+    /**
+     * Scores pre-chunked documents (including PDF pages) against [query] and returns
+     * both the bounded prompt context and distinct [DocumentCitation] badges.
+     */
+    fun retrieveWithCitations(
+        query: String,
+        chunks: List<DocumentChunker.DocumentChunk>,
+        maxChars: Int = MAX_ATTACHMENT_BUDGET,
+        topK: Int = 10,
+    ): RetrievalResult {
+        if (chunks.isEmpty()) return RetrievalResult("", emptyList(), 0)
+
+        val index = OfflineKeywordIndex(chunks)
+        val selectedChunks = index.retrieveWithinBudget(query = query, maxChars = maxChars, topK = topK)
+        if (selectedChunks.isEmpty()) return RetrievalResult("", emptyList(), 0)
+
+        val promptContext = index.formatPromptContext(query = query, maxChars = maxChars, topK = topK)
+        val citations = selectedChunks.map { chunk ->
+            val snippet = chunk.content.take(120).replace("\r\n", " ").replace("\n", " ").trim()
+            DocumentCitation(
+                documentName = chunk.source.ifBlank { "Document" },
+                pageNumber = chunk.pageNumber,
+                excerptSnippet = snippet,
+            )
+        }.distinctBy { "${it.documentName}_${it.pageNumber}" }
+
+        return RetrievalResult(
+            promptContext = promptContext,
+            citations = citations,
+            totalChunksRetrieved = selectedChunks.size,
+        )
+    }
+
+    /**
+     * Splits [documentText] into chunks, indexes them, and returns [RetrievalResult] with citations.
+     */
+    fun retrieveTextWithCitations(
+        query: String,
+        documentText: String,
+        sourceName: String = "attachment",
+        maxChars: Int = MAX_ATTACHMENT_BUDGET,
+        chunkSize: Int = DocumentChunker.DEFAULT_CHUNK_SIZE,
+        chunkOverlap: Int = DocumentChunker.DEFAULT_CHUNK_OVERLAP,
+        topK: Int = 10,
+    ): RetrievalResult {
+        val trimmed = documentText.trim()
+        if (trimmed.isEmpty()) return RetrievalResult("", emptyList(), 0)
+
+        val chunks = DocumentChunker.chunkText(
+            text = trimmed,
+            source = sourceName,
+            chunkSize = chunkSize,
+            chunkOverlap = chunkOverlap,
+        )
+        return retrieveWithCitations(query, chunks, maxChars, topK)
+    }
 }

@@ -532,9 +532,22 @@ class MainViewModel internal constructor(
         workerExecutor.execute {
             val accumulated = StringBuilder()
             val firstChunk = AtomicBoolean(true)
+            var retrievedCitations = emptyList<LocalDocumentRetriever.DocumentCitation>()
             try {
                 val intent = AnswerDirective.classify(task.ifBlank { attached })
                 val history = conversationHistoryFor(task)
+                val contextToInject = if (attached.isNotBlank()) {
+                    val retrieval = LocalDocumentRetriever.retrieveTextWithCitations(
+                        query = task,
+                        documentText = attached,
+                        sourceName = state.attachedNames.firstOrNull() ?: "attachment",
+                        maxChars = MainUiState.MAX_ATTACHMENT_CHARS,
+                    )
+                    retrievedCitations = retrieval.citations
+                    if (retrieval.promptContext.isNotBlank()) retrieval.promptContext else attached
+                } else {
+                    ""
+                }
 
                 var attempt = 0
                 var result = ""
@@ -548,7 +561,7 @@ class MainViewModel internal constructor(
                         updateState { it.withStatus("Answer needs more detail. Refining on this device…") }
                     }
 
-                    val prompt = answerPrompt(task = task, attachment = attached, intent = intent, isRetry = isRetry, history = history)
+                    val prompt = answerPrompt(task = task, attachment = contextToInject, intent = intent, isRetry = isRetry, history = history)
                     // The guard stops a model that locks onto a phrase and repeats it forever.
                     val guard = GuardedGeneration { currentText ->
                         val isFirst = firstChunk.compareAndSet(true, false)
@@ -588,7 +601,7 @@ class MainViewModel internal constructor(
                     val currentText = synchronized(accumulated) { accumulated.toString().trim() }
                     val formatted = MarkdownFormatter.formatForDisplay(currentText)
                     val plain = MarkdownFormatter.stripToPlainText(currentText)
-                    updateState { it.withGenerationStopped(currentText, formatted, plain) }
+                    updateState { it.withGenerationStopped(currentText, formatted, plain).withDocumentCitations(retrievedCitations) }
                     return@execute
                 }
 
@@ -596,6 +609,7 @@ class MainViewModel internal constructor(
                 val finalPlain = MarkdownFormatter.stripToPlainText(result)
                 updateState {
                     it.withGenerationCompleted(result, finalFormatted, finalPlain)
+                        .withDocumentCitations(retrievedCitations)
                         .let { done ->
                             val stopped = runawayFragment
                             if (stopped != null && result.isNotBlank()) {

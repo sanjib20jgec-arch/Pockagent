@@ -88,6 +88,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var suggestButton: Button
     private lateinit var attachmentCard: LinearLayout
     private lateinit var outputCard: LinearLayout
+    private lateinit var citationsContainer: LinearLayout
     private lateinit var systemActionContainer: LinearLayout
     private var recognizer: SpeechRecognizer? = null
     private var tts: TextToSpeech? = null
@@ -96,6 +97,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     @Volatile private var attachmentGeneration = 0L
     @Volatile private var isWhisperTranscribing = false
     @Volatile private var transcriptReviewPending = false
+    @Volatile private var currentCitations = emptyList<LocalDocumentRetriever.DocumentCitation>()
     private var attachedNames = mutableListOf<String>()
     private var attachmentPreviewExpanded = false
     private var answerIsComplete = false
@@ -321,6 +323,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             outputCard.visibility = View.GONE
             answerText.text = ""
             answerIsComplete = false
+            citationsContainer.removeAllViews()
+            citationsContainer.visibility = View.GONE
+            currentCitations = emptyList()
             systemActionContainer.removeAllViews()
             systemActionContainer.visibility = View.GONE
         })
@@ -343,6 +348,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             setLineSpacing(dp(4).toFloat(), 1.0f)
         }
         outputCard.addView(answerText)
+
+        citationsContainer = column().apply {
+            visibility = View.GONE
+            setPadding(0, dp(4), 0, dp(10))
+        }
+        outputCard.addView(citationsContainer)
 
         val outputActions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         outputActions.addView(pillButton("Copy", accessibilityLabel = "Copy answer") { copyAnswer() }, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(4) })
@@ -972,16 +983,30 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val backendLabel = engineManager.activeBackend?.name ?: "accelerated"
         updateStatus("Answering on this device ($backendLabel)…")
         worker.execute {
+            var localCitations = emptyList<LocalDocumentRetriever.DocumentCitation>()
             try {
                 val localEngine = engineManager.getOrInitializeEngine(modelFile, cacheDir)
                 val intent = AnswerDirective.classify(task.ifBlank { attachedContext })
                 val history = conversationHistoryFor(task)
                 val boundedAttachment = if (attachedContext.isNotBlank()) {
-                    LocalDocumentRetriever.retrieveContext(
+                    val retrieval = LocalDocumentRetriever.retrieveTextWithCitations(
                         query = task,
                         documentText = attachedContext,
                         sourceName = attachedNames.firstOrNull() ?: "attachment",
                         maxChars = MAX_ATTACHMENT_CHARS,
+                    )
+                    localCitations = retrieval.citations
+                    if (retrieval.promptContext.isNotBlank()) retrieval.promptContext else attachedContext
+                } else {
+                    ""
+                }
+                val prompt = answerPrompt(
+                    task = task,
+                    attachment = boundedAttachment,
+                    intent = intent,
+                    isRetry = false,
+                    history = history,
+                )
                     )
                 } else {
                     ""
@@ -1004,6 +1029,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 mainHandler.post {
                     stopGeneratingButton.visibility = View.GONE
                     suggestButton.isEnabled = true
+                    currentCitations = localCitations
+                    renderCitations(localCitations)
                     if (isGeneratingCancelled.get()) {
                         answerIsComplete = result.isNotBlank()
                         val formatted = MarkdownFormatter.formatForDisplay(result)
@@ -1061,6 +1088,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 mainHandler.post {
                     stopGeneratingButton.visibility = View.GONE
                     suggestButton.isEnabled = true
+                    currentCitations = localCitations
+                    renderCitations(localCitations)
                     if (isGeneratingCancelled.get()) {
                         updateStatus("Generation stopped by user.")
                     } else {
@@ -1303,6 +1332,54 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 }
             }
             .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun renderCitations(citations: List<LocalDocumentRetriever.DocumentCitation>) {
+        citationsContainer.removeAllViews()
+        if (citations.isEmpty()) {
+            citationsContainer.visibility = View.GONE
+            return
+        }
+        citationsContainer.visibility = View.VISIBLE
+        citationsContainer.addView(text("📌 Document Citations", 12f, TEAL, true).apply {
+            setPadding(0, 0, 0, dp(4))
+        })
+        val wrapRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        for (cit in citations) {
+            val pill = textButton("📄 ${cit.citationLabel}", accessibilityLabel = "View citation from ${cit.citationLabel}") {
+                showCitationDialog(cit)
+            }.apply {
+                background = shape(MINT, 12, TEAL)
+                setPadding(dp(8), dp(4), dp(8), dp(4))
+                textSize = 11f
+                setTextColor(TEAL)
+            }
+            wrapRow.addView(pill, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(6) })
+        }
+        val hScroll = HorizontalScrollView(this).apply {
+            addView(wrapRow)
+            isHorizontalScrollBarEnabled = false
+        }
+        citationsContainer.addView(hScroll)
+    }
+
+    private fun showCitationDialog(citation: LocalDocumentRetriever.DocumentCitation) {
+        val dialogView = column().apply {
+            setPadding(dp(18), dp(16), dp(18), dp(16))
+            addView(text(citation.citationLabel, 16f, INK, true))
+            val snippetText = citation.excerptSnippet.ifBlank { "No excerpt snippet available." }
+            addView(text("\"$snippetText…\"", 13f, MUTED).apply {
+                setPadding(0, dp(10), 0, dp(12))
+                setLineSpacing(dp(3).toFloat(), 1.0f)
+            })
+        }
+        AlertDialog.Builder(this)
+            .setView(dialogView)
+            .setPositiveButton("Close", null)
             .show()
     }
 

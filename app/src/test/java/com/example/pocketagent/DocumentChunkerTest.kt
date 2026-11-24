@@ -147,4 +147,21 @@ class DocumentChunkerTest {
             DocumentChunker.chunkText("text", chunkSize = 100, chunkOverlap = 120)
         }
     }
+
+    @Test
+    fun chunksPdfPagesWithExactPageAttribution() {
+        val pages = listOf(
+            DocumentChunker.DocumentPage(pageNumber = 1, text = "Page one content with introductory facts."),
+            DocumentChunker.DocumentPage(pageNumber = 2, text = "Page two content with advanced architectural analysis."),
+        )
+        val chunks = DocumentChunker.chunkPdfPages(pages, source = "report.pdf", chunkSize = 200, chunkOverlap = 50)
+
+        assertEquals(2, chunks.size)
+        assertEquals(1, chunks[0].pageNumber)
+        assertEquals(2, chunks[1].pageNumber)
+        assertEquals("report.pdf", chunks[0].source)
+        assertEquals("report.pdf", chunks[1].source)
+        assertEquals(0, chunks[0].chunkIndex)
+        assertEquals(1, chunks[1].chunkIndex)
+    }
 }

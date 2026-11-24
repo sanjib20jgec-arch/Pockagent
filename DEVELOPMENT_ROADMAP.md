@@ -36,7 +36,7 @@ This is the persistent task ledger for the current product direction. It is grou
 | SAFE-001 | Regenerate stale source ZIP; verify no legacy service/control remains | Security + Release | **COMPLETED** | AUD-001; M0 approved | Current archive checker and CI pass; no legacy implementation files in bundle |
 | TEST-001 | Add focused unit tests for bounded text extraction and import rollback | QA + Implementation | **COMPLETED** | ARC-001; small testable seam | Nine JUnit cases passed in CI run 45346913699 |
 | AI-001 | Harden model import (bounds, free space, atomic replace/rollback, retry/error states) | AI Engine + Implementation | **COMPLETED (CI/unit scope)** | ARC-001, TEST-001 | Size/free-space guard; atomic replace; previous model retained on tested failures; no device validation |
-| UX-001 | Accessibility, responsive layout, and accurate speech-privacy disclosure review | UI/UX + Security + QA | **IN PROGRESS** | AUD-001 | Speech-provider disclosure updated; TalkBack/layout/device checks remain unverified |
+| UX-001 | Accessibility, responsive layout, and accurate speech-privacy disclosure review | UI/UX + Security + QA | **IN PROGRESS** | AUD-001 | Native button semantics, explicit labels, 48dp minimum controls, live status regions, stronger muted-text contrast implemented; device review remains unverified |
 | QA-DEVICE-001 | Verify permission, missing/corrupt model, speech, inference and UI flows on Android | QA | **BLOCKED** | M0 app build available; physical device/emulator needed | No device/emulator is available in workspace; user-device checks requested after APK install |
 | AI-002 | Model status/capability metadata and inference progress/cancel feasibility | AI Engine + QA | **PROPOSED** | AI-001; LiteRT-LM API review | Medium; no unsupported capability promises |
 | DOC-001 | Safe PDF/document text extraction and source display | Document/Knowledge + Security | **PROPOSED** | M0 gates, input abstraction, TEST-001 | Medium-high; size/context limits and prompt injection |
@@ -85,7 +85,7 @@ M0 quality gate
 
 **Risks:** adding abstractions can overgrow a small app; keep seams minimal and avoid broad rewrite.
 
-### M1 — Usability and accessibility hardening (P1) — PROPOSED
+### M1 — Usability and accessibility hardening (P1) — IN PROGRESS (user said “ok move on”)
 
 **Objective:** make current manual-assistant flows clearer and accessible without a redesign for redesign's sake.
 
@@ -137,4 +137,4 @@ For each approved task: inspect relevant code and dependencies; document a narro
 
 ## Current decision and next gate
 
-**M0 is approved and in progress.** To preserve the existing source-bundle workflow without carrying legacy behavior, the stale ZIP is being regenerated from the current manual-only source and guarded by `scripts/package_source.py`. No later feature milestone (documents, audio-file transcription, vision, persistent memory or tools) has been approved yet. After M0's CI and device-verification limitations are reported, request review before starting M1/M2.
+**M0's code and CI gates pass; physical-device verification remains blocked.** The user approved M1 by saying “ok move on.” M1 is now focused on semantic controls, touch targets, status announcements, and accessible labels without a broad redesign. Device verification remains explicitly pending. M2 (PDF/audio input), M3 (vision), persistent memory, and tools remain unapproved.

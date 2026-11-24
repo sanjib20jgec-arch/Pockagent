@@ -63,8 +63,12 @@ data class MainUiState(
     val duplexStatusMessage: String = "",
 ) {
     companion object {
-        const val MAX_ATTACHMENT_CHARS = 12_000
-        const val MAX_RESPONSE_TOKENS = 1024
+        /** Attachment context kept in the prompt. Trimmed for phone-sized prefill. */
+        const val MAX_ATTACHMENT_CHARS = 7_000
+        /** Answer budget. Enough for a thorough phone answer without inviting runaway output. */
+        const val MAX_RESPONSE_TOKENS = 512
+        /** Larger budget when an attachment or a refine pass needs more room to work with. */
+        const val MAX_RESPONSE_TOKENS_WITH_CONTEXT = 768
         /** Intent-aware instruction (answers the request instead of returning steps to the user). */
         val SYSTEM_INSTRUCTION: String get() = AnswerDirective.SYSTEM_INSTRUCTION
 

@@ -33,11 +33,57 @@ jobs:
         with:
           gradle-version: '8.14.4'
 
-      - name: Assemble debug APK
+      - name: Verify source archive
+        run: python3 scripts/package_source.py --check
+
+      - name: Run unit tests and assemble debug APK
         shell: bash
         run: |
           set -o pipefail
-          gradle --no-daemon --stacktrace --console=plain assembleDebug 2>&1 | tee gradle-build.log
+          gradle --no-daemon --stacktrace --console=plain testDebugUnitTest assembleDebug 2>&1 | tee gradle-build.log
+
+      - name: Summarize Gradle failure
+        if: failure()
+        shell: bash
+        run: |
+          {
+            echo '### Gradle build failure (last 160 lines)'
+            echo '```text'
+            tail -n 160 gradle-build.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          grep -E '(^e: |error:|What went wrong|Execution failed|Could not resolve|Could not find|A problem occurred)' gradle-build.log | tail -n 20 | while IFS= read -r line; do
+            printf '::error::%s\n' "$line"
+          done
+
+      - name: Summarize unit-test failures
+        if: failure()
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import glob
+          import os
+          import xml.etree.ElementTree as ET
+
+          reports = glob.glob('app/build/test-results/testDebugUnitTest/*.xml')
+          entries = []
+          for report in reports:
+              root = ET.parse(report).getroot()
+              for case in root.iter('testcase'):
+                  for failure in list(case.findall('failure')) + list(case.findall('error')):
+                      detail = (failure.get('message', '') + '\n' + (failure.text or '')).strip()
+                      entries.append((case.get('classname', ''), case.get('name', ''), detail))
+          if entries:
+              summary = os.environ.get('GITHUB_STEP_SUMMARY')
+              with open(summary, 'a', encoding='utf-8') as out:
+                  out.write('### Unit-test failures\n')
+                  for cls, name, detail in entries:
+                      out.write(f'\n- `{cls}.{name}`\n\n```text\n{detail[:6000]}\n```\n')
+              for cls, name, detail in entries:
+                  print(f'::error title=Unit test failed::{cls}.{name}: {detail[:3000]}')
+          else:
+              print('No JUnit XML failures were available.')
+          PY
 
       - name: Upload Gradle failure log
         if: failure()

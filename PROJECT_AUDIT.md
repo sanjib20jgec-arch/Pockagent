@@ -204,3 +204,15 @@ No native sub-agent spawning capability is available in this workspace. The foll
 5. Keep the CI build green and require a test result before accepting follow-on modality work.
 
 **Acceptance:** source bundle is confirmed current/manual-only; tests pass for import and attachment bounds; debug APK builds on CI; privacy/accessibility limitations are documented; no autonomous screen control is present. Do not start image/audio-file integration or long-term memory before M0 is reviewed and approved.
+
+## 9. M0 follow-up (after the audit snapshot)
+
+M0 was approved by the user. On the active feature branch after audit commit `b86f420`, these scoped changes were made:
+
+- Regenerated `PocketAgent.zip` from the current tree and added `scripts/package_source.py` to create/check the bundle. The checker rejects legacy AccessibilityService source/manifest registrations; local `--check` passed.
+- Extracted bounded text reading and model-file import into small testable helpers. Model imports are capped at 5 GiB, reserve free space, stream to a temporary file, sync before replacement, and atomically replace/rollback so empty, over-limit, storage-limited or interrupted imports do not intentionally delete the prior complete model.
+- Added nine JUnit tests for bounded text reads and model import success, empty/oversized/insufficient-space/stream-failure cases and limit validation.
+- Clarified that the model inference is local while dictation's offline/network behavior depends on the device speech service.
+- CI run `45347145665` passed source-archive verification, `testDebugUnitTest`, `assembleDebug`, and APK artifact upload for commit `223bd31`.
+
+**M0 is not fully closed:** no emulator or physical-device permission, microphone, TalkBack, layout, model-format, or inference-failure checks were available. Those checks remain tracked as `QA-DEVICE-001`. These follow-up changes are on the active branch and are not yet merged into `main`.

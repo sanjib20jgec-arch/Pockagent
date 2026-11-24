@@ -20,8 +20,8 @@ This is the persistent task ledger for the current product direction. It is grou
 
 ## Current baseline
 
-- Audit baseline: `b86f420`; M0 implementation commit: `ab12ad9` on `arena/85d065bd-pockagent`; base `main` is `f579f52`.
-- GitHub Actions run `45346913699` passed source-archive verification, `testDebugUnitTest`, `assembleDebug`, and APK artifact upload.
+- Audit baseline: `b86f420`; current M0 commit: `223bd31` on `arena/85d065bd-pockagent`; base `main` is `f579f52`.
+- GitHub Actions run `45347145665` passed source-archive verification, `testDebugUnitTest`, `assembleDebug`, and APK artifact upload.
 - Nine unit tests now cover bounded text reading and model import success/failure/rollback. No Android UI/instrumented tests, lint, or device/emulator tests exist. Local build remains unavailable (no Java/Gradle executable or wrapper).
 - User-reported: app launches and loads the Gemma 3 1B INT4 model; generated output/UI need improvement.
 - Current app supports typed prompts, live system speech-to-text, bounded text/Markdown/CSV attachments, local CPU inference, and answer copy/share/TTS. Image input, imported audio transcription, PDF extraction, chat history and tool execution are not implemented.

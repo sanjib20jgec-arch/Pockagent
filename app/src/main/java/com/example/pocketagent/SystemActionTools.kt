@@ -517,7 +517,7 @@ object SystemActionTools {
         while (calMatcher.find()) {
             val params = parseKeyValueParams(calMatcher.group(1))
             val title = params["title"] ?: params["name"]
-            if (!title.isNullEx()) {
+            if (!title.isNullOrBlank()) {
                 val desc = params["description"] ?: params["desc"] ?: ""
                 val loc = params["location"] ?: params["loc"] ?: ""
                 val begin = params["begin"]?.toLongOrNull() ?: params["start"]?.toLongOrNull()
@@ -649,7 +649,7 @@ object SystemActionTools {
     }
 
     private fun parseKeyValueParams(raw: String?): Map<String, String> {
-        if (raw.isNullEx()) return emptyMap()
+        if (raw.isNullOrBlank()) return emptyMap()
         val result = mutableMapOf<String, String>()
         val pattern = Pattern.compile("""(\w+)\s*=\s*(?:"([^"]*)"|'([^']*)'|(\S+))""")
         val matcher = pattern.matcher(raw)
@@ -662,7 +662,7 @@ object SystemActionTools {
     }
 
     private fun parseDurationString(str: String?): Int? {
-        if (str.isNullEx()) return null
+        if (str.isNullOrBlank()) return null
         val trimmed = str.trim().lowercase(Locale.ROOT)
         val num = trimmed.filter { it.isDigit() }.toIntOrNull() ?: return null
         return when {
@@ -671,8 +671,6 @@ object SystemActionTools {
             else -> num * 60
         }
     }
-
-    private fun String?.isNullEx(): Boolean = this == null || this.isBlank()
 
     private fun formatSeconds(seconds: Int): String {
         val h = seconds / 3600

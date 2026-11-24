@@ -163,7 +163,7 @@ class DefaultWhisperTranscriber : WhisperTranscriber {
  * - Never controls other apps, inspects screen, or automates user actions.
  * - Enforces safety bounds (12,000 char attachment limits, model rollback).
  */
-class MainViewModel(
+class MainViewModel internal constructor(
     private val filesDir: File,
     private val cacheDir: File,
     private val modelFileStore: ModelFileStore = ModelFileStore(filesDir),
@@ -173,6 +173,13 @@ class MainViewModel(
     private val workerExecutor: Executor = Executors.newSingleThreadExecutor(),
     private val mainDispatcher: (Runnable) -> Unit = { it.run() },
 ) : Closeable {
+
+    constructor(filesDir: File, cacheDir: File) : this(
+        filesDir = filesDir,
+        cacheDir = cacheDir,
+        modelFileStore = ModelFileStore(filesDir),
+        whisperModelStore = WhisperModelStore(filesDir),
+    )
 
     private val _uiState = MutableStateFlow(MainUiState())
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
@@ -191,7 +198,8 @@ class MainViewModel(
     }
 
     private fun updateState(transform: (MainUiState) -> MainUiState) {
-        val newState = _uiState.updateAndGet(transform)
+        _uiState.update(transform)
+        val newState = _uiState.value
         mainDispatcher(Runnable {
             observers.forEach { it(newState) }
         })

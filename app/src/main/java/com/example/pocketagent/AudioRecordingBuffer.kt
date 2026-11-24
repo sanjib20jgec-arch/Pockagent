@@ -14,7 +14,7 @@ import kotlin.math.sqrt
  * conversion to normalized float samples for Whisper inference, temporary WAV file export,
  * and secure zero-wipe of all audio data.
  */
-internal class AudioRecordingBuffer(
+class AudioRecordingBuffer(
     val maxDurationSeconds: Int = DEFAULT_MAX_DURATION_SECONDS,
     val maxBytes: Long = DEFAULT_MAX_BYTES,
     val silenceThresholdRms: Float = DEFAULT_SILENCE_THRESHOLD_RMS,

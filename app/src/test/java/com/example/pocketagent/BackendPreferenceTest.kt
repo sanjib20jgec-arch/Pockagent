@@ -190,13 +190,13 @@ class BackendPreferenceTest {
             constructor.isAccessible = true
             constructor.newInstance(config)
         } catch (_: Throwable) {
-            // JVM mock using reflection/Unsafe if Engine has native constructor
-            val obj = sun.misc.Unsafe::class.java.getDeclaredField("theUnsafe").let {
-                it.isAccessible = true
-                val unsafe = it.get(null) as sun.misc.Unsafe
-                unsafe.allocateInstance(Engine::class.java) as Engine
-            }
-            obj
+            // JVM mock using pure reflection without compile-time sun.misc imports
+            val unsafeClass = Class.forName("sun.misc.Unsafe")
+            val theUnsafeField = unsafeClass.getDeclaredField("theUnsafe")
+            theUnsafeField.isAccessible = true
+            val unsafe = theUnsafeField.get(null)
+            val allocateInstance = unsafeClass.getMethod("allocateInstance", Class::class.java)
+            allocateInstance.invoke(unsafe, Engine::class.java) as Engine
         }
     }
 }

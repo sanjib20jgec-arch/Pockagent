@@ -1,6 +1,6 @@
 # PocketAgent Development Roadmap
 
-This is the persistent task ledger for the current product direction. It is grounded in the repository review in [`PROJECT_AUDIT.md`](PROJECT_AUDIT.md). The user approved M0 after reviewing the audit; M0 is now in progress. Later milestones still require separate review.
+This is the persistent task ledger for the current product direction. It is grounded in the repository review in [`PROJECT_AUDIT.md`](PROJECT_AUDIT.md). The user approved M0 after reviewing the audit; M0 remains in progress. The user has also explicitly approved a bounded M5 scope: operate only on user-selected files/results, confirm before overwrite/delete or irreversible changes, and never control other apps or the phone. This approval does not authorize general-purpose execution or automation.
 
 ## Governance and product constraints
 
@@ -20,11 +20,11 @@ This is the persistent task ledger for the current product direction. It is grou
 
 ## Current baseline
 
-- Audit baseline: `b86f420`; M0 implementation commit: `ab12ad9`; M1 UI commit: `eb0668b`; base `main` is `f579f52`. The remote active branch tip is `193b908` (`Increase response budget to avoid mid-answer stops`).
-- GitHub Actions run [`45369663629`](https://github.com/sanjib20jgec-arch/Pockagent/actions/runs/45369663629) passed source-archive verification, `testDebugUnitTest`, `assembleDebug`, and APK artifact upload for `193b908`, including the 256-token response budget change.
-- The passing suite contains 24 unit tests across six test files, covering bounded text/model/PDF/WAV staging, WAV parsing/resampling, and model import/rollback. No Android UI/instrumented tests or lint run are present. This workspace has no `java`, `gradle`, `adb`, or Gradle wrapper, and no emulator/device is attached.
-- User-reported: PocketAgent works with Gemma 3 1B INT4 on a Redmi Note 10 Pro. Before the streaming/output-length change, answers took about 30–60 seconds; after installing the APK from `64dc851`, the user first estimated about 10 seconds and now reports roughly 2–4 seconds. The user also reports some answers stop mid-way after the 128-token cap; this may be related but is not yet confirmed. This remains user-reported timing without a controlled repeatable benchmark. Android version/RAM and model-file size remain unknown.
-- Current app supports typed prompts, live system speech-to-text, bounded text/Markdown/CSV/PDF attachments, the approved local WAV prototype, local CPU inference, and answer copy/share/TTS. PDF and WAV source/build tests pass in CI; runtime/device validation remains open. Image input, chat history and tool execution are not implemented.
+- Audit baseline: `b86f420`; M0 implementation commit: `ab12ad9`; M1 UI commit: `eb0668b`; base `main` is `f579f52`. The active branch's starting tip for this Save Answer slice is `6006c74` (`Record CI result for completion fix`).
+- GitHub Actions run [`45370018036`](https://github.com/sanjib20jgec-arch/Pockagent/actions/runs/45370018036) passed source-archive verification, `testDebugUnitTest`, `assembleDebug`, and APK artifact upload for `6006c74`, including the 256-token response budget change. The current Save Answer changes still need their own CI run.
+- The baseline passing suite contains 24 unit tests across six test files, covering bounded text/model/PDF/WAV staging, WAV parsing/resampling, and model import/rollback. Three focused answer-writer tests have now been added but are not yet run. No Android UI/instrumented tests or lint run are present. This workspace has no Java, Gradle, adb, or Gradle wrapper, and no emulator/device is attached.
+- User-reported: PocketAgent works with Gemma 3 1B INT4 on a Redmi Note 10 Pro, and the user confirms the 256-token response-completeness adjustment works. Previous approximate timing reports were 30–60 seconds before streaming, then about 10 seconds and later 2–4 seconds; these are not controlled benchmarks. No independent on-device verification or speed measurement was performed here. Android version/RAM and model-file size remain unknown.
+- Current app supports typed prompts, live system speech-to-text, bounded text/Markdown/CSV/PDF attachments, the approved local WAV prototype, local CPU inference, and answer copy/share/TTS plus user-selected text export (Save Answer; this new slice still needs CI/device verification). PDF and WAV source/build tests pass in CI; runtime/device validation remains open. A first, narrow M5 slice is being implemented: save the completed answer as plain text only after the user chooses a destination in Android's system document picker. Image input, chat history, general-purpose tool execution, and phone/app automation are not implemented.
 - The source ZIP matches the current manual-only source. `python3 scripts/package_source.py --check` passed locally and in CI; no AccessibilityService-based control code is present in the app source.
 
 ## Task ledger
@@ -44,7 +44,7 @@ This is the persistent task ledger for the current product direction. It is grou
 | VOICE-FEAS-001 | Research offline imported-audio ASR options | Voice + Security + QA | **COMPLETED (research only; no integration)** | No code/dependency integration | Candidate comparison documented; model-specific choice and device benchmark remain open |
 | VIS-001 | Image input with a compatible multimodal model/runtime | AI Engine + UI/UX + QA + Security | **PROPOSED** | M0 gates, AI-002, model/API/hardware compatibility review | High; memory, preprocessing, model license/size |
 | STATE-001 | Optional local conversation history with user deletion controls | Memory/Knowledge + Security + QA | **PROPOSED** | M0 gates; explicit retention approval | Medium-high; data lifecycle and migrations |
-| TOOL-001 | Safe local utilities (e.g. calculator) | Tooling + Security + QA | **OUT OF SCOPE** | Requires separate product approval | High if expanded into action/execution |
+| TOOL-001 | Bounded local tools on user-selected files/results | Tooling + Security + QA | **IN PROGRESS (first slice)** | User approved the restricted M5 scope; CI and Android picker/write verification pending | Scope creep into unselected files, overwrite/delete, or automation; each destructive/irreversible action needs explicit confirmation |
 | AUTO-001 | Accessibility-driven screen inspection/control or autonomous phone actions | Tooling + Security | **OUT OF SCOPE** | Explicitly rejected direction | Prohibited by product constraint |
 
 ## M0/M1 device verification checklist — NOT RUN
@@ -166,9 +166,13 @@ M0 quality gate
 
 **Risks:** sensitive data persistence, backup/migration behavior, retrieval mistakes.
 
-### M5 — Safe local tools (P3, separate product approval) — OUT OF SCOPE FOR NOW
+### M5 — Bounded local tools (P3, user-approved narrow scope) — IN PROGRESS
 
-Only consider user-approved, low-risk utilities such as a calculator or selected-file summarizer. Read/prepare/confirm/restricted action classes and explicit confirmation would be mandatory. No general phone automation, AccessibilityService, or destructive operations.
+The user approved tools restricted to user-selected files/results, with explicit confirmation before overwrite, delete, or other irreversible changes. PocketAgent must not control other apps or the phone; no AccessibilityService, hidden file access, cloud execution, or autonomous actions.
+
+**First slice: Save Answer.** Add an explicit action that opens Android's `ACTION_CREATE_DOCUMENT` picker and writes only the completed current answer to the URI the user selects. Cancel performs no write; missing picker and write failures are reported. The writer is bounded, UTF-8 plain text. No app-selected path, background file discovery, overwrite/delete utility, or claim of general Claude Code-like capability is included. Add focused output-writer unit coverage; CI/build and actual Android picker behavior must be verified separately. This narrow save creates a new document rather than modifying/deleting an existing file; any future modification/destruction action requires confirmation.
+
+Future tools require their own focused review, tests, and user-visible scope. The M5 approval does not approve phone automation, arbitrary commands, or unrestricted filesystem access.
 
 ## Implementation and verification workflow
 
@@ -176,4 +180,4 @@ For each approved task: inspect relevant code and dependencies; document a narro
 
 ## Current decision and next gate
 
-**Current in-progress work: UX-001 and the targeted M1 slice of AI-002; QA-DEVICE-001 is partially verified by user report, with the rest of the checklist open.** On Redmi Note 10 Pro with Gemma 3 1B INT4, the user reports 2–4 seconds after the 128-token streaming change but also says some answers stop mid-way. The cap is a plausible cause, not confirmed. The current patch raises it to 256 and explicitly requests complete thoughts while keeping streaming and the CPU backend. CI run [`45369663629`](https://github.com/sanjib20jgec-arch/Pockagent/actions/runs/45369663629) passed the source check, 24 unit tests, and debug APK build; a device check of both completeness and latency is still needed before claiming a full fix. TalkBack, permissions/error cases, and layout checks remain open. The M2 PDF/WAV prototype has CI/unit coverage but no new work is being done on it here. Scanned OCR, other audio formats, image input, persistent memory, and tools remain out of scope or unapproved.
+**Current in-progress work: UX-001, the targeted M1 response-completeness adjustment, and the first approved M5 slice (Save Answer); QA-DEVICE-001 is partially verified by user report, with the rest of the checklist open.** On Redmi Note 10 Pro with Gemma 3 1B INT4, the user reported that the 256-token response budget/completion instruction now works; no independent device benchmark or verification was performed here. CI run [`45370018036`](https://github.com/sanjib20jgec-arch/Pockagent/actions/runs/45370018036) passed source archive verification, unit tests, and debug APK build for the preceding response-completeness work. The Save Answer changes are not yet CI-verified or tested on Android; its focused writer tests and CI build are the next gate. TalkBack, permissions/error cases, and layout checks remain open. The M2 PDF/WAV prototype has CI/unit coverage but no new work is being done on it here. Scanned OCR, other audio formats, image input, persistent memory, arbitrary tool execution, and all phone/app automation remain out of scope.

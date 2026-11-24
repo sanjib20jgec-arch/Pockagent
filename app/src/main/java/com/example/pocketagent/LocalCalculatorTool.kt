@@ -53,6 +53,9 @@ object LocalCalculatorTool {
         if (pctResult != null) return pctResult
 
         // 3. Try standard mathematical evaluation
+        val hasMathChars = trimmed.any { it.isDigit() || it in "+-*/%^" }
+        if (!hasMathChars) return null
+
         return try {
             evaluateMathExpression(trimmed)
         } catch (_: Exception) {
@@ -142,6 +145,9 @@ object LocalCalculatorTool {
 
         val tokens = tokenize(sanitized)
         require(tokens.isNotEmpty()) { "No valid math tokens found." }
+        require(tokens.any { it in listOf("+", "-", "*", "/", "%", "^") || isFunction(it) }) {
+            "Expression must contain an operator or math function."
+        }
 
         // If the text still contains a non-function word, it is prose, not an expression.
         val hasProse = tokens.any { token ->
@@ -205,9 +211,14 @@ object LocalCalculatorTool {
                     val start = i
                     while (i < len && expr[i].isLetter()) i++
                     val word = expr.substring(start, i).lowercase(Locale.US)
-                    tokens.add(word)
+                    when (word) {
+                        "e" -> tokens.add(Math.E.toString())
+                        "pi" -> tokens.add(Math.PI.toString())
+                        in listOf("sqrt", "abs", "round", "sin", "cos", "tan", "log", "ln") -> tokens.add(word)
+                        else -> throw IllegalArgumentException("Unknown identifier in math expression: $word")
+                    }
                 }
-                else -> i++
+                else -> throw IllegalArgumentException("Unexpected character in math expression: $c")
             }
         }
         return tokens

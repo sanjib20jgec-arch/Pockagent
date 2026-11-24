@@ -170,6 +170,7 @@ class MainViewModel internal constructor(
     private val whisperModelStore: WhisperModelStore = WhisperModelStore(filesDir),
     private val sessionStore: SessionStore = SessionStore(SessionStore.defaultDir(filesDir)),
     private val userMemoryStore: UserMemoryStore = UserMemoryStore(UserMemoryStore.defaultDir(filesDir)),
+    private val notesStore: PersonalNotesStore = PersonalNotesStore(PersonalNotesStore.defaultDir(filesDir)),
     private val llmRunner: LlmInferenceRunner = DefaultLlmInferenceRunner(filesDir, cacheDir),
     private val whisperTranscriber: WhisperTranscriber = DefaultWhisperTranscriber(),
     private val workerExecutor: Executor = Executors.newSingleThreadExecutor(),
@@ -183,6 +184,7 @@ class MainViewModel internal constructor(
         whisperModelStore = WhisperModelStore(filesDir),
         sessionStore = SessionStore(SessionStore.defaultDir(filesDir)),
         userMemoryStore = UserMemoryStore(UserMemoryStore.defaultDir(filesDir)),
+        notesStore = PersonalNotesStore(PersonalNotesStore.defaultDir(filesDir)),
     )
 
     private val _uiState = MutableStateFlow(MainUiState())
@@ -217,6 +219,7 @@ class MainViewModel internal constructor(
     fun initModels() {
         refreshSessions()
         refreshMemories()
+        refreshNotes()
         val model = modelFileStore.modelFile
         if (model.exists() && model.length() > 0) {
             updateState { it.withModelReady(model.length()) }
@@ -517,8 +520,9 @@ class MainViewModel internal constructor(
         }
 
         isGenerationCancelled.set(false)
+        val calculation = if (task.isNotBlank()) LocalCalculatorTool.tryEvaluate(task) else null
         updateState {
-            it.withLastUserPrompt(task).withThinking()
+            it.withLastUserPrompt(task).withThinking().withActiveCalculation(calculation)
         }
 
         workerExecutor.execute {
@@ -527,6 +531,9 @@ class MainViewModel internal constructor(
             var retrievedCitations = emptyList<LocalDocumentRetriever.DocumentCitation>()
             try {
                 val prompt = buildString {
+                    if (calculation != null) {
+                        append("Offline Calculation Verification:\n${calculation.expression} = ${calculation.displayOutput}\n\n")
+                    }
                     if (task.isNotBlank()) append("User task or question:\n").append(task)
                     if (attached.isNotBlank()) {
                         val retrieval = LocalDocumentRetriever.retrieveTextWithCitations(
@@ -801,6 +808,69 @@ class MainViewModel internal constructor(
      */
     fun setMemoryEnabled(enabled: Boolean) {
         updateState { it.withMemoryEnabled(enabled) }
+    }
+
+    /**
+     * Refreshes personal notes from sovereign local storage into UI state.
+     */
+    fun refreshNotes() {
+        try {
+            val notes = notesStore.listNotes()
+            updateState { it.withPersonalNotes(notes) }
+        } catch (_: Exception) {}
+    }
+
+    /**
+     * Creates or updates a personal note locally.
+     */
+    fun saveNote(
+        title: String,
+        content: String,
+        tags: List<String> = emptyList(),
+        isPinned: Boolean = false,
+    ): PersonalNotesStore.PersonalNote {
+        val note = notesStore.createNote(title, content, tags, isPinned)
+        refreshNotes()
+        return note
+    }
+
+    /**
+     * Deletes a personal note by ID.
+     */
+    fun deleteNote(id: String): Boolean {
+        val result = notesStore.deleteNote(id)
+        refreshNotes()
+        return result
+    }
+
+    /**
+     * Toggles pin status for a personal note.
+     */
+    fun pinNote(id: String, pinned: Boolean): PersonalNotesStore.PersonalNote? {
+        val result = notesStore.pinNote(id, pinned)
+        refreshNotes()
+        return result
+    }
+
+    /**
+     * Filters stored notes by search query.
+     */
+    fun searchNotes(query: String): List<PersonalNotesStore.PersonalNote> {
+        val results = notesStore.searchNotes(query)
+        updateState { it.withPersonalNotes(results) }
+        return results
+    }
+
+    /**
+     * Exports all personal notes as Markdown text.
+     */
+    fun exportNotesAsMarkdown(): String = notesStore.exportNotesAsMarkdown()
+
+    /**
+     * Clears active calculation result.
+     */
+    fun clearActiveCalculation() {
+        updateState { it.withActiveCalculation(null) }
     }
 
     private fun saveTurnToSession(task: String, attachedContext: String, answer: String) {

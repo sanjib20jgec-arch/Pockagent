@@ -56,6 +56,8 @@ data class MainUiState(
     val documentCitations: List<LocalDocumentRetriever.DocumentCitation> = emptyList(),
     val userMemories: List<UserMemoryStore.UserMemory> = emptyList(),
     val isMemoryEnabled: Boolean = true,
+    val activeCalculation: LocalCalculatorTool.CalculationResult? = null,
+    val personalNotes: List<PersonalNotesStore.PersonalNote> = emptyList(),
 ) {
     companion object {
         const val MAX_ATTACHMENT_CHARS = 12_000
@@ -344,5 +346,13 @@ data class MainUiState(
 
     fun withMemoryEnabled(enabled: Boolean): MainUiState = copy(
         isMemoryEnabled = enabled,
+    )
+
+    fun withActiveCalculation(calc: LocalCalculatorTool.CalculationResult?): MainUiState = copy(
+        activeCalculation = calc,
+    )
+
+    fun withPersonalNotes(notes: List<PersonalNotesStore.PersonalNote>): MainUiState = copy(
+        personalNotes = notes,
     )
 }

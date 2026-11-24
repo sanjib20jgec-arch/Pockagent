@@ -120,6 +120,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             mainDispatcher = { mainHandler.post(it) },
         )
     }
+    private val biometricLockManager by lazy {
+        BiometricLockManager(
+            preferences = getSharedPreferences("pocketagent_security", MODE_PRIVATE),
+            authenticator = AndroidBiometricAuthenticator(this)
+        )
+    }
     private var isMemoryEnabled = true
     private var currentSession: ConversationSession? = null
     private var lastPrompt: String = ""
@@ -182,31 +188,46 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             addView(text("LOCAL MODEL INFERENCE", 10f, MUTED, true).apply { letterSpacing = .12f })
         }
         brandRow.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))
-        brandRow.addView(pillButton("🎙️ Voice", accessibilityLabel = "Start continuous hands-free voice duplex mode") {
+
+        val headerToolsScroll = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+        }
+        val headerToolsRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        headerToolsRow.addView(pillButton("🎙️ Voice", accessibilityLabel = "Start continuous hands-free voice duplex mode") {
             showDuplexVoiceDialog()
         }.apply {
             layoutParams = LinearLayout.LayoutParams(-2, dp(34)).apply { marginEnd = dp(6) }
         })
-        brandRow.addView(pillButton("🧠 Memory", accessibilityLabel = "Manage sovereign long-term memory") {
+        headerToolsRow.addView(pillButton("🧠 Memory", accessibilityLabel = "Manage sovereign long-term memory") {
             showMemoryCenterDialog()
         }.apply {
             layoutParams = LinearLayout.LayoutParams(-2, dp(34)).apply { marginEnd = dp(6) }
         })
-        brandRow.addView(pillButton("📝 Notes", accessibilityLabel = "Manage sovereign personal notes") {
+        headerToolsRow.addView(pillButton("📝 Notes", accessibilityLabel = "Manage sovereign personal notes") {
             showNotesManagerDialog()
         }.apply {
             layoutParams = LinearLayout.LayoutParams(-2, dp(34)).apply { marginEnd = dp(6) }
         })
-        brandRow.addView(pillButton("☰ Chats", accessibilityLabel = "View saved conversations") {
+        headerToolsRow.addView(pillButton("🛡️ Privacy", accessibilityLabel = "View privacy audit and storage controls") {
+            showPrivacyCenterDialog()
+        }.apply {
+            layoutParams = LinearLayout.LayoutParams(-2, dp(34)).apply { marginEnd = dp(6) }
+        })
+        headerToolsRow.addView(pillButton("☰ Chats", accessibilityLabel = "View saved conversations") {
             showHistoryDialog()
         }.apply {
             layoutParams = LinearLayout.LayoutParams(-2, dp(34)).apply { marginEnd = dp(6) }
         })
-        brandRow.addView(pillButton("+ New", accessibilityLabel = "Start a fresh conversation") {
+        headerToolsRow.addView(pillButton("+ New", accessibilityLabel = "Start a fresh conversation") {
             startNewConversation()
         }.apply {
             layoutParams = LinearLayout.LayoutParams(-2, dp(34))
         })
+        headerToolsScroll.addView(headerToolsRow)
+        brandRow.addView(headerToolsScroll, LinearLayout.LayoutParams(-2, -2))
         page.addView(brandRow)
 
         val hero = column().apply {
@@ -1791,6 +1812,116 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 }
             }
         )
+    }
+
+    private fun showPrivacyCenterDialog() {
+        val permAudit = PrivacyAuditCenter.auditPermissions(this)
+        val storageAudit = PrivacyAuditCenter.auditStorage(filesDir, cacheDir)
+
+        val dialogView = column().apply {
+            setPadding(dp(18), dp(12), dp(18), dp(18))
+        }
+
+        // 1. Zero-Cloud Telemetry Guarantee Badge
+        val auditCard = column().apply {
+            background = shape(0xFFE8F5E9.toInt(), 12, 0xFFC8E6C9.toInt())
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+        }
+        val auditTitle = text("🛡️ 100% Zero-Cloud Guarantee", 14f, 0xFF1B5E20.toInt(), true)
+        auditCard.addView(auditTitle)
+        val auditDesc = text(
+            if (permAudit.isZeroCloudCompliant)
+                "Verified: Hardware-level zero cloud telemetry. PocketAgent does not request or hold 'android.permission.INTERNET'. All audio, documents, and inference run 100% locally on this device."
+            else
+                "Warning: Non-standard permissions detected.",
+            12f,
+            0xFF2E7D32.toInt()
+        ).apply { setPadding(0, dp(4), 0, 0) }
+        auditCard.addView(auditDesc)
+        dialogView.addView(auditCard, marginBottom(12))
+
+        // 2. Storage Audit Card
+        val storageCard = column().apply {
+            background = shape(WHITE, 12, BORDER)
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+        }
+        storageCard.addView(text("💾 Local Storage Breakdown", 14f, INK, true), marginBottom(8))
+
+        fun addStorageRow(label: String, value: String) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, dp(3), 0, dp(3))
+            }
+            row.addView(text(label, 12f, MUTED), LinearLayout.LayoutParams(0, -2, 1f))
+            row.addView(text(value, 12f, INK, true))
+            storageCard.addView(row)
+        }
+
+        addStorageRow("AI Models (.litertlm & whisper):", storageAudit.modelDisplay)
+        addStorageRow("Saved Conversations:", storageAudit.sessionsDisplay)
+        addStorageRow("Long-Term Memories:", storageAudit.memoriesDisplay)
+        addStorageRow("Personal Notes:", storageAudit.notesDisplay)
+        addStorageRow("Temporary Cache:", storageAudit.cacheDisplay)
+        addStorageRow("Total Storage Used:", storageAudit.totalDisplay)
+        dialogView.addView(storageCard, marginBottom(12))
+
+        // 3. Biometric App Lock Row
+        val lockCard = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = shape(WHITE, 12, BORDER)
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+        }
+        val lockInfo = column().apply {
+            addView(text("🔒 Biometric App Lock", 14f, INK, true))
+            addView(text("Require fingerprint or device PIN on launch", 11f, MUTED))
+        }
+        lockCard.addView(lockInfo, LinearLayout.LayoutParams(0, -2, 1f))
+
+        val lockToggleBtn = pillButton(
+            if (biometricLockManager.isLockEnabled) "Enabled" else "Disabled",
+            accessibilityLabel = "Toggle biometric app lock"
+        ) {}.apply {
+            layoutParams = LinearLayout.LayoutParams(-2, dp(32))
+        }
+        lockToggleBtn.setOnClickListener {
+            val newState = !biometricLockManager.isLockEnabled
+            biometricLockManager.setLockEnabled(newState)
+            lockToggleBtn.text = if (newState) "Enabled" else "Disabled"
+            Toast.makeText(this, if (newState) "Biometric lock enabled" else "Biometric lock disabled", Toast.LENGTH_SHORT).show()
+        }
+        lockCard.addView(lockToggleBtn)
+        dialogView.addView(lockCard, marginBottom(12))
+
+        // 4. Panic Wipe Button
+        val panicBtn = pillButton("⚠️ Panic Wipe All User Data", accessibilityLabel = "Emergency delete all personal data") {
+            AlertDialog.Builder(this)
+                .setTitle("🚨 Panic Data Wipe")
+                .setMessage("This will permanently delete all conversation history, memories, and personal notes on this device. (AI models will be kept).\n\nProceed?")
+                .setPositiveButton("Erase Everything") { _, _ ->
+                    PrivacyAuditCenter.wipeAllUserData(filesDir, cacheDir, purgeModels = false)
+                    startNewConversation()
+                    Toast.makeText(this, "All personal data has been erased.", Toast.LENGTH_LONG).show()
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        }.apply {
+            background = shape(0xFFFFEBEE.toInt(), 12, 0xFFFFCDD2.toInt())
+            setTextColor(0xFFC62828.toInt())
+        }
+        dialogView.addView(panicBtn)
+
+        AlertDialog.Builder(this)
+            .setTitle("🛡️ Privacy & Sovereign Security")
+            .setView(dialogView)
+            .setPositiveButton("Close", null)
+            .show()
+    }
+
+    private fun promptBiometricUnlock() {
+        if (!biometricLockManager.isAppLocked) return
+        biometricLockManager.unlock()
     }
 
     private fun showActionReviewDialog(reviewUi: SystemActionTools.ActionReviewUi) {

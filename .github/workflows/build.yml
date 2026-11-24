@@ -39,6 +39,17 @@ jobs:
           set -o pipefail
           gradle --no-daemon --stacktrace --console=plain assembleDebug 2>&1 | tee gradle-build.log
 
+      - name: Summarize Gradle failure
+        if: failure()
+        shell: bash
+        run: |
+          {
+            echo '### Gradle build failure (last 160 lines)'
+            echo '```text'
+            tail -n 160 gradle-build.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload Gradle failure log
         if: failure()
         uses: actions/upload-artifact@v4

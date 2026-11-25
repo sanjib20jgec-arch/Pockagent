@@ -827,8 +827,9 @@ class MainViewModel internal constructor(
                         onChunk = { chunk ->
                             if (isGenerationCancelled.get() || !isCurrentGeneration() || !isSessionActive()) {
                                 guard.cancel()
+                            } else {
+                                guard.accept(accumulated, chunk)
                             }
-                            guard.accept(accumulated, chunk)
                         },
                         conversationSessionId = originatingSessionId,
                     )

@@ -444,7 +444,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             context = this,
             text = "🔒 100% Offline · Zero Cloud",
             sizeSp = 11.5f,
-            color = WHITE,
+            color = Color.WHITE,
             bold = true,
         ).apply {
             background = roundedShape(0x29FFFFFF, dp(12).toFloat())
@@ -454,7 +454,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             }
         }
         heroCard.addView(trustBadge)
-        heroCard.addView(text("Your pocket assistant", 21f, WHITE, true))
+        heroCard.addView(text("Your pocket assistant", 21f, Color.WHITE, true))
         heroCard.addView(
             text(
                 "Private on-device AI. Ask anything, analyze PDFs, or speak hands-free with zero cloud.",
@@ -471,7 +471,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             setAllCaps(false)
             textSize = 13.5f
             typeface = Typeface.create("sans-serif", Typeface.BOLD)
-            setTextColor(WHITE)
+            setTextColor(Color.WHITE)
             gravity = Gravity.CENTER
             minHeight = dp(48)
             minimumHeight = dp(48)
@@ -3026,7 +3026,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             setPadding(dp(20), dp(20), dp(20), dp(20))
         }
 
-        val title = text("🎙️ Continuous Voice Mode", 18f, WHITE, true)
+        val title = text("🎙️ Continuous Voice Mode", 18f, Color.WHITE, true)
         dialogView.addView(title)
 
         val stateBadge = text("Initializing…", 13f, palette.heroSubtitleInk, true).apply {
@@ -3041,7 +3041,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 arrayOf(
                     roundedShape(0x33FFFFFF, dp(4).toFloat()),
                     android.graphics.drawable.ClipDrawable(
-                        roundedShape(WHITE, dp(4).toFloat()),
+                        roundedShape(Color.WHITE, dp(4).toFloat()),
                         Gravity.START,
                         android.graphics.drawable.ClipDrawable.HORIZONTAL,
                     ),
@@ -3077,7 +3077,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             setAllCaps(false)
             textSize = 13f
             typeface = Typeface.create("sans-serif", Typeface.BOLD)
-            setTextColor(WHITE)
+            setTextColor(Color.WHITE)
             gravity = Gravity.CENTER
             minHeight = dp(48)
             minimumHeight = dp(48)
@@ -3106,7 +3106,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             minimumHeight = dp(48)
             setPadding(dp(12), dp(8), dp(12), dp(8))
             background = rippleDrawable(
-                roundedShape(WHITE, dp(24).toFloat()),
+                roundedShape(Color.WHITE, dp(24).toFloat()),
                 palette.rippleOnMint,
             )
             backgroundTintList = null
@@ -3446,23 +3446,6 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         lockOverlay.visibility = if (biometricLockManager.isAppLocked) View.VISIBLE else View.GONE
     }
 
-    override fun onResume() {
-        super.onResume()
-        if (biometricLockManager.shouldLockOnResume()) {
-            biometricLockManager.lock()
-        }
-        updateLockOverlay()
-        if (biometricLockManager.isAppLocked) {
-            promptBiometricUnlock()
-        }
-    }
-
-    override fun onStop() {
-        if (!isChangingConfigurations) {
-            biometricLockManager.markBackgrounded()
-        }
-        super.onStop()
-    }
 
 
     private fun promptBiometricUnlock() {

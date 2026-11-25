@@ -57,23 +57,14 @@ class InferenceEngineManager<T : AutoCloseable>(
      * real LiteRT-LM [com.google.ai.edge.litertlm.Engine], and that cast lives here rather than
      * leaking into every caller.
      */
-    companion object {
-        // Conservative decoding defaults for small on-device models: reduce repetition/looping
-        // while keeping answers coherent. RunawayGuard remains a secondary backstop.
-        const val DEFAULT_TOP_K = 40
-        const val DEFAULT_TOP_P = 0.95f
-        const val DEFAULT_TEMPERATURE = 0.8f
-    }
-
     private val conversationFactory: (T, String) -> ConversationHandle = { active, instruction ->
         val litertEngine = active as? com.google.ai.edge.litertlm.Engine
             ?: error("Conversation caching requires a real LiteRT-LM Engine.")
-        // NOTE: SamplerConfig wiring is version-sensitive across LiteRT-LM releases.
-        // Keep defaults documented above; wire explicitly once API is verified in CI/device.
-        val config = com.google.ai.edge.litertlm.ConversationConfig(
-            systemInstruction = com.google.ai.edge.litertlm.Contents.of(instruction),
+        val conversation = litertEngine.createConversation(
+            com.google.ai.edge.litertlm.ConversationConfig(
+                systemInstruction = com.google.ai.edge.litertlm.Contents.of(instruction)
+            )
         )
-        val conversation = litertEngine.createConversation(config)
         object : ConversationHandle {
             override fun sendMessage(
                 prompt: String,
@@ -97,6 +88,16 @@ class InferenceEngineManager<T : AutoCloseable>(
         }
     },
 ) : AutoCloseable {
+
+    companion object {
+        // Conservative decoding defaults for small on-device models: reduce repetition/looping
+        // while keeping answers coherent. RunawayGuard remains a secondary backstop.
+        // NOTE: SamplerConfig wiring is version-sensitive across LiteRT-LM releases;
+        // keep defaults documented here and wire explicitly once API is verified in CI/device.
+        const val DEFAULT_TOP_K = 40
+        const val DEFAULT_TOP_P = 0.95f
+        const val DEFAULT_TEMPERATURE = 0.8f
+    }
 
     @Volatile var engine: T? = null
         private set

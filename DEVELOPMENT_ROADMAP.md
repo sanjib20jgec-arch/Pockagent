@@ -58,8 +58,8 @@ _Updated: 2026-11-24. Evidence-based reconciliation of branch `arena/925d477f-po
 | P1-1 | Honest 4K-class context defaults | Implemented; CI Unverified; Device Unverified | `ContextBudgetManager` 4096/1024/384; `MainUiState` 6000 chars / 1024 response; `RunawayGuard` 12000; warm reset 2800 | Make model-capability-aware; device validation |
 | P1-2 | Reserve out-of-band system budget | Implemented; CI/Device Unverified | `ContextBudgetManager` uses `max(estimatedSystemTokens, reservedSystemTokens)`; test added | CI green required |
 | P1-3 | Trim newest turn on overflow | Implemented; CI/Device Unverified | `pruneHistory` trims latest turn attachment/content; test added | CI green required |
-| P1-4 | LiteRT-LM 0.20.0 bump | Implemented (config); CI Unverified | `build.gradle.kts` dependency 0.20.0 | Confirm compile/runtime compatibility in CI/device |
-| P1-5 | SamplerConfig stability tuning | Partial / Blocked | Constants present in `InferenceEngineManager`; ConversationConfig wiring deferred after compile-risk; no active wiring | Verify 0.20.0 API and wire safely |
+| P1-4 | LiteRT-LM 0.20.0 bump | Blocked/Reverted | Attempted 0.20.0; reverted to 0.19.1 after CI compile failure (exact log unavailable in sandbox; suspected classfile/toolchain incompatibility) | Retry only with verified toolchain-compatible release and green CI |
+| P1-5 | SamplerConfig stability tuning | Partial / Blocked | Constants present in `InferenceEngineManager`; ConversationConfig wiring deferred after compile-risk; no active wiring | Verify LiteRT-LM API for target version and wire safely behind CI |
 | P1-6 | Conversation/session state isolation | Partial | Conversation cache keyed by session/model/system/attachment hash | Device smoke test for Omni/state bleed; fallback strategy |
 | P1-7 | Lifecycle memory handling | Implemented; CI/Device Unverified | `MainActivity.onTrimMemory/onLowMemory`, 120s idle unload | Foreground service, RAM preflight, thermal handling |
 | P1-8 | Model import sanity checks | Implemented; CI/Device Unverified | `ModelFileStore` min-size/header check; tests | Hash/manifest/capability registry still needed |
@@ -104,7 +104,7 @@ _Updated: 2026-11-24. Evidence-based reconciliation of branch `arena/925d477f-po
 - No **device verification** exists (0 instrumented tests).
 - `MainActivity` is a 4147 LOC God Activity; `MainViewModel` is dead parallel path.
 - Model budgets are static 4K defaults, not capability-aware.
-- LiteRT-LM 0.20.0 runtime behavior and SamplerConfig wiring are unverified.
+- LiteRT-LM 0.20.0 bump was reverted to 0.19.1 after CI compile failure; SamplerConfig wiring remains unverified/deferred.
 - Large Omni models carry RAM/thermal/process-death risk on 4–6GB devices.
 
 ## Next 5 tasks (recommended)

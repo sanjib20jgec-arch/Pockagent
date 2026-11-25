@@ -7,7 +7,7 @@ _Updated: 2026-11-24 (evidence-based reconciliation). Branch: `arena/925d477f-po
 | Area | Evidence |
 |---|---|
 | App config | Android/Kotlin, `compileSdk 35`, `minSdk 28`, `targetSdk 35`, `versionCode 2`, `versionName 1.1.0-dev`, `applicationId com.example.pocketagent`, Java/Kotlin 17, NDK 27.2.12479018, CMake 3.22.1 |
-| Inference deps | `com.google.ai.edge.litertlm:litertlm-android:0.20.0`, `androidx.biometric:biometric:1.1.0`, `pdfbox-android:2.0.27.1`, `kotlinx-coroutines-android:1.8.1` |
+| Inference deps | `com.google.ai.edge.litertlm:litertlm-android:0.19.1` (0.20.0 attempted, reverted due to CI compile failure), `androidx.biometric:biometric:1.1.0`, `pdfbox-android:2.0.27.1`, `kotlinx-coroutines-android:1.8.1` |
 | Source/tests | 42 main Kotlin files (~15,426 LOC), 37 JVM unit test files, 0 instrumented/androidTest files |
 | Live architecture | `MainActivity.kt` (~4,147 LOC) is live path; `MainViewModel.kt` (~1,219 LOC) is not referenced by MainActivity |
 | CI | `.github/workflows/build.yml` runs `package_source.py --check`, `testDebugUnitTest`, `assembleDebug`. Latest branch runs all failed: `45516167988` (aea1832), `45515134152` (e4060c3), `45514135744` (e68f0af). Current head is **not CI verified**. |
@@ -53,7 +53,7 @@ CI is not device testing. Code presence is not verified functionality.
 ### High
 - **Dead parallel architecture:** `MainViewModel` (1219 LOC) not wired into live `MainActivity` (4147 LOC); test confidence can be misleading.
 - **Static 4K budgeting:** safer defaults now, but not model-capability-aware; large attachments/models remain risky.
-- **LiteRT-LM 0.20.0 unverified:** dependency bumped; runtime/API compatibility not CI/device verified.
+- **LiteRT-LM 0.20.0 bump reverted:** 0.20.0 caused CI compile failure (exact log unavailable in sandbox); repo pinned back to 0.19.1 pending toolchain-compatible verification.
 - **Memory/thermal/process-death risk:** large model use on 4–6GB devices lacks RAM preflight/FGS/thermal strategy.
 
 ### Medium

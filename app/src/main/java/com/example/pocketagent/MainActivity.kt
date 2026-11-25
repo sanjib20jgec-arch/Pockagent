@@ -50,6 +50,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
 class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
@@ -131,13 +132,17 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             formatExecutor = ioExecutor,
         ).apply {
             onPartialText = { text ->
-                activeAssistantHandle?.bindStreamingText(text)
-                maybeFollowStreamingOutput()
+                if (generationLifecycleTracker.canApplyUi(activeUiGenerationId)) {
+                    activeAssistantHandle?.bindStreamingText(text)
+                    maybeFollowStreamingOutput()
+                }
             }
         }
     }
     private val mainHandler = Handler(Looper.getMainLooper())
     private val engineManager = InferenceEngineManager<Engine>()
+    private val generationLifecycleTracker = GenerationLifecycleTracker()
+    @Volatile private var activeUiGenerationId: Long = 0L
     private val promptContext = AnswerPromptComposer()
     private val inAppAudioRecorder = InAppAudioRecorder()
     @Volatile private var whisperContext: Long = 0L
@@ -1675,6 +1680,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         convKey: String,
         prompt: String,
         systemInstruction: String,
+        generationId: Long = 0L,
     ): String {
         val accumulated = StringBuilder()
         val firstChunk = AtomicBoolean(true)
@@ -1685,6 +1691,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             val isFirst = firstChunk.compareAndSet(true, false)
             if (isFirst) {
                 mainHandler.post {
+                    if (generationId != 0L && !generationLifecycleTracker.isCurrent(generationId)) return@post
                     refreshModelStatus()
                     currentGenerationStageLabel = "Streaming"
                     updateStatus("Response streaming locally…")
@@ -1838,6 +1845,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         if (!isGeneratingUi) return
         isGeneratingUi = false
         isStoppingUi = false
+        activeUiGenerationId = 0L
         val gradient = gradientPillDrawable(
             palette.heroGradientStart,
             palette.heroGradientEnd,
@@ -1918,11 +1926,15 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         val task = lastPrompt
         val handle = activeAssistantHandle ?: return
         if (task.isBlank() || isGeneratingUi || engineManager.isGenerationActive) return
+        val originatingSessionId = currentSession?.id ?: return
         val modelFile = File(filesDir, "model.litertlm")
         if (!modelFile.exists()) {
             updateStatus("Choose a compatible .litertlm model first.")
             return
         }
+        val generationToken = generationLifecycleTracker.begin(originatingSessionId)
+        val generationId = generationToken.generationId
+        activeUiGenerationId = generationId
         maybeShowRefineAffordance = false
         updateRefineAffordance(handle)
         isGeneratingCancelled.set(false)
@@ -1950,9 +1962,9 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 // Different prompt shape: start from a clean context.
                 engineManager.invalidateConversation("refine")
                 runawayFragment = null
-                val convKey = conversationKeyFor(currentSession?.id, modelFile, instruction, attachedContext)
+                val convKey = conversationKeyFor(originatingSessionId, modelFile, instruction, attachedContext)
                 val retried = executeWithGpuFallback(modelFile) {
-                    runGuardedGeneration(convKey, retryBuild.prompt, instruction)
+                    runGuardedGeneration(convKey, retryBuild.prompt, instruction, generationId)
                 }
                 if (!isGeneratingCancelled.get()) {
                     engineManager.recordConversationTurnTokens(
@@ -1961,27 +1973,63 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 }
                 val elapsedMs = SystemClock.elapsedRealtime() - generationStartElapsedMs
                 mainHandler.post {
+                    val isCurrent = generationLifecycleTracker.isCurrent(generationId)
+                    if (!isCurrent) {
+                        if (retried.isNotBlank() && generationLifecycleTracker.canPersist(generationId, originatingSessionId)) {
+                            try {
+                                val sess = sessionStore.getSession(originatingSessionId) ?: return@post
+                                val msgs = sess.messages.toMutableList()
+                                val lastIdx = msgs.indexOfLast { it.isAssistant }
+                                if (lastIdx >= 0) {
+                                    msgs[lastIdx] = ChatMessage.assistant(retried)
+                                    sessionStore.saveSession(sess.copy(messages = msgs, updatedAt = System.currentTimeMillis()))
+                                }
+                            } catch (_: Exception) {}
+                        }
+                        return@post
+                    }
                     exitGeneratingState()
                     refreshModelStatus()
                     if (isGeneratingCancelled.get()) {
                         renderFinalAnswer(handle, retried, stoppedByUser = true, elapsedMs = elapsedMs)
                         updateStatus("Generation stopped by user.")
+                        if (retried.isNotBlank() && generationLifecycleTracker.canPersist(generationId, originatingSessionId)) {
+                            try {
+                                val sess = sessionStore.getSession(originatingSessionId) ?: currentSession
+                                if (sess != null) {
+                                    val msgs = sess.messages.toMutableList()
+                                    val lastIdx = msgs.indexOfLast { it.isAssistant }
+                                    if (lastIdx >= 0) {
+                                        msgs[lastIdx] = ChatMessage.assistant(retried)
+                                        val updated = sess.copy(messages = msgs, updatedAt = System.currentTimeMillis())
+                                        sessionStore.saveSession(updated)
+                                        if (currentSession?.id == originatingSessionId) {
+                                            currentSession = updated
+                                        }
+                                    }
+                                }
+                            } catch (_: Exception) {}
+                        }
                     } else if (retried.isNotBlank()) {
                         renderFinalAnswer(handle, retried, stoppedByUser = false, elapsedMs = elapsedMs)
                         updateStatus("Answer refined.")
-                        try {
-                            val sess = currentSession
-                            if (sess != null) {
-                                val msgs = sess.messages.toMutableList()
-                                val lastIdx = msgs.indexOfLast { it.isAssistant }
-                                if (lastIdx >= 0) {
-                                    msgs[lastIdx] = ChatMessage.assistant(retried)
-                                    val updated = sess.copy(messages = msgs, updatedAt = System.currentTimeMillis())
-                                    sessionStore.saveSession(updated)
-                                    currentSession = updated
+                        if (generationLifecycleTracker.canPersist(generationId, originatingSessionId)) {
+                            try {
+                                val sess = sessionStore.getSession(originatingSessionId) ?: currentSession
+                                if (sess != null) {
+                                    val msgs = sess.messages.toMutableList()
+                                    val lastIdx = msgs.indexOfLast { it.isAssistant }
+                                    if (lastIdx >= 0) {
+                                        msgs[lastIdx] = ChatMessage.assistant(retried)
+                                        val updated = sess.copy(messages = msgs, updatedAt = System.currentTimeMillis())
+                                        sessionStore.saveSession(updated)
+                                        if (currentSession?.id == originatingSessionId) {
+                                            currentSession = updated
+                                        }
+                                    }
                                 }
-                            }
-                        } catch (_: Exception) {}
+                            } catch (_: Exception) {}
+                        }
                     } else {
                         stopGenerationIndicators()
                         handle.setStatusBadge("No response", palette.statusMissing)
@@ -1990,6 +2038,9 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 }
             } catch (e: Exception) {
                 mainHandler.post {
+                    if (!generationLifecycleTracker.isCurrent(generationId)) {
+                        return@post
+                    }
                     exitGeneratingState()
                     stopGenerationIndicators()
                     refreshModelStatus()
@@ -2091,6 +2142,10 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             ?: ConversationSession.createWithInitialPrompt(task.ifBlank { "Conversation" }).also {
                 currentSession = it
             }
+        val originatingSessionId = activeSession.id
+        val generationToken = generationLifecycleTracker.begin(originatingSessionId)
+        val generationId = generationToken.generationId
+        activeUiGenerationId = generationId
         lastPrompt = task
         isGeneratingCancelled.set(false)
         streamingRenderer.reset()
@@ -2209,7 +2264,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                         )
                     },
                 ) {
-                    runGuardedGeneration(convKey, activeBuild.prompt, effectiveInstruction)
+                    runGuardedGeneration(convKey, activeBuild.prompt, effectiveInstruction, generationId)
                 }
 
                 if (!isGeneratingCancelled.get()) {
@@ -2223,17 +2278,51 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 maybeShowRefineAffordance = needsRefineHint
                 val elapsedMs = SystemClock.elapsedRealtime() - generationStartElapsedMs
                 mainHandler.post {
-                    exitGeneratingState()
-                    refreshModelStatus()
-                    syncComposerState()
-                    currentCitations = localCitations
-                    renderCitations(localCitations, handle.citationsContainer)
+                    val isCurrent = generationLifecycleTracker.isCurrent(generationId)
+                    val isOriginatingSessionSelected = currentSession?.id == originatingSessionId
+                    if (isCurrent) {
+                        exitGeneratingState()
+                        refreshModelStatus()
+                        syncComposerState()
+                    }
                     if (isGeneratingCancelled.get()) {
-                        renderFinalAnswer(handle, result, stoppedByUser = true, elapsedMs = elapsedMs)
-                        updateStatus("Generation stopped by user.")
-                        scrollChatToBottom()
+                        if (isCurrent) {
+                            currentCitations = localCitations
+                            renderCitations(localCitations, handle.citationsContainer)
+                            renderFinalAnswer(handle, result, stoppedByUser = true, elapsedMs = elapsedMs)
+                            updateStatus("Generation stopped by user.")
+                            scrollChatToBottom()
+                        }
+                        // Persist partial cancelled output to the originating session only, so isolation
+                        // is preserved without changing the stopped UX for the active generation.
+                        if (result.isNotBlank() && generationLifecycleTracker.canPersist(generationId, originatingSessionId)) {
+                            try {
+                                val sess = sessionStore.getSession(originatingSessionId) ?: activeSession
+                                val updated = sess.withMessage(userMsg).withMessage(ChatMessage.assistant(result))
+                                sessionStore.saveSession(updated)
+                                if (isCurrent && isOriginatingSessionSelected) {
+                                    currentSession = updated
+                                }
+                            } catch (_: Exception) {}
+                        }
                         return@post
                     }
+
+                    if (!isCurrent) {
+                        // Stale generation: never mutate current UI. Persist only to originating session
+                        // when this generation token is still the owner of that session slot.
+                        if (result.isNotBlank() && generationLifecycleTracker.canPersist(generationId, originatingSessionId)) {
+                            try {
+                                val sess = sessionStore.getSession(originatingSessionId) ?: activeSession
+                                val updated = sess.withMessage(userMsg).withMessage(ChatMessage.assistant(result))
+                                sessionStore.saveSession(updated)
+                            } catch (_: Exception) {}
+                        }
+                        return@post
+                    }
+
+                    currentCitations = localCitations
+                    renderCitations(localCitations, handle.citationsContainer)
                     renderFinalAnswer(handle, result, stoppedByUser = false, elapsedMs = elapsedMs)
                     updateRefineAffordance(handle)
                     scrollChatToBottom()
@@ -2246,14 +2335,15 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                         }
                     )
 
-                    // Auto-save turn to local conversation session
-                    if (result.isNotBlank()) {
+                    // Auto-save turn to local conversation session (originating session only).
+                    if (result.isNotBlank() && generationLifecycleTracker.canPersist(generationId, originatingSessionId)) {
                         try {
-                            val sess = currentSession ?: activeSession
-                            val assistantMsg = ChatMessage.assistant(result)
-                            val updated = sess.withMessage(userMsg).withMessage(assistantMsg)
+                            val sess = sessionStore.getSession(originatingSessionId) ?: activeSession
+                            val updated = sess.withMessage(userMsg).withMessage(ChatMessage.assistant(result))
                             sessionStore.saveSession(updated)
-                            currentSession = updated
+                            if (currentSession?.id == originatingSessionId) {
+                                currentSession = updated
+                            }
                         } catch (_: Exception) {}
                     }
 
@@ -2278,6 +2368,9 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 }
             } catch (e: Exception) {
                 mainHandler.post {
+                    if (!generationLifecycleTracker.isCurrent(generationId)) {
+                        return@post
+                    }
                     exitGeneratingState()
                     stopGenerationIndicators()
                     refreshModelStatus()
@@ -2304,7 +2397,6 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             }
         }
     }
-
     private fun regenerateAnswer() {
         if (lastPrompt.isNotBlank() && !isGeneratingUi && !engineManager.isGenerationActive) {
             taskInput.setText(lastPrompt)
@@ -2535,12 +2627,18 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             val (label, isDanger) = spec
             val btn = if (isDanger) {
                 dangerButton(this, palette, label, accessibilityLabel = label) {
-                    menuDialog.dismiss()
-                    sessionStore.deleteSession(s.id)
-                    if (currentSession?.id == s.id) {
-                        startNewConversation()
+                    val generating = isGeneratingUi || engineManager.isGenerationActive
+                    if (generating && (s.id == currentSession?.id || generationLifecycleTracker.isSessionMutationBlockedDuringGeneration(s.id, true))) {
+                        menuDialog.dismiss()
+                        updateStatus("Stop active generation before deleting the active conversation.")
+                    } else {
+                        menuDialog.dismiss()
+                        sessionStore.deleteSession(s.id)
+                        if (currentSession?.id == s.id) {
+                            startNewConversation()
+                        }
+                        onUpdated()
                     }
-                    onUpdated()
                 }
             } else {
                 secondaryOutlineButton(this, palette, label, accessibilityLabel = label) {

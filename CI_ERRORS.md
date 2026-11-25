@@ -63,75 +63,33 @@
 143:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainUiState.kt:130:54 Syntax error: Expecting an expression.
 144:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainUiState.kt:131:10 Syntax error: Expecting '"'.
 145:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainUiState.kt:371:2 Syntax error: Missing '}.
-146:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:312:30 Unresolved reference 'withModelReady'.
-147:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:317:30 Unresolved reference 'withWhisperLoading'.
-148:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:328:28 Unresolved reference 'withWhisperReady'.
-149:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:334:28 Unresolved reference 'withWhisperLoadFailed'.
-150:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:342:26 Unresolved reference 'withTaskInput'.
-151:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:351:26 Unresolved reference 'withTtsReady'.
-152:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:356:30 Unresolved reference 'withStatus'.
-153:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:360:26 Unresolved reference 'withModelImporting'.
-154:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:368:34 Unresolved reference 'withModelReady'.
-155:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:371:34 Unresolved reference 'withModelImportFailed'.
-156:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:377:26 Unresolved reference 'withStatus'.
-157:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:395:24 Unresolved reference 'withAttachmentsUpdated'.
-158:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:402:34 Unresolved reference 'withStatus'.
-159:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:408:26 Unresolved reference 'withStatus'.
-160:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:435:24 Unresolved reference 'withAttachmentsUpdated'.
-161:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:439:24 Unresolved reference 'withStatus'.
-162:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:449:20 Unresolved reference 'withStatus'.
-163:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:455:26 Unresolved reference 'withWhisperLoading'.
-164:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:479:24 Unresolved reference 'withWhisperReady'.
-165:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:495:24 Unresolved reference 'withWhisperLoadFailed'.
-166:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:502:26 Unresolved reference 'withStatus'.
-167:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:512:34 Unresolved reference 'withWhisperModelRemoved'.
-168:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:514:34 Unresolved reference 'withStatus'.
-169:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:521:30 Unresolved reference 'withStatus'.
-170:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:526:26 Unresolved reference 'withTranscribingWav'.
-171:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:550:34 Unresolved reference 'withStatus'.
-172:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:562:24 Unresolved reference 'withTranscriptReady'.
-173:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:567:26 Unresolved reference 'withStatus'.
-174:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:576:26 Unresolved reference 'withAttachmentsCleared'.
-175:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:580:26 Unresolved reference 'withAttachmentPreviewToggled'.
-176:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:585:30 Unresolved reference 'withTranscriptConfirmed'.
-177:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:592:30 Unresolved reference 'withStatus'.
-178:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:596:30 Unresolved reference 'withStatus'.
-179:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:602:30 Unresolved reference 'withStatus'.
-180:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:606:30 Unresolved reference 'withStatus'.
-181:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:613:16 Unresolved reference 'withLastUserPrompt'.
-182:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:670:42 Unresolved reference 'withStatus'.
-183:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:673:53 Unresolved reference 'composePrompt'.
-184:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:682:42 Unresolved reference 'withStatus'.
-185:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:691:32 Unresolved reference 'withStreamChunk'.
-186:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:725:38 Unresolved reference 'withGenerationStopped'.
-187:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:732:24 Unresolved reference 'withGenerationCompleted'.
-188:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:734:26 Cannot infer type for type parameter 'T'. Specify it explicitly.
-189:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:734:26 Cannot infer type for type parameter 'R'. Specify it explicitly.
-190:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:734:32 Cannot infer type for type parameter 'T'. Specify it explicitly.
-191:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:737:38 Unresolved reference 'withStatus'.
-192:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:751:38 Unresolved reference 'withGenerationStopped'.
-193:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:754:28 Unresolved reference 'withGenerationError'.
-194:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:810:20 Unresolved reference 'withSessions'.
-195:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:831:16 Unresolved reference 'withOutputCleared'.
-196:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:866:15 Unresolved reference 'withSessions'.
-197:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:913:26 Unresolved reference 'withSessionSearch'.
-198:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:933:30 Unresolved reference 'withUserMemories'.
+146:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:433:44 Unresolved reference 'newContext'.
+147:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:433:44 Only expressions are allowed in this context.
+148:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:434:41 Unresolved reference 'newNames'.
+149:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:434:41 Only expressions are allowed in this context.
+150:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:437:41 Unresolved reference 'status'.
+151:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:437:41 Only expressions are allowed in this context.
+152:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:661:31 No parameter with name 'attachedFileNames' found.
+153:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:661:51 Cannot infer type for type parameter 'T'. Specify it explicitly.
+154:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:665:31 No parameter with name 'isAttachmentPreviewExpanded' found.
+155:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:665:65 Unresolved reference 'isAttachmentPreviewExpanded'.
+156:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:764:53 Unresolved reference 'composePrompt'.
 ```
 
 ## first failure context
 ```
-e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:737:38 Unresolved reference 'withStatus'.
-e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:751:38 Unresolved reference 'withGenerationStopped'.
-e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:754:28 Unresolved reference 'withGenerationError'.
-e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:810:20 Unresolved reference 'withSessions'.
-e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:831:16 Unresolved reference 'withOutputCleared'.
-e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:866:15 Unresolved reference 'withSessions'.
-e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:913:26 Unresolved reference 'withSessionSearch'.
-e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:933:30 Unresolved reference 'withUserMemories'.
+e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:434:41 Only expressions are allowed in this context.
+e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:437:41 Unresolved reference 'status'.
+e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:437:41 Only expressions are allowed in this context.
+e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:661:31 No parameter with name 'attachedFileNames' found.
+e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:661:51 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:665:31 No parameter with name 'isAttachmentPreviewExpanded' found.
+e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:665:65 Unresolved reference 'isAttachmentPreviewExpanded'.
+e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:764:53 Unresolved reference 'composePrompt'.
 
 > Task :app:compileDebugKotlin FAILED
 > Task :app:buildCMakeDebug[x86_64]
-gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_2-1795596457398.json
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_2-1795597131692.json
 
 [Incubating] Problems report is available at: file:///home/runner/work/Pockagent/Pockagent/build/reports/problems/problems-report.html
 

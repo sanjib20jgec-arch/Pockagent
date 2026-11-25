@@ -316,7 +316,6 @@ class PersonalNotesStore(
         }
         return sb.toString()
     }
->>>>>>> 32b1732 (Harden privacy, increase model limits, and improve UI baseline)
     private fun extractJsonField(jsonBody: String, field: String): String? {
         val regex = Regex(""""$field"\s*:\s*"((?:\\.|[^"\\])*)"""")
         val match = regex.find(jsonBody) ?: return null

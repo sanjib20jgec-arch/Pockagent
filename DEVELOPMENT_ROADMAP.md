@@ -44,9 +44,9 @@ _Updated: 2026-11-24. Evidence-based reconciliation of branch `arena/925d477f-po
 | ID | Task | Status | Acceptance criteria | Evidence / Gap |
 |---|---|---|---|---|
 | M1-1 | Reconcile git baseline | Implemented (synced during audit) | Local branch clean and aligned with intended remote tip; no ambiguous dirty state | Synced to `aea1832` during audit; keep clean going forward |
-| M1-2 | Make current head CI green | Blocked | Green CI run URL for `package_source.py --check`, `testDebugUnitTest`, `assembleDebug` | Latest 3 runs failed; exact log not retrieved in sandbox (EOF) |
+| M1-2 | Make current head CI green | In Progress | Green CI run URL for `package_source.py --check`, `testDebugUnitTest`, `assembleDebug` | Previous runs failed; root cause identified as leftover conflict markers in UserMemoryStore/PersonalNotesStore; fix pushed, awaiting CI |
 | M1-3 | Correct roadmap/audit status taxonomy | Implemented | Docs use evidence-based statuses; no ambiguous `[x]=completed` | This doc + PROJECT_AUDIT update |
-| M1-4 | Record CI failure root cause and fix | Blocked | Failure log identified, fix committed, green rerun | Needs CI log access / diagnosis |
+| M1-4 | Record CI failure root cause and fix | In Progress | Failure log identified, fix committed, green rerun | Check-run annotations revealed leftover merge conflict markers in `UserMemoryStore.kt:316` and `PersonalNotesStore.kt:319` (pre-existing in ee6cd79); removed in fix commit; awaiting green CI |
 | M1-5 | Baseline verification note | Proposed | README/CI badge or doc note states latest verified commit/run | Add after green CI |
 
 **M1 exit criteria:** M1-1 to M1-4 completed with evidence. No new feature scope added.

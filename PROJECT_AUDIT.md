@@ -47,7 +47,7 @@ CI is not device testing. Code presence is not verified functionality.
 ## Key findings
 
 ### Critical
-- **CI red on current head:** latest 3 branch runs failed; no CI-verified claim allowed.
+- **CI red on current head (root cause identified):** branch runs failed; check-run annotations showed leftover merge conflict markers in `UserMemoryStore.kt:316` and `PersonalNotesStore.kt:319` (pre-existing at ee6cd79). Markers removed; awaiting green rerun.
 - **Git baseline hygiene risk:** local/remote divergence and dirty tree observed during audit (synced before doc correction).
 
 ### High

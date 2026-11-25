@@ -1,84 +1,67 @@
-# PocketAgent Project Audit
+# PocketAgent Project Audit (Corrected)
 
-_Updated: 2026-11-24 (branch `arena/925d477f-pockagent`, base `ee6cd79` on `main`)._
-_This is a code-grounded audit snapshot. It replaces stale earlier claims where they conflict with the current tree._
+_Updated: 2026-11-24 (evidence-based reconciliation). Branch: `arena/925d477f-pockagent`, HEAD: `aea1832` (aligned with origin during audit). No code/features changed as part of this audit._
 
 ## Verified snapshot
 
-| Area | Current state |
+| Area | Evidence |
 |---|---|
-| App | Android app, Kotlin, `minSdk 28`, `targetSdk 34`, `compileSdk 35`, `applicationId com.example.pocketagent` |
-| Inference | `com.google.ai.edge.litertlm:litertlm-android:0.20.0` (bumped from 0.19.1 in this pass) |
-| Main UI path | `MainActivity.kt` (~4.1k lines) is the live path; `MainViewModel.kt` exists but is not referenced by `MainActivity` |
-| Tests | 37 JVM unit test files under `app/src/test` (no instrumented tests in repo) |
-| CI | `.github/workflows/build.yml`: source bundle check, `testDebugUnitTest`, `assembleDebug` |
-| Network | No `INTERNET` permission declared in manifest |
-| Model import | Private app storage, transactional copy, 5 GB cap, basic header/sanity check added in this pass |
+| App config | Android/Kotlin, `compileSdk 35`, `minSdk 28`, `targetSdk 35`, `versionCode 2`, `versionName 1.1.0-dev`, `applicationId com.example.pocketagent`, Java/Kotlin 17, NDK 27.2.12479018, CMake 3.22.1 |
+| Inference deps | `com.google.ai.edge.litertlm:litertlm-android:0.20.0`, `androidx.biometric:biometric:1.1.0`, `pdfbox-android:2.0.27.1`, `kotlinx-coroutines-android:1.8.1` |
+| Source/tests | 42 main Kotlin files (~15,426 LOC), 37 JVM unit test files, 0 instrumented/androidTest files |
+| Live architecture | `MainActivity.kt` (~4,147 LOC) is live path; `MainViewModel.kt` (~1,219 LOC) is not referenced by MainActivity |
+| CI | `.github/workflows/build.yml` runs `package_source.py --check`, `testDebugUnitTest`, `assembleDebug`. Latest branch runs all failed: `45516167988` (aea1832), `45515134152` (e4060c3), `45514135744` (e68f0af). Current head is **not CI verified**. |
+| Privacy posture | Manifest declares no `INTERNET` permission; `RECORD_AUDIO` present; backup/data extraction disabled; biometric lock present. SpeechRecognizer/TTS provider behavior may be device/provider-dependent. |
+| Repo hygiene | At audit start: local HEAD behind remote with dirty working tree. Synced to `aea1832` before doc correction. Keep baseline clean. |
 
-## What is good / keep
+## Status taxonomy
 
-- Offline-first posture: no INTERNET permission, local model import, local session/note/memory stores.
-- Answer-first prompt shaping (`AnswerDirective`), runaway/repetition guard, confirmation-before-action patterns.
-- Local RAG primitives (chunking, BM25 keyword index, citation packaging), session history, personal notes.
-- Biometric/device-credential lock, privacy audit/wipe flows, backup/data extraction disabled.
-- Broad JVM test coverage for pure logic/helpers (though live-path confidence is limited).
+**Proposed / Approved / In Progress / Implemented / CI Verified / Device Verified / Completed / Blocked / Out of Scope.**  
+CI is not device testing. Code presence is not verified functionality.
 
-## Key gaps / risks (verified)
+## Verified feature inventory (summary)
 
-### P0 - Correctness / reliability
+| Feature | Status | Evidence | Gap |
+|---|---|---|---|
+| Local `.litertlm` import/load/chat | Implemented; CI/Device Unverified | `ModelFileStore`, `InferenceEngineManager`, `MainActivity`, tests present | CI failing on head |
+| Backend GPU-preferred/CPU fallback | Implemented; CI/Device Unverified | `BackendPreference`, `InferenceEngineManager` | Device runtime unverified |
+| Answer-first prompting | Implemented; CI/Device Unverified | `AnswerDirective`, tests | CI/device |
+| Sessions/history | Implemented; CI/Device Unverified | `SessionStore`, `ConversationSession`, tests | Hand-rolled JSON; CI/device |
+| User memory fact store | Implemented; CI/Device Unverified | `UserMemoryStore`, `MemoryFactExtractor`, tests | Heuristic local memory, not semantic/verified |
+| Personal notes | Implemented; CI/Device Unverified | `PersonalNotesStore`, tests | CI/device |
+| Local RAG (BM25/chunk/citation) | Implemented; CI/Device Unverified | `DocumentChunker`, `OfflineKeywordIndex`, `LocalDocumentRetriever`, PDF/text bounds, tests | BM25 only; CI/device |
+| Local calculator | Implemented; CI/Device Unverified | `LocalCalculatorTool`, tests | CI/device |
+| System intent tools (confirmation-only) | Implemented; CI/Device Unverified | `SystemActionTools` (696 LOC), confirmation invariant, tests | Regex parsing risk; no auto-exec |
+| Android STT / Whisper WAV / Duplex prototype | Implemented/Prototype; CI/Device Unverified | `InAppAudioRecorder`, `WhisperNative`, `DuplexVoiceController`, tests | Device/provider dependent |
+| Biometric lock | Implemented; CI/Device Unverified | `BiometricLockManager`, tests | OS/device behavior |
+| Privacy audit / panic wipe | Implemented; CI/Device Unverified | `PrivacyAuditCenter`, tests | Device/storage behavior |
+| Backup/data extraction disabled | Implemented (config); CI/Device Unverified | Manifest + xml rules | — |
+| 4K-honest budgeting + overflow trim | Implemented; CI/Device Unverified | `ContextBudgetManager`, `MainUiState`, `RunawayGuard`, tests | Static defaults, not model-aware |
+| Model import sanity check | Implemented; CI/Device Unverified | `ModelFileStore` header/min-size, tests | No hash/manifest |
+| Lifecycle trim/idle unload | Implemented; CI/Device Unverified | `MainActivity` `onTrimMemory/onLowMemory`, idle unload | No FGS/RAM preflight/thermal |
+| Launcher icon + target/version bump | Implemented; CI Unverified | icon resources, manifest, build.gradle targetSdk35/v2 | CI packaging |
+| MainViewModel live MVVM | Code present, not wired | `MainViewModel` no refs in MainActivity | Dead-parallel/false confidence |
+| Instrumented/device tests | Missing | No `androidTest` | Proposed |
+| Multimodal end-to-end / model catalog / semantic memory / native tool-calling | Proposed / Out of scope | No implementation | Approval needed |
 
-1. **Small-context budget honesty (partially addressed in this pass)**
-   - Defaults were too large for 4K-class models. This pass set `TokenBudget` defaults to `4096/1024/384`, `MainUiState.MAX_ATTACHMENT_CHARS=6000`, `MAX_RESPONSE_TOKENS=1024`, `RunawayGuard.MAX_ANSWER_CHARS=12000`, warm-context reset threshold to 2800.
-   - `buildConversationalPrompt/buildGemmaTurnsPrompt` now reserve `max(estimatedSystemTokens, reservedSystemTokens)` so out-of-band system instructions cannot over-promise history space.
-   - `pruneHistory` now trims the newest turn if it alone exceeds available budget (instead of silently overflowing).
-   - **Remaining**: budgets are still static defaults, not model-capability-aware. Actual model context/runtime/device RAM can still be tighter.
+## Key findings
 
-2. **Conversation/session state bleed risk on multimodal/Omni models**
-   - Engine/conversation reuse is keyed by session/model/system/attachment hash. This is good for warm-cache reuse but must be validated against LiteRT-LM+model behavior, especially Omni/linear-attention state.
-   - Dependency bumped to `litertlm-android:0.20.0` in this pass; **device/CI validation required**.
-   - **Remaining**: add explicit device smoke test for cross-session state isolation and context overflow behavior.
+### Critical
+- **CI red on current head:** latest 3 branch runs failed; no CI-verified claim allowed.
+- **Git baseline hygiene risk:** local/remote divergence and dirty tree observed during audit (synced before doc correction).
 
-3. **Decoding quality / loop control**
-   - SamplerConfig defaults documented in `InferenceEngineManager`; wiring deferred pending LiteRT-LM 0.20.0 API verification in CI/device (initial wiring caused CI compile failure). `RunawayGuard` remains secondary.
-   - **Remaining**: expose sampling controls carefully; validate API compatibility with LiteRT-LM 0.20.0 in CI.
+### High
+- **Dead parallel architecture:** `MainViewModel` (1219 LOC) not wired into live `MainActivity` (4147 LOC); test confidence can be misleading.
+- **Static 4K budgeting:** safer defaults now, but not model-capability-aware; large attachments/models remain risky.
+- **LiteRT-LM 0.20.0 unverified:** dependency bumped; runtime/API compatibility not CI/device verified.
+- **Memory/thermal/process-death risk:** large model use on 4–6GB devices lacks RAM preflight/FGS/thermal strategy.
 
-4. **Lifecycle / memory pressure**
-   - Added `onTrimMemory`/`onLowMemory` handling and 120s idle engine unload in `MainActivity`.
-   - **Remaining**: foreground-service-backed generation for long runs, thermal throttling awareness, explicit RAM preflight before loading large Omni models.
+### Medium
+- **Speech/TTS provider caveat:** app has no INTERNET permission, but Android providers may use network depending on device/provider/config.
+- **Basic model integrity only:** min-size/header check, no SHA-256/manifest.
+- **Hand-rolled JSON persistence:** fragile over time despite tests.
+- **Regex intent parsing:** confirmation mitigates but misparse possible.
 
-5. **Model integrity**
-   - Added minimum-size and basic header/magic sanity checks in `ModelFileStore`.
-   - **Remaining**: model capability registry (context, modalities, license, SHA-256/hash pinning), corruption detection beyond header, user-visible model metadata.
+## Recommended next milestone
 
-### P1 - Architecture / verification
-
-- **God Activity / dead parallel path**: `MainActivity` is 4103 lines and owns UI+inference+state. `MainViewModel`/`MainUiState` have logic/tests but `MainViewModel` is not wired into `MainActivity` - false confidence risk.
-- **Test confidence gap**: 37 JVM unit test files; 0 instrumented tests; no lint gate; some tests validate dead or non-live paths.
-- **Release hygiene**: `applicationId` placeholder-like, `targetSdk 34`, `versionCode 1`, no launcher icon resources, no Gradle wrapper jar, R8/minify off, no signing config, no lint/detekt baseline.
-- **Docs drift**: README previously claimed Gemma 3 1B/text-only/old workflow details; roadmap/audit stale. Updated in this pass.
-- **Hand-rolled JSON** in stores increases maintenance/bug risk; acceptable short-term but should be hardened or migrated carefully.
-
-### P2 - Product gaps
-
-- **Omni underutilized**: no end-to-end image input, no model audio input, no model TTS path; Whisper/Android STT/TTS remain separate.
-- **Model UX**: manual sideload only; no catalog/download/resume/hash/license/benchmark/RAM preflight.
-- **Agent/actions**: action extraction is limited; no native tool-calling schema, no action log/undo surface beyond confirmations.
-- **Retrieval quality**: BM25 only; no semantic embeddings/vector index.
-- **Localization/accessibility/release**: no `strings.xml` localization strategy, no i18n, no instrumented accessibility checks.
-
-## Changes made in this pass
-
-- Bumped LiteRT-LM dependency to `0.20.0`.
-- SamplerConfig constants added; ConversationConfig wiring deferred pending 0.20.0 API verification.
-- Made context budgeting honest for 4K-class models: defaults `4096/1024/384`, attachment cap `6000`, response cap `1024`, runaway char cap `12000`, warm reset `2800`.
-- Fixed budget reservation when system instruction is out-of-band.
-- Trim newest turn when it alone exceeds available budget.
-- Added basic `.litertlm` import sanity checks (min size/header).
-- Added `onTrimMemory`/`onLowMemory` handling and 120s idle engine unload.
-- Updated unit tests for new constants/behaviors (`MainUiStateTest`, `ModelFileStoreTest`, `ContextBudgetManagerTest`).
-- Refreshed README/roadmap/audit docs.
-
-## Validation status
-
-- **Not run in this environment**: `gradle --no-daemon testDebugUnitTest assembleDebug lintDebug`, instrumented/device tests.
-- CI workflow should be used as the source of truth for build/test execution.
+**M1 — Trustworthy Green Baseline:** clean git state, CI green, roadmap/audit taxonomy corrected, CI failure root cause recorded. No new feature scope until M1 exit criteria met. See `DEVELOPMENT_ROADMAP.md`.

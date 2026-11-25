@@ -430,11 +430,11 @@ class MainViewModel internal constructor(
                 val truncated = content.toString().take(MainUiState.MAX_ATTACHMENT_CHARS)
                 updateState {
                     it.copy(
-                        attachedContext = (newContext = truncated).take(MainUiState.MAX_ATTACHMENT_CHARS),
-                        attachedNames = newNames = names,
+                        attachedContext = truncated,
+                        attachedNames = names,
                         attachmentPreviewExpanded = false,
                         transcriptReviewPending = false,
-                        statusMessage = status = "Text attached. Review the preview, then add your question.",
+                        statusMessage = "Text attached. Review the preview, then add your question.",
                         errorMessage = null,
                     )
                 }
@@ -658,11 +658,18 @@ class MainViewModel internal constructor(
     }
 
     fun clearAttachments() {
-        updateState { it.copy(attachedFileNames = emptyList(), attachedContext = "", statusMessage = "Attached files cleared.") }
+        updateState { it.copy(
+                attachedContext = "",
+                attachedNames = emptyList(),
+                attachmentPreviewExpanded = false,
+                transcriptReviewPending = false,
+                attachmentGeneration = it.attachmentGeneration + 1,
+                statusMessage = "Attachment removed.",
+            ) }
     }
 
     fun toggleAttachmentPreview() {
-        updateState { it.copy(isAttachmentPreviewExpanded = !it.isAttachmentPreviewExpanded) }
+        updateState { it.copy(attachmentPreviewExpanded = !it.attachmentPreviewExpanded) }
     }
 
     fun confirmTranscriptReview() {
@@ -761,7 +768,7 @@ class MainViewModel internal constructor(
                         updateState { it.copy(statusMessage = "Answer needs more detail. Refining on this device…") }
                     }
 
-                    val promptBuild = promptContext.composePrompt(
+                    val promptBuild = promptContext.answerPrompt(
                         task = task,
                         attachment = contextToInject,
                         intent = intent,

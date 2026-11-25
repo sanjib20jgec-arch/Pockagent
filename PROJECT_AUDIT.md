@@ -47,7 +47,7 @@ CI is not device testing. Code presence is not verified functionality.
 ## Key findings
 
 ### Critical
-- **CI red on current head (root causes being fixed iteratively):** conflict markers in UserMemoryStore/PersonalNotesStore removed (5372b14); InferenceEngineManager.kt constructor corruption from sampler-constants edit fixed; further CI errors being diagnosed via CI_ERRORS.md artifact pushed to branch.
+- **CI green on current head (M1 baseline):** GitHub Actions run https://github.com/sanjib20jgec-arch/Pockagent/actions/runs/45588352148 (commit 3c265a5) passed `source bundle check`, `testDebugUnitTest`, and `assembleDebug`. This is CI verification only; instrumented/device/runtime claims remain unverified.
 - **Git baseline hygiene risk:** local/remote divergence and dirty tree observed during audit (synced before doc correction).
 
 ### High

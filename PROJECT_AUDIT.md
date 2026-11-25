@@ -39,7 +39,7 @@ _This is a code-grounded audit snapshot. It replaces stale earlier claims where 
    - **Remaining**: add explicit device smoke test for cross-session state isolation and context overflow behavior.
 
 3. **Decoding quality / loop control**
-   - Added conservative `SamplerConfig` (topK=40, topP=0.95, temperature=0.8) in conversation creation (best-effort, guarded). `RunawayGuard` remains secondary.
+   - SamplerConfig defaults documented in `InferenceEngineManager`; wiring deferred pending LiteRT-LM 0.20.0 API verification in CI/device (initial wiring caused CI compile failure). `RunawayGuard` remains secondary.
    - **Remaining**: expose sampling controls carefully; validate API compatibility with LiteRT-LM 0.20.0 in CI.
 
 4. **Lifecycle / memory pressure**
@@ -69,7 +69,7 @@ _This is a code-grounded audit snapshot. It replaces stale earlier claims where 
 ## Changes made in this pass
 
 - Bumped LiteRT-LM dependency to `0.20.0`.
-- Added conservative `SamplerConfig` to conversation creation.
+- SamplerConfig constants added; ConversationConfig wiring deferred pending 0.20.0 API verification.
 - Made context budgeting honest for 4K-class models: defaults `4096/1024/384`, attachment cap `6000`, response cap `1024`, runaway char cap `12000`, warm reset `2800`.
 - Fixed budget reservation when system instruction is out-of-band.
 - Trim newest turn when it alone exceeds available budget.

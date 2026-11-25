@@ -68,16 +68,10 @@ class InferenceEngineManager<T : AutoCloseable>(
     private val conversationFactory: (T, String) -> ConversationHandle = { active, instruction ->
         val litertEngine = active as? com.google.ai.edge.litertlm.Engine
             ?: error("Conversation caching requires a real LiteRT-LM Engine.")
-        val sampler = try {
-            com.google.ai.edge.litertlm.SamplerConfig(
-                topK = DEFAULT_TOP_K,
-                topP = DEFAULT_TOP_P.toDouble(),
-                temperature = DEFAULT_TEMPERATURE.toDouble(),
-            )
-        } catch (_: Throwable) { null }
+        // NOTE: SamplerConfig wiring is version-sensitive across LiteRT-LM releases.
+        // Keep defaults documented above; wire explicitly once API is verified in CI/device.
         val config = com.google.ai.edge.litertlm.ConversationConfig(
             systemInstruction = com.google.ai.edge.litertlm.Contents.of(instruction),
-            samplerConfig = sampler,
         )
         val conversation = litertEngine.createConversation(config)
         object : ConversationHandle {

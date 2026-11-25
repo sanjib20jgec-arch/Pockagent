@@ -28,7 +28,7 @@ _Updated: 2026-11-24. Grounded in current repo state; items marked [x] were addr
 
 ### 1.2 Engine/session correctness
 - [x] Bump LiteRT-LM to `0.20.0`.
-- [x] Add conservative `SamplerConfig` (topK/topP/temperature) for small-model stability.
+- [~] Add conservative `SamplerConfig` (topK/topP/temperature) for small-model stability; constants added, ConversationConfig wiring deferred pending 0.20.0 API verification.
 - [~] Conversation cache keyed by session/model/system/attachment hash.
 - [ ] Verify cross-session state isolation on LiteRT-LM 0.20.0 with Omni model on device.
 - [ ] Add explicit "new chat = clean state" integration test.

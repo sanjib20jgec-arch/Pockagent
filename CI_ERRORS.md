@@ -2,40 +2,28 @@
 
 ## kotlin e: lines
 ```
-56:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:5:30 Conflicting import: imported name 'FragmentActivity' is ambiguous.
-57:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:7:30 Conflicting import: imported name 'FragmentActivity' is ambiguous.
-58:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:296:57 Unresolved reference 'ActivityManager'.
-59:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:297:20 Unresolved reference 'ActivityManager'.
-60:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:298:12 Unresolved reference 'getMemoryInfo'.
-61:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:525:9 Unresolved reference 'outputCard'.
-62:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:536:13 Unresolved reference 'outputCard'.
-63:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:537:13 Unresolved reference 'answerText'.
-64:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:539:13 Unresolved reference 'citationsContainer'.
-65:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:540:13 Unresolved reference 'citationsContainer'.
-66:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:542:13 Unresolved reference 'systemActionContainer'.
-67:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:543:13 Unresolved reference 'systemActionContainer'.
-68:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:545:19 Unresolved reference 'refineButton'.
-69:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:545:47 Unresolved reference 'refineButton'.
-70:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:548:9 Unresolved reference 'outputCard'.
-71:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:549:9 Unresolved reference 'stopGeneratingButton'.
-72:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:559:9 Unresolved reference 'outputCard'.
-73:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:559:28 Unresolved reference 'stopGeneratingButton'.
+55:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:5:30 Conflicting import: imported name 'FragmentActivity' is ambiguous.
+56:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:7:30 Conflicting import: imported name 'FragmentActivity' is ambiguous.
+57:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:303:57 Unresolved reference 'ActivityManager'.
+58:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:304:20 Unresolved reference 'ActivityManager'.
+59:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:305:12 Unresolved reference 'getMemoryInfo'.
+60:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:544:13 Unresolved reference 'answerText'.
 ```
 
 ## first failure context
 ```
-e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:540:13 Unresolved reference 'citationsContainer'.
-e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:542:13 Unresolved reference 'systemActionContainer'.
-e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:543:13 Unresolved reference 'systemActionContainer'.
-e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:545:19 Unresolved reference 'refineButton'.
-e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:545:47 Unresolved reference 'refineButton'.
-e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:548:9 Unresolved reference 'outputCard'.
-e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:549:9 Unresolved reference 'stopGeneratingButton'.
-e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:559:9 Unresolved reference 'outputCard'.
-e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:559:28 Unresolved reference 'stopGeneratingButton'.
+> Task :app:configureCMakeDebug[x86_64]
+> Task :app:compileDebugKotlin
+e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:5:30 Conflicting import: imported name 'FragmentActivity' is ambiguous.
+e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:7:30 Conflicting import: imported name 'FragmentActivity' is ambiguous.
+e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:303:57 Unresolved reference 'ActivityManager'.
+e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:304:20 Unresolved reference 'ActivityManager'.
+e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:305:12 Unresolved reference 'getMemoryInfo'.
+e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:544:13 Unresolved reference 'answerText'.
 
+> Task :app:compileDebugKotlin FAILED
 > Task :app:buildCMakeDebug[x86_64]
-gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_2-1795598784051.json
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_2-1795599159510.json
 
 [Incubating] Problems report is available at: file:///home/runner/work/Pockagent/Pockagent/build/reports/problems/problems-report.html
 

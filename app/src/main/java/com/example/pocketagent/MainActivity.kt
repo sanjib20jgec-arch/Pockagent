@@ -3464,38 +3464,6 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         super.onStop()
     }
 
-    private fun buildLockOverlay(): LinearLayout {
-        return LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            setBackgroundColor(if (isDarkTheme) 0xF2121816.toInt() else 0xF2F4F7F6.toInt())
-            isClickable = true
-            isFocusable = true
-            visibility = View.GONE
-            setPadding(dp(24), dp(24), dp(24), dp(24))
-
-            val card = LinearLayout(context).apply {
-                orientation = LinearLayout.VERTICAL
-                background = shape(SURFACE, 20, BORDER)
-                setPadding(dp(24), dp(24), dp(24), dp(24))
-            }
-            card.addView(text("PocketAgent is locked", 22f, INK).apply {
-                typeface = Typeface.DEFAULT_BOLD
-            })
-            card.addView(text("Authenticate to access your local conversations, memories, and notes.", 14f, MUTED).apply {
-                setPadding(0, dp(10), 0, dp(18))
-            })
-            card.addView(pillButton("Unlock", accessibilityLabel = "Unlock PocketAgent") {
-                promptBiometricUnlock()
-            }, LinearLayout.LayoutParams(-1, -2))
-            addView(card, LinearLayout.LayoutParams(-1, -2))
-        }
-    }
-
-    private fun updateLockOverlay() {
-        if (!::lockOverlay.isInitialized) return
-        lockOverlay.visibility = if (biometricLockManager.isAppLocked) View.VISIBLE else View.GONE
-    }
 
     private fun promptBiometricUnlock() {
         if (!::lockOverlay.isInitialized) return

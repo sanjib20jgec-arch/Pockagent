@@ -8,6 +8,7 @@ import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption.ATOMIC_MOVE
 import java.nio.file.StandardCopyOption.REPLACE_EXISTING
+import java.util.Locale
 
 /** Copies a selected model transactionally, preserving the last working file if import fails. */
 internal class ModelFileStore(
@@ -24,8 +25,13 @@ internal class ModelFileStore(
         require(reservedFreeSpaceBytes >= 0) { "Reserved free space cannot be negative." }
     }
 
+    @JvmOverloads
     @Throws(IOException::class)
-    fun importModel(input: InputStream): File {
+    fun importModel(
+        input: InputStream,
+        expectedBytes: Long? = null,
+        onProgress: ((copiedBytes: Long, totalBytes: Long?) -> Unit)? = null,
+    ): File {
         if (!directory.exists() && !directory.mkdirs()) {
             throw IOException("Could not create private model storage.")
         }
@@ -43,10 +49,16 @@ internal class ModelFileStore(
             maxBytes
         }
 
+        val normalizedExpectedBytes = expectedBytes?.takeIf { it > 0L }
+        if (normalizedExpectedBytes != null && normalizedExpectedBytes > copyLimit) {
+            throw IOException(sizeLimitMessage(0L, copyLimit, maxBytes, normalizedExpectedBytes))
+        }
+
         var committed = false
         try {
             var copied = 0L
-            val magic = ByteArray(4)
+            var lastReported = 0L
+            val magic = ByteArray(HEADER_PEEK_BYTES)
             var magicRead = 0
             FileOutputStream(temporary).use { output ->
                 val buffer = ByteArray(COPY_BUFFER_SIZE)
@@ -56,21 +68,33 @@ internal class ModelFileStore(
                     if (count == 0) {
                         val singleByte = input.read()
                         if (singleByte < 0) break
-                        if (copied >= copyLimit) throw IOException(sizeLimitMessage(copied, copyLimit, maxBytes))
+                        if (copied >= copyLimit) {
+                            val needed = if (copied < Long.MAX_VALUE) copied + 1L else Long.MAX_VALUE
+                            throw IOException(sizeLimitMessage(needed, copyLimit, maxBytes, normalizedExpectedBytes))
+                        }
                         output.write(singleByte)
-                        if (magicRead < magic.size) magic[magicRead] = singleByte.toByte()
-                        magicRead++
+                        if (magicRead < magic.size) {
+                            magic[magicRead] = singleByte.toByte()
+                            magicRead++
+                        }
                         copied++
-                        continue
+                    } else {
+                        if (count.toLong() > copyLimit - copied) {
+                            val needed = if (copied <= Long.MAX_VALUE - count) copied + count else Long.MAX_VALUE
+                            throw IOException(sizeLimitMessage(needed, copyLimit, maxBytes, normalizedExpectedBytes))
+                        }
+                        output.write(buffer, 0, count)
+                        if (magicRead < magic.size) {
+                            val toCopy = minOf(count, magic.size - magicRead)
+                            System.arraycopy(buffer, 0, magic, magicRead, toCopy)
+                            magicRead += toCopy
+                        }
+                        copied += count
                     }
-                    if (count.toLong() > copyLimit - copied) throw IOException(sizeLimitMessage(copied, copyLimit, maxBytes))
-                    output.write(buffer, 0, count)
-                    if (magicRead < magic.size) {
-                        val toCopy = minOf(count, magic.size - magicRead)
-                        System.arraycopy(buffer, 0, magic, magicRead, toCopy)
-                        magicRead += toCopy
+                    if (onProgress != null && copied - lastReported >= PROGRESS_INTERVAL_BYTES) {
+                        lastReported = copied
+                        onProgress.invoke(copied, normalizedExpectedBytes)
                     }
-                    copied += count
                 }
                 if (copied == 0L) throw IOException("The selected model file is empty.")
                 if (copied < minBytes) {
@@ -84,6 +108,7 @@ internal class ModelFileStore(
 
             replaceCurrentModel(temporary, modelFile)
             committed = true
+            onProgress?.invoke(copied, normalizedExpectedBytes ?: copied)
             return modelFile
         } finally {
             if (!committed && temporary.exists()) temporary.delete()
@@ -119,24 +144,48 @@ internal class ModelFileStore(
         }
     }
 
-    private fun sizeLimitMessage(copied: Long, copyLimit: Long, maxBytes: Long): String {
-        val copiedMb = copied / (1024 * 1024)
+    private fun sizeLimitMessage(
+        neededOrCopiedBytes: Long,
+        copyLimit: Long,
+        maxBytes: Long,
+        expectedBytes: Long?,
+    ): String {
+        val neededBytes = expectedBytes ?: neededOrCopiedBytes
         return if (copyLimit < maxBytes) {
-            "Not enough free storage to import this model (copied ${copiedMb} MB before limit). Free up space and try again."
+            val existingNote = if (modelFile.exists() && modelFile.length() > 0L) {
+                " Remove the current stored model first to free ${formatStorageSize(modelFile.length())}."
+            } else {
+                ""
+            }
+            "Not enough free storage (need ${formatStorageSize(neededBytes)}, only ${formatStorageSize(copyLimit)} safely available).$existingNote"
         } else {
-            "Model exceeds the ${maxBytes / (1024 * 1024 * 1024)} GB import limit. Choose a smaller compatible .litertlm model."
+            val limitLabel = if (maxBytes >= 1024L * 1024 * 1024 && maxBytes % (1024L * 1024 * 1024) == 0L) {
+                "${maxBytes / (1024 * 1024 * 1024)} GB"
+            } else {
+                formatStorageSize(maxBytes)
+            }
+            "Model exceeds the $limitLabel import limit. Choose a smaller compatible .litertlm model."
         }
     }
 
+    private fun formatStorageSize(bytes: Long): String = when {
+        bytes >= 1024L * 1024 * 1024 -> String.format(Locale.US, "%.1f GB", bytes.toDouble() / (1024 * 1024 * 1024))
+        bytes >= 1024L * 1024 -> "${bytes / (1024 * 1024)} MB"
+        bytes >= 1024L -> "${bytes / 1024} KB"
+        else -> "$bytes B"
+    }
+
     /** Removes the stored model file and any partial/backup artifacts from private storage. */
-    fun removeStoredModel() {
+    fun removeStoredModel(): Boolean {
+        var ok = true
         listOf(
             modelFile,
             File(directory, "$MODEL_FILE_NAME.part"),
             File(directory, "$MODEL_FILE_NAME.backup"),
         ).forEach { f ->
-            if (f.exists()) f.delete()
+            if (f.exists() && !f.delete()) ok = false
         }
+        return ok
     }
 
     companion object {
@@ -157,25 +206,26 @@ internal class ModelFileStore(
         const val DEFAULT_MAX_MODEL_BYTES = 5L * 1024 * 1024 * 1024
         const val DEFAULT_RESERVED_FREE_SPACE_BYTES = 32L * 1024 * 1024
         const val MIN_MODEL_BYTES = 1L * 1024 * 1024
-        private const val COPY_BUFFER_SIZE = 64 * 1024
+        private const val COPY_BUFFER_SIZE = 256 * 1024
+        private const val PROGRESS_INTERVAL_BYTES = 8L * 1024 * 1024
+        private const val HEADER_PEEK_BYTES = 64
 
         /**
          * Basic sanity check for .litertlm files. Current LiteRT-LM bundles are commonly
-         * zip-based (PK header) or binary flatbuffer/TFLite-like files. We reject obvious
-         * text/empty/invalid files but avoid over-constraining unknown valid variants.
+         * zip-based (PK header) or binary flatbuffer/TFLite-like files. Inspecting up to 64
+         * header bytes avoids rejecting valid binary models whose first 4 bytes are printable
+         * ASCII (e.g. "TFL3" or "LTLM") while still rejecting pure ASCII text files.
          */
         internal fun looksLikeLitertLm(header: ByteArray, read: Int): Boolean {
-            if (read < 4) return false
+            val inspectCount = minOf(read, header.size)
+            if (inspectCount < 4) return false
             val b0 = header[0].toInt() and 0xff
             val b1 = header[1].toInt() and 0xff
-            val b2 = header[2].toInt() and 0xff
-            val b3 = header[3].toInt() and 0xff
             // ZIP / PK
             if (b0 == 0x50 && b1 == 0x4B) return true
-            // FlatBuffer/TFLite often has identifier at bytes 4-7, but we only have 4 bytes;
-            // accept common binary headers and reject clear text.
-            val isAsciiText = header.take(read).all { b ->
-                val v = b.toInt() and 0xff
+            // Accept binary headers (including FlatBuffer/TFLite identifiers) and reject pure ASCII text.
+            val isAsciiText = (0 until inspectCount).all { index ->
+                val v = header[index].toInt() and 0xff
                 v == 0x09 || v == 0x0A || v == 0x0D || v in 0x20..0x7E
             }
             return !isAsciiText

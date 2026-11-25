@@ -228,22 +228,23 @@ class AnswerPromptComposer(
     private val budget: ContextBudgetManager = ContextBudgetManager(),
 ) {
 
+    /** Built prompt text and context-budget accounting returned by [answerPrompt]. */
+    data class PromptBuildResult(val prompt: String, val truncatedCount: Int, val estimatedTotalTokens: Int = 0)
+
     /**
      * @param task the user's current request.
      * @param attachment optional untrusted reference text, already bounded.
      * @param intent answer shape for this request.
      * @param isRetry true for the single corrective retry after a dodged answer.
      * @param history earlier turns of the conversation, oldest first.
+     * @param calculation verified offline arithmetic, when the request contained a calculation.
      */
-    data class PromptBuildResult(val prompt: String, val truncatedCount: Int, val estimatedTotalTokens: Int = 0)
-
     fun answerPrompt(
         task: String,
         attachment: String,
         intent: AnswerDirective.Intent,
         isRetry: Boolean,
         history: List<ChatMessage>,
-        /** Verified offline arithmetic, when the request contained a calculation. */
         calculation: LocalCalculatorTool.CalculationResult? = null,
     ): PromptBuildResult {
         val baseQuestion = task.ifBlank { "Use the attached text to answer my request." }

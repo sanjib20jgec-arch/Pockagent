@@ -161,4 +161,55 @@ class AnswerPromptComposerTest {
         assertTrue(built.truncatedCount > 0)
         assertTrue(built.prompt.contains(question))
     }
+
+    @Test
+    fun integratesMainUiStateResponseAndAttachmentBudgetsWithContextBudgetManager() {
+        assertEquals(2048, MainUiState.MAX_RESPONSE_TOKENS)
+        assertEquals(
+            MainUiState.MAX_RESPONSE_TOKENS,
+            ContextBudgetManager.TokenBudget.DEFAULT_MAX_RESPONSE_TOKENS,
+        )
+
+        val tokenBudget = ContextBudgetManager.TokenBudget(
+            maxResponseTokens = MainUiState.MAX_RESPONSE_TOKENS,
+        )
+        val boundedComposer = AnswerPromptComposer(ContextBudgetManager(tokenBudget))
+        val maxAttachment = "A".repeat(MainUiState.MAX_ATTACHMENT_CHARS)
+
+        val built = boundedComposer.answerPrompt(
+            task = "Summarise the attached notes.",
+            attachment = maxAttachment,
+            intent = AnswerDirective.Intent.FACT,
+            isRetry = false,
+            history = emptyList(),
+        )
+
+        assertTrue(built.estimatedTotalTokens > 0)
+        assertTrue(
+            "Prompt tokens (${built.estimatedTotalTokens}) must stay within maxInputTokens (${tokenBudget.maxInputTokens})",
+            built.estimatedTotalTokens <= tokenBudget.maxInputTokens,
+        )
+        assertTrue(
+            "Prompt plus 2048 response tokens must fit within ${tokenBudget.maxContextTokens}",
+            built.estimatedTotalTokens + MainUiState.MAX_RESPONSE_TOKENS <= tokenBudget.maxContextTokens,
+        )
+        assertTrue(built.prompt.contains(ContextBudgetManager.ATTACHMENT_START_TAG))
+        assertTrue(built.prompt.contains(ContextBudgetManager.ATTACHMENT_END_TAG))
+    }
+
+    @Test
+    fun injectsOfflineCalculationVerificationWhenProvided() {
+        val calc = LocalCalculatorTool.tryEvaluate("25 * 4 + 10")!!
+        val built = composer.answerPrompt(
+            task = "25 * 4 + 10",
+            attachment = "",
+            intent = AnswerDirective.Intent.FACT,
+            isRetry = false,
+            history = emptyList(),
+            calculation = calc,
+        )
+
+        assertTrue(built.prompt.contains("Offline Calculation Verification:"))
+        assertTrue(built.prompt.contains("25 * 4 + 10 = 110"))
+    }
 }

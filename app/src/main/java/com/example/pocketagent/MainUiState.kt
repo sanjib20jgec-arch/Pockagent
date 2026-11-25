@@ -5,7 +5,7 @@ package com.example.pocketagent
  *
  * Invariants:
  * - 100% offline, zero cloud, zero telemetry.
- * - Bounded inputs: attachment character limit is configurable by build constant (default 32,000 characters).
+ * - Bounded inputs: attachment character limit is configurable by build constant (default 6,000 characters).
  * - Safe rollback: previous model retained on failure.
  * - Manual-guidance only: no automated phone/screen control.
  */

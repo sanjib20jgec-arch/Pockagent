@@ -1,7 +1,6 @@
 package com.example.pocketagent
 
 import android.Manifest
-import android.app.Activity
 import android.app.ActivityManager
 import android.app.AlertDialog
 import androidx.fragment.app.FragmentActivity
@@ -78,38 +77,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         private const val WARM_CONTEXT_RESET_THRESHOLD = 2800
         private const val IDLE_ENGINE_UNLOAD_MS = 120_000L
         private val SYSTEM_INSTRUCTION: String get() = AnswerDirective.SYSTEM_INSTRUCTION
-        private var BG = 0xFFF4F7F6.toInt()
-        private var INK = 0xFF162D2A.toInt()
-        private var MUTED = 0xFF5F6F6A.toInt()
-        private var TEAL = 0xFF126B60.toInt()
-        private var MINT = 0xFFE2F3ED.toInt()
-        private var BORDER = 0xFFE3EBE8.toInt()
-        private var SURFACE = Color.WHITE
-        private var STOP_CRIMSON = 0xFFB91C1C.toInt()
-        private var isDarkTheme = false
-
-        private fun applyTheme(dark: Boolean) {
-            isDarkTheme = dark
-            if (dark) {
-                BG = 0xFF121816.toInt()
-                INK = 0xFFE8F0EE.toInt()
-                MUTED = 0xFF9FB0AB.toInt()
-                TEAL = 0xFF4DB6A6.toInt()
-                MINT = 0xFF1E332F.toInt()
-                BORDER = 0xFF2A3D39.toInt()
-                SURFACE = 0xFF1A2421.toInt()
-                STOP_CRIMSON = 0xFFEF5350.toInt()
-            } else {
-                BG = 0xFFF4F7F6.toInt()
-                INK = 0xFF162D2A.toInt()
-                MUTED = 0xFF5F6F6A.toInt()
-                TEAL = 0xFF126B60.toInt()
-                MINT = 0xFFE2F3ED.toInt()
-                BORDER = 0xFFE3EBE8.toInt()
-                SURFACE = Color.WHITE
-                STOP_CRIMSON = 0xFFB91C1C.toInt()
-            }
-        }
+        private const val WHITE = Color.WHITE
     }
 
     private lateinit var palette: UiPalette
@@ -155,14 +123,6 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     // Sticky bottom composer, multi-turn chat thread, and collapsible chrome.
     private lateinit var chatScroll: ScrollView
     private lateinit var chatCanvas: LinearLayout
-
-    // Legacy output-card views (kept for compatibility with older UI paths)
-    private lateinit var outputCard: LinearLayout
-    private lateinit var answerText: TextView
-    private lateinit var stopGeneratingButton: android.widget.Button
-    private lateinit var citationsContainer: LinearLayout
-    private lateinit var systemActionContainer: LinearLayout
-    private lateinit var refineButton: android.widget.Button
     private lateinit var chatThreadContainer: LinearLayout
     private lateinit var jumpToBottomButton: Button
     private lateinit var heroCard: LinearLayout
@@ -255,19 +215,12 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     @Volatile private var activeStreamLatch: CountDownLatch? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        val nightMode = resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK
-        applyTheme(nightMode == android.content.res.Configuration.UI_MODE_NIGHT_YES)
+        val themeMode = ThemeMode.fromString(settingsPrefs.getString(UiThemeResolver.PREF_THEME_MODE, null))
+        val systemNightActive = UiThemeResolver.isDarkFromConfiguration(resources.configuration.uiMode)
+        palette = UiThemeResolver.paletteFor(themeMode, systemNightActive)
         super.onCreate(savedInstanceState)
         pendingAnswerToSave = savedInstanceState?.getString(STATE_PENDING_ANSWER_SAVE)
-        window.statusBarColor = BG
-        window.navigationBarColor = BG
-        var flags = window.decorView.systemUiVisibility
-        flags = if (isDarkTheme) {
-            flags and View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR.inv() and View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR.inv()
-        } else {
-            flags or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
-        }
-        window.decorView.systemUiVisibility = flags
+        applyWindowBars(this, palette)
         tts = TextToSpeech(this, this)
 
         var savedBackend = BackendPreference.fromString(settingsPrefs.getString(PREF_BACKEND_MODE, null))
@@ -371,7 +324,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             textSize = 17f
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
-            setTextColor(Color.WHITE)
+            setTextColor(WHITE)
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             background = shape(palette.teal, 12)
             layoutParams = LinearLayout.LayoutParams(dp(34), dp(34))
@@ -452,7 +405,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             context = this,
             text = "🔒 100% Offline · Zero Cloud",
             sizeSp = 11.5f,
-            color = Color.WHITE,
+            color = WHITE,
             bold = true,
         ).apply {
             background = roundedShape(0x29FFFFFF, dp(12).toFloat())
@@ -462,7 +415,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             }
         }
         heroCard.addView(trustBadge)
-        heroCard.addView(text("Your pocket assistant", 21f, Color.WHITE, true))
+        heroCard.addView(text("Your pocket assistant", 21f, WHITE, true))
         heroCard.addView(
             text(
                 "Private on-device AI. Ask anything, analyze PDFs, or speak hands-free with zero cloud.",
@@ -479,7 +432,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             setAllCaps(false)
             textSize = 13.5f
             typeface = Typeface.create("sans-serif", Typeface.BOLD)
-            setTextColor(Color.WHITE)
+            setTextColor(WHITE)
             gravity = Gravity.CENTER
             minHeight = dp(48)
             minimumHeight = dp(48)
@@ -530,41 +483,8 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         quickChips = quickScroll
         chatCanvas.addView(quickScroll, marginBottom(10))
 
-        outputCard = column().apply {
-            visibility = View.GONE
-            background = shape(SURFACE, 20, BORDER)
-            setPadding(dp(16), dp(14), dp(16), dp(16))
-        }
-        val outputHeader = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        val outputTitle = column()
-        outputTitle.addView(text("Answer", 18f, INK, true))
-        outputTitle.addView(text("Generated locally · runs offline", 11f, MUTED).apply { setPadding(0, dp(3), 0, 0) })
-        outputHeader.addView(outputTitle, LinearLayout.LayoutParams(0, -2, 1f))
-        outputHeader.addView(textButton("Clear", accessibilityLabel = "Clear answer") {
-            outputCard.visibility = View.GONE
-            answerText.text = ""
-            answerIsComplete = false
-            citationsContainer.removeAllViews()
-            citationsContainer.visibility = View.GONE
-            currentCitations = emptyList()
-            systemActionContainer.removeAllViews()
-            systemActionContainer.visibility = View.GONE
-            maybeShowRefineAffordance = false
-            if (::refineButton.isInitialized) refineButton.visibility = View.GONE
-            syncComposerState()
-        })
-        outputCard.addView(outputHeader)
-        stopGeneratingButton = pillButton("■ Stop Generating", accessibilityLabel = "Stop in-progress generation") {
-            isGeneratingCancelled.set(true)
-            suggestButton.isEnabled = true
-            updateStatus("Stopping generation…")
-        }.apply {
-            visibility = View.GONE
-            background = shape(0xFFC62828.toInt(), 18)
-            setTextColor(Color.WHITE)
-            layoutParams = LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6); bottomMargin = dp(6) }
-        }
-        outputCard.addView(stopGeneratingButton)
+        chatThreadContainer = column()
+        chatCanvas.addView(chatThreadContainer, LinearLayout.LayoutParams(-1, -2))
 
         chatCanvas.addView(
             text(
@@ -622,7 +542,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             }
         }
         composerCard = column().apply {
-            background = shape(SURFACE, 20, BORDER)
+            background = shape(palette.surface, 20, palette.border)
             elevation = dp(6).toFloat()
             setPadding(dp(12), dp(10), dp(12), dp(10))
         }
@@ -1174,7 +1094,18 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 val labelForProgress = cleanName ?: "model"
                 mainHandler.post { updateStatus("Importing $labelForProgress into private storage…") }
                 val target = contentResolver.openInputStream(uri)?.use { input ->
-                    ModelFileStore(filesDir).importModel(input)
+                    ModelFileStore(filesDir).importModel(
+                        input = input,
+                        expectedBytes = expectedBytes,
+                    ) { copied, total ->
+                        val progressMsg = if (total != null && total > 0L) {
+                            val pct = ((copied * 100L) / total).coerceIn(0L, 100L)
+                            "Importing $labelForProgress… ${formatStorageSize(copied)} / ${formatStorageSize(total)} ($pct%)"
+                        } else {
+                            "Importing $labelForProgress… ${formatStorageSize(copied)}"
+                        }
+                        mainHandler.post { updateStatus(progressMsg) }
+                    }
                 } ?: error("Could not open the selected file.")
 
                 settingsPrefs.edit().apply {
@@ -1835,8 +1766,8 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         suggestButton.isEnabled = true
         suggestButton.text = "Stop"
         suggestButton.contentDescription = "Stop generating answer"
-        suggestButton.background = ripple(shape(STOP_CRIMSON, 16), 0x33FFFFFF)
-        suggestButton.setTextColor(Color.WHITE)
+        suggestButton.background = ripple(shape(palette.stopCrimson, 16), palette.rippleOnAccent)
+        suggestButton.setTextColor(WHITE)
         suggestButton.setOnClickListener { stopActiveGeneration() }
         syncComposerState()
     }
@@ -1853,8 +1784,8 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         )
         suggestButton.text = "Ask"
         suggestButton.contentDescription = "Send your question and get an answer"
-        suggestButton.background = ripple(gradient, 0x33FFFFFF)
-        suggestButton.setTextColor(Color.WHITE)
+        suggestButton.background = rippleDrawable(gradient, palette.rippleOnAccent)
+        suggestButton.setTextColor(WHITE)
         suggestButton.setOnClickListener { suggestSteps() }
         syncComposerState()
         scheduleIdleEngineUnload()
@@ -1863,11 +1794,19 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     private fun scheduleIdleEngineUnload() {
         idleUnloadRunnable?.let { mainHandler.removeCallbacks(it) }
         val runnable = Runnable {
-            if (!isGeneratingUi && engineManager.engine != null) {
-                engineManager.invalidateConversation("idle unload")
-                inferenceExecutor.execute { engineManager.close() }
-                updateStatus("Model unloaded after inactivity to free memory. It will reload on next request.")
-                refreshModelStatus()
+            if (!isGeneratingUi && !engineManager.isGenerationActive && engineManager.engine != null) {
+                inferenceExecutor.execute {
+                    if (!isGeneratingUi && !engineManager.isGenerationActive && engineManager.engine != null) {
+                        engineManager.invalidateConversation("idle unload")
+                        engineManager.close()
+                        mainHandler.post {
+                            if (!isDestroyed) {
+                                updateStatus("Model unloaded after inactivity to free memory. It will reload on next request.")
+                                refreshModelStatus()
+                            }
+                        }
+                    }
+                }
             }
         }
         idleUnloadRunnable = runnable
@@ -2095,10 +2034,24 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             return
         }
         // Assign session ID before building the cache key so Turn 1 and Turn 2 share the warm KV cache.
-        val activeSession = currentSession
-            ?: ConversationSession.createWithInitialPrompt(task.ifBlank { "Conversation" }).also {
-                currentSession = it
+        val existingSession = currentSession
+        val activeSession = when {
+            existingSession == null ->
+                ConversationSession.createWithInitialPrompt(task.ifBlank { "Conversation" }).also {
+                    currentSession = it
+                }
+            existingSession.messages.isEmpty() && existingSession.title == "New Conversation" -> {
+                val derivedTitle = ConversationSession.deriveTitle(task)
+                if (derivedTitle != existingSession.title) {
+                    existingSession.withTitle(derivedTitle).also {
+                        currentSession = it
+                    }
+                } else {
+                    existingSession
+                }
             }
+            else -> existingSession
+        }
         lastPrompt = task
         isGeneratingCancelled.set(false)
         streamingRenderer.reset()
@@ -2416,10 +2369,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         val searchBox = EditText(this).apply {
             hint = "Search conversations…"
             textSize = 14f
-            background = shape(SURFACE, 12, BORDER)
-            setPadding(dp(12), dp(10), dp(12), dp(10))
-            setTextColor(INK)
-            setHintTextColor(MUTED)
+            styleEditText(this, palette)
         }
         dialogView.addView(searchBox, marginBottom(12))
 
@@ -2462,8 +2412,16 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 val row = LinearLayout(this).apply {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
-                    setPadding(dp(10), dp(10), dp(10), dp(10))
-                    background = shape(SURFACE, 12, BORDER)
+                    setPadding(dp(12), dp(10), dp(6), dp(10))
+                    background = rippleDrawable(
+                        roundedShape(
+                            color = palette.surfaceElevated,
+                            radiusPx = dp(14).toFloat(),
+                            strokeWidthPx = maxOf(1, dp(1)),
+                            strokeColor = palette.border,
+                        ),
+                        palette.rippleOnSurface,
+                    )
                     isClickable = true
                     isFocusable = true
                     setOnClickListener {
@@ -2716,8 +2674,13 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 val card = LinearLayout(this).apply {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
-                    setPadding(dp(12), dp(10), dp(12), dp(10))
-                    background = shape(SURFACE, 12, BORDER)
+                    setPadding(dp(12), dp(10), dp(6), dp(10))
+                    background = roundedShape(
+                        color = palette.surfaceElevated,
+                        radiusPx = dp(14).toFloat(),
+                        strokeWidthPx = maxOf(1, dp(1)),
+                        strokeColor = palette.border,
+                    )
                 }
 
                 val info = column().apply {
@@ -2784,10 +2747,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         val input = EditText(this).apply {
             hint = "e.g., Prefers Kotlin, Speaks Bengali, Offline only…"
             textSize = 14f
-            background = shape(SURFACE, 12, BORDER)
-            setPadding(dp(12), dp(10), dp(12), dp(10))
-            setTextColor(INK)
-            setHintTextColor(MUTED)
+            styleEditText(this, palette)
         }
         val categories = arrayOf("Preference", "Profile", "Constraint", "Goal", "Custom")
         var selectedCategoryIndex = 0
@@ -2846,10 +2806,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         val searchBox = EditText(this).apply {
             hint = "Search personal notes…"
             textSize = 14f
-            background = shape(SURFACE, 12, BORDER)
-            setPadding(dp(12), dp(10), dp(12), dp(10))
-            setTextColor(INK)
-            setHintTextColor(MUTED)
+            styleEditText(this, palette)
         }
         dialogView.addView(searchBox, marginBottom(12))
 
@@ -2876,8 +2833,18 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 val card = LinearLayout(this).apply {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
-                    setPadding(dp(12), dp(10), dp(12), dp(10))
-                    background = shape(SURFACE, 12, BORDER)
+                    setPadding(dp(12), dp(10), dp(6), dp(10))
+                    background = rippleDrawable(
+                        roundedShape(
+                            color = palette.surfaceElevated,
+                            radiusPx = dp(14).toFloat(),
+                            strokeWidthPx = maxOf(1, dp(1)),
+                            strokeColor = palette.border,
+                        ),
+                        palette.rippleOnSurface,
+                    )
+                    isClickable = true
+                    isFocusable = true
                 }
 
                 val info = column().apply {
@@ -2964,21 +2931,15 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         val titleInput = EditText(this).apply {
             hint = "Note Title"
             textSize = 14f
-            background = shape(SURFACE, 12, BORDER)
-            setPadding(dp(12), dp(10), dp(12), dp(10))
-            setTextColor(INK)
-            setHintTextColor(MUTED)
+            styleEditText(this, palette)
             if (existingNote != null) setText(existingNote.title)
         }
         container.addView(titleInput, marginBottom(10))
 
         val contentInput = EditText(this).apply {
             hint = "Note Content…"
-            textSize = 13f
-            background = shape(SURFACE, 12, BORDER)
-            setPadding(dp(12), dp(10), dp(12), dp(10))
-            setTextColor(INK)
-            setHintTextColor(MUTED)
+            textSize = 13.5f
+            styleEditText(this, palette)
             minLines = 4
             gravity = Gravity.TOP or Gravity.START
             if (existingNote != null) setText(existingNote.content)
@@ -3032,7 +2993,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             setPadding(dp(20), dp(20), dp(20), dp(20))
         }
 
-        val title = text("🎙️ Continuous Voice Mode", 18f, Color.WHITE, true)
+        val title = text("🎙️ Continuous Voice Mode", 18f, WHITE, true)
         dialogView.addView(title)
 
         val stateBadge = text("Initializing…", 13f, palette.heroSubtitleInk, true).apply {
@@ -3047,7 +3008,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 arrayOf(
                     roundedShape(0x33FFFFFF, dp(4).toFloat()),
                     android.graphics.drawable.ClipDrawable(
-                        roundedShape(Color.WHITE, dp(4).toFloat()),
+                        roundedShape(WHITE, dp(4).toFloat()),
                         Gravity.START,
                         android.graphics.drawable.ClipDrawable.HORIZONTAL,
                     ),
@@ -3062,7 +3023,8 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
 
         val transcriptView = TextView(this).apply {
             textSize = 14f
-            setTextColor(Color.WHITE)
+            setTextColor(WHITE)
+            setLineSpacing(dp(3).toFloat(), 1f)
             text = "Say something to start speaking…"
             setPadding(dp(12), dp(12), dp(12), dp(12))
             background = shape(0x33000000, 12)
@@ -3083,7 +3045,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             setAllCaps(false)
             textSize = 13f
             typeface = Typeface.create("sans-serif", Typeface.BOLD)
-            setTextColor(Color.WHITE)
+            setTextColor(WHITE)
             gravity = Gravity.CENTER
             minHeight = dp(48)
             minimumHeight = dp(48)
@@ -3112,7 +3074,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             minimumHeight = dp(48)
             setPadding(dp(12), dp(8), dp(12), dp(8))
             background = rippleDrawable(
-                roundedShape(Color.WHITE, dp(24).toFloat()),
+                roundedShape(WHITE, dp(24).toFloat()),
                 palette.rippleOnMint,
             )
             backgroundTintList = null
@@ -3279,30 +3241,30 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
 
         // 2. Zero-Cloud Telemetry Guarantee Badge
         val auditCard = column().apply {
-            val bg = if (isDarkTheme) 0xFF1B3A2F.toInt() else 0xFFE8F5E9.toInt()
-            val border = if (isDarkTheme) 0xFF2E5A4A.toInt() else 0xFFC8E6C9.toInt()
-            background = shape(bg, 12, border)
+            background = roundedShape(
+                color = palette.successBg,
+                radiusPx = dp(14).toFloat(),
+                strokeWidthPx = maxOf(1, dp(1)),
+                strokeColor = palette.successBorder,
+            )
             setPadding(dp(14), dp(12), dp(14), dp(12))
         }
-        val auditTitle = text("🛡️ 100% Zero-Cloud Guarantee", 14f, if (isDarkTheme) 0xFFB9F6CA.toInt() else 0xFF1B5E20.toInt(), true)
-        auditCard.addView(auditTitle)
-        val auditDesc = text(
-            if (permAudit.isZeroCloudCompliant)
-                "Verified: Hardware-level zero cloud telemetry. PocketAgent does not request or hold 'android.permission.INTERNET'. All audio, documents, and inference run 100% locally on this device."
-            else
-                "Warning: Non-standard permissions detected.",
-            12f,
-            if (isDarkTheme) 0xFFA5D6A7.toInt() else 0xFF2E7D32.toInt()
-        ).apply { setPadding(0, dp(4), 0, 0) }
-        auditCard.addView(auditDesc)
-        dialogView.addView(auditCard, marginBottom(12))
+        auditCard.addView(text("🛡️ 100% Zero-Cloud Guarantee", 14f, palette.successInk, true))
+        auditCard.addView(
+            text(
+                if (permAudit.isZeroCloudCompliant)
+                    "Verified: Hardware-level zero cloud telemetry. PocketAgent does not request or hold 'android.permission.INTERNET'. All audio, documents, and inference run 100% locally on this device."
+                else
+                    "Warning: Non-standard permissions detected.",
+                12f,
+                palette.successInk,
+            ).apply { setPadding(0, dp(4), 0, 0) }
+        )
+        bodyCol.addView(auditCard, marginBottom(12))
 
-        // 2. Storage Audit Card
-        val storageCard = column().apply {
-            background = shape(SURFACE, 12, BORDER)
-            setPadding(dp(14), dp(12), dp(14), dp(12))
-        }
-        storageCard.addView(text("💾 Local Storage Breakdown", 14f, INK, true), marginBottom(8))
+        // 3. Storage Audit Card
+        val storageCard = cardContainer(this, palette, cornerDp = 14, elevated = true, paddingDp = 14)
+        storageCard.addView(text("💾 Local Storage Breakdown", 14f, palette.ink, true), marginBottom(8))
 
         fun addStorageRow(label: String, value: String) {
             val row = LinearLayout(this).apply {
@@ -3327,12 +3289,17 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         val lockCard = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            background = shape(SURFACE, 12, BORDER)
+            background = roundedShape(
+                color = palette.surfaceElevated,
+                radiusPx = dp(14).toFloat(),
+                strokeWidthPx = maxOf(1, dp(1)),
+                strokeColor = palette.border,
+            )
             setPadding(dp(14), dp(12), dp(14), dp(12))
         }
         val lockInfo = column().apply {
-            addView(text("🔒 Biometric App Lock", 14f, INK, true))
-            addView(text("Require device credential/biometric on resume", 11f, MUTED))
+            addView(text("🔒 Biometric App Lock", 14f, palette.ink, true))
+            addView(text("Require device credential or biometric on resume", 11.5f, palette.muted))
         }
         lockCard.addView(lockInfo, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(8) })
 
@@ -3352,8 +3319,10 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 }
                 biometricLockManager.setLockEnabled(true)
                 lockToggleBtn.text = "Enabled"
+                privacyDialog?.dismiss()
                 updateLockOverlay()
-                Toast.makeText(this, "App lock enabled. You'll be asked to authenticate on resume.", Toast.LENGTH_SHORT).show()
+                promptBiometricUnlock()
+                Toast.makeText(this, "App lock enabled. Authenticate to continue.", Toast.LENGTH_SHORT).show()
             } else {
                 biometricLockManager.setLockEnabled(false)
                 lockToggleBtn.text = "Disabled"
@@ -3380,12 +3349,8 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                     Toast.makeText(this, "All personal data has been erased.", Toast.LENGTH_LONG).show()
                 }
                 .setNegativeButton("Cancel", null)
-                .show()
-        }.apply {
-            val bg = if (isDarkTheme) 0xFF3A1F1F.toInt() else 0xFFFFEBEE.toInt()
-            val border = if (isDarkTheme) 0xFF5C2A2A.toInt() else 0xFFFFCDD2.toInt()
-            background = shape(bg, 12, border)
-            setTextColor(if (isDarkTheme) 0xFFFF8A80.toInt() else 0xFFC62828.toInt())
+                .create()
+            showStyledAlertDialog(wipeDialog, palette)
         }
         bodyCol.addView(panicBtn, LinearLayout.LayoutParams(-1, -2))
 
@@ -3451,8 +3416,6 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         if (!::lockOverlay.isInitialized) return
         lockOverlay.visibility = if (biometricLockManager.isAppLocked) View.VISIBLE else View.GONE
     }
-
-
 
     private fun promptBiometricUnlock() {
         if (!::lockOverlay.isInitialized) return
@@ -3982,7 +3945,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         textSize = 16f
         typeface = Typeface.create("sans-serif", Typeface.BOLD)
         gravity = Gravity.CENTER
-        setTextColor(Color.WHITE)
+        setTextColor(WHITE)
         setPadding(dp(16), dp(10), dp(16), dp(10))
         val gradient = gradientPillDrawable(
             palette.heroGradientStart,
@@ -4005,29 +3968,52 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
 
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
-        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW &&
+            !isGeneratingUi && !engineManager.isGenerationActive) {
             // Under memory pressure, drop warm conversation state; keep engine loaded if possible.
             engineManager.invalidateConversation("trim memory level $level")
         }
         if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_COMPLETE ||
             level == android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL) {
-            if (!isGeneratingUi) {
-                inferenceExecutor.execute { engineManager.close() }
-                updateStatus("Model unloaded to free memory. It will reload on next request.")
+            if (!isGeneratingUi && !engineManager.isGenerationActive) {
+                inferenceExecutor.execute {
+                    if (!isGeneratingUi && !engineManager.isGenerationActive) {
+                        engineManager.close()
+                        mainHandler.post {
+                            if (!isDestroyed) {
+                                refreshModelStatus()
+                                updateStatus("Model unloaded to free memory. It will reload on next request.")
+                            }
+                        }
+                    }
+                }
             }
         }
     }
 
     override fun onLowMemory() {
         super.onLowMemory()
-        engineManager.invalidateConversation("low memory")
-        if (!isGeneratingUi) {
-            inferenceExecutor.execute { engineManager.close() }
+        if (!isGeneratingUi && !engineManager.isGenerationActive) {
+            engineManager.invalidateConversation("low memory")
+            inferenceExecutor.execute {
+                if (!isGeneratingUi && !engineManager.isGenerationActive) {
+                    engineManager.close()
+                    mainHandler.post {
+                        if (!isDestroyed) {
+                            refreshModelStatus()
+                        }
+                    }
+                }
+            }
         }
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
+        if (::palette.isInitialized) {
+            applyWindowBars(this, palette)
+        }
+        window?.decorView?.requestApplyInsets()
         if (::chatScroll.isInitialized && !isUserReadingUpwards) {
             scrollChatToBottom()
         }

@@ -129,6 +129,26 @@ class ComposerChromeHelperTest {
     }
 
     @Test
+    fun formatCharBudgetLabelMatchesMainUiStateAttachmentLimit() {
+        assertEquals(6_000, MainUiState.MAX_ATTACHMENT_CHARS)
+        assertEquals(
+            "0 / 6k chars",
+            ComposerChromeHelper.formatCharBudgetLabel(0, MainUiState.MAX_ATTACHMENT_CHARS),
+        )
+        assertEquals(
+            "3.4k / 6k chars",
+            ComposerChromeHelper.formatCharBudgetLabel(3_400, MainUiState.MAX_ATTACHMENT_CHARS),
+        )
+        assertEquals(
+            "6k / 6k chars",
+            ComposerChromeHelper.formatCharBudgetLabel(
+                MainUiState.MAX_ATTACHMENT_CHARS,
+                MainUiState.MAX_ATTACHMENT_CHARS,
+            ),
+        )
+    }
+
+    @Test
     fun formatIndividualChipLabelsFiltersBlanksAndTruncatesPreservingOrder() {
         val input = listOf(
             "notes.txt",

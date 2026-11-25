@@ -1,7 +1,9 @@
 package com.example.pocketagent
 
+import android.app.KeyguardManager
 import android.content.Context
 import android.content.SharedPreferences
+import android.os.Build
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
@@ -11,16 +13,23 @@ import androidx.fragment.app.FragmentActivity
  * Manages app-lock state for PocketAgent.
  *
  * The lock protects local conversations, memories, notes, and model-backed workflows when
- * enabled. Authentication is performed with AndroidX BiometricPrompt using device credential
+ * enabled. Authentication is performed with AndroidX [BiometricPrompt] using device credential
  * as fallback when available.
  */
 class BiometricLockManager(
     private val preferences: SharedPreferences,
     private val nowMs: () -> Long = { System.currentTimeMillis() },
     private val canAuthenticate: (Context) -> Boolean = { context ->
-        val authenticators = BiometricManager.Authenticators.BIOMETRIC_STRONG or
-            BiometricManager.Authenticators.DEVICE_CREDENTIAL
-        BiometricManager.from(context).canAuthenticate(authenticators) == BiometricManager.BIOMETRIC_SUCCESS
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val authenticators = BiometricManager.Authenticators.BIOMETRIC_STRONG or
+                BiometricManager.Authenticators.DEVICE_CREDENTIAL
+            BiometricManager.from(context).canAuthenticate(authenticators) == BiometricManager.BIOMETRIC_SUCCESS
+        } else {
+            val keyguard = context.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
+            val hasBiometric = BiometricManager.from(context)
+                .canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_WEAK) == BiometricManager.BIOMETRIC_SUCCESS
+            keyguard?.isDeviceSecure == true || hasBiometric
+        }
     },
 ) {
     companion object {
@@ -40,10 +49,9 @@ class BiometricLockManager(
 
     fun setLockEnabled(enabled: Boolean) {
         preferences.edit().putBoolean(PREF_BIOMETRIC_ENABLED, enabled).apply()
+        isUnlocked = !enabled
         if (!enabled) {
-            isUnlocked = true
-        } else {
-            isUnlocked = false
+            lastBackgroundedAt = 0L
         }
     }
 
@@ -69,6 +77,7 @@ class BiometricLockManager(
 
     fun unlock() {
         isUnlocked = true
+        lastBackgroundedAt = 0L
         preferences.edit().putLong(PREF_LAST_UNLOCKED_AT, nowMs()).apply()
     }
 
@@ -116,14 +125,18 @@ class BiometricLockManager(
         }
 
         val prompt = BiometricPrompt(activity, executor, callback)
-        val promptInfo = BiometricPrompt.PromptInfo.Builder()
+        val promptInfoBuilder = BiometricPrompt.PromptInfo.Builder()
             .setTitle(title)
             .setSubtitle(subtitle)
-            .setAllowedAuthenticators(
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            promptInfoBuilder.setAllowedAuthenticators(
                 BiometricManager.Authenticators.BIOMETRIC_STRONG or
                     BiometricManager.Authenticators.DEVICE_CREDENTIAL
             )
-            .build()
-        prompt.authenticate(promptInfo)
+        } else {
+            @Suppress("DEPRECATION")
+            promptInfoBuilder.setDeviceCredentialAllowed(true)
+        }
+        prompt.authenticate(promptInfoBuilder.build())
     }
 }

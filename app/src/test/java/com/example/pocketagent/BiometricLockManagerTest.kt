@@ -88,4 +88,40 @@ class BiometricLockManagerTest {
         lockManager.lock()
         assertTrue(lockManager.isAppLocked)
     }
+
+    @Test
+    fun `unlock clears lastBackgroundedAt so shouldLockOnResume stays false until backgrounded again`() {
+        lockManager.setLockEnabled(true)
+        lockManager.unlock()
+
+        lockManager.markBackgrounded()
+        now += 61_000L
+        assertTrue(lockManager.shouldLockOnResume())
+
+        lockManager.lock()
+        lockManager.unlock()
+        assertFalse(lockManager.isAppLocked)
+        assertFalse(lockManager.shouldLockOnResume())
+
+        now += 120_000L
+        assertFalse(lockManager.shouldLockOnResume())
+
+        lockManager.markBackgrounded()
+        now += 60_000L
+        assertTrue(lockManager.shouldLockOnResume())
+    }
+
+    @Test
+    fun `disabling lock clears lastBackgroundedAt`() {
+        lockManager.setLockEnabled(true)
+        lockManager.unlock()
+        lockManager.markBackgrounded()
+        now += 120_000L
+        assertTrue(lockManager.shouldLockOnResume())
+
+        lockManager.setLockEnabled(false)
+        lockManager.setLockEnabled(true)
+        lockManager.unlock()
+        assertFalse(lockManager.shouldLockOnResume())
+    }
 }

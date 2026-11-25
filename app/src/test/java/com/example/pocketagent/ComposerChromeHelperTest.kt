@@ -213,7 +213,7 @@ class ComposerChromeHelperTest {
         assertEquals("a", ComposerChromeHelper.formatDictationLivePreview("a", maxChars = 1))
         assertEquals("", ComposerChromeHelper.formatDictationLivePreview("hello", maxChars = 0))
 
-        val longSpeech = "please summarize the causes of world war two and explain its long term economic consequences across europe"
+        val longSpeech = "please summarize the major historical causes of world war two and explain its long term economic consequences across europe"
         val preview = ComposerChromeHelper.formatDictationLivePreview(longSpeech)
         assertTrue(preview.startsWith("…"))
         assertTrue(preview.length <= 110)

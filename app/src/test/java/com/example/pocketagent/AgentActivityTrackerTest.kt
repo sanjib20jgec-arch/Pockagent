@@ -93,6 +93,7 @@ class AgentActivityTrackerTest {
             title = "Weekend Shopping",
             content = "Buy batteries and router cables for the home wifi setup.",
             tags = listOf("shopping"),
+            createdAt = 100L,
             updatedAt = 3_000L,
         )
         val titleHit = PersonalNotesStore.PersonalNote(
@@ -100,6 +101,7 @@ class AgentActivityTrackerTest {
             title = "Home Wifi Credentials",
             content = "Guest access code is cedar-19.",
             tags = listOf("network"),
+            createdAt = 100L,
             updatedAt = 2_000L,
         )
         val unrelatedPinned = PersonalNotesStore.PersonalNote(
@@ -108,6 +110,7 @@ class AgentActivityTrackerTest {
             content = "Apples, oats, and coffee beans.",
             tags = listOf("food"),
             isPinned = true,
+            createdAt = 100L,
             updatedAt = 5_000L,
         )
 
@@ -130,6 +133,7 @@ class AgentActivityTrackerTest {
             title = "Passport Details",
             content = "Stored in top drawer.",
             tags = listOf("travel", "documents"),
+            createdAt = 100L,
             updatedAt = 2_000L,
         )
         val longContentHit = PersonalNotesStore.PersonalNote(
@@ -137,6 +141,7 @@ class AgentActivityTrackerTest {
             title = "Travel Checklist",
             content = "Pack charger adapter itinerary boarding pass " + "item ".repeat(200),
             tags = listOf("checklist"),
+            createdAt = 100L,
             updatedAt = 1_000L,
         )
 

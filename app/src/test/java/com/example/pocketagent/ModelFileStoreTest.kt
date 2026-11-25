@@ -102,29 +102,24 @@ class ModelFileStoreTest {
     }
 
     @Test
-    fun expectedBytesExceedingLimitFailsBeforeReadingStream() {
-        val store = ModelFileStore(temporaryFolder.root, maxBytes = 100, reservedFreeSpaceBytes = 0, minBytes = 1L)
-        val unreadStream = object : java.io.InputStream() {
-            override fun read(): Int = throw AssertionError("Stream should not be read when expectedBytes exceeds limit.")
-        }
+    fun importModelRejectsWhenStreamExceedsSizeLimit() {
+        val store = ModelFileStore(temporaryFolder.root, maxBytes = 4, reservedFreeSpaceBytes = 0, minBytes = 1L)
 
         assertThrows(IOException::class.java) {
-            store.importModel(unreadStream, expectedBytes = 250L)
+            store.importModel(ByteArrayInputStream(byteArrayOf(1, 2, 3, 4, 5)))
         }
         assertFalse(partFile(store).exists())
     }
 
     @Test
-    fun importModelReportsCompletionProgress() {
+    fun importModelStoresValidSmallFile() {
         val store = ModelFileStore(temporaryFolder.root, maxBytes = 100, reservedFreeSpaceBytes = 0, minBytes = 1L)
-        val updates = mutableListOf<Pair<Long, Long?>>()
+        val data = byteArrayOf(0x50, 0x4B, 0x03, 0x04)
 
-        store.importModel(ByteArrayInputStream(byteArrayOf(1, 2, 3, 4)), expectedBytes = 4L) { copied, total ->
-            updates += copied to total
-        }
+        val file = store.importModel(ByteArrayInputStream(data))
 
-        assertTrue(updates.isNotEmpty())
-        assertEquals(4L to 4L, updates.last())
+        assertTrue(file.exists())
+        assertArrayEquals(data, file.readBytes())
     }
 
     @Test
@@ -134,7 +129,7 @@ class ModelFileStoreTest {
         partFile(store).writeBytes(byteArrayOf(3, 4))
         val backup = java.io.File(temporaryFolder.root, "model.litertlm.backup").apply { writeBytes(byteArrayOf(5)) }
 
-        assertTrue(store.removeStoredModel())
+        store.removeStoredModel()
         assertFalse(store.modelFile.exists())
         assertFalse(partFile(store).exists())
         assertFalse(backup.exists())

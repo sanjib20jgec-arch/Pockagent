@@ -145,6 +145,7 @@ internal class ModelFileStore(
         fun clearEngineCaches(cacheDir: File) {
             if (!cacheDir.exists() || !cacheDir.isDirectory) return
             cacheDir.listFiles()?.forEach { child ->
+                if (child.name.startsWith("pocketagent")) return@forEach
                 try {
                     if (child.isDirectory) child.deleteRecursively() else child.delete()
                 } catch (_: Exception) {

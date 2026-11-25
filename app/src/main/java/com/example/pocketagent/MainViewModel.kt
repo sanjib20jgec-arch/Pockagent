@@ -1140,36 +1140,38 @@ class MainViewModel internal constructor(
     fun prepareSaveAnswer(): String? {
         val state = _uiState.value
         if (!state.answerIsComplete) {
-            updateState { it.withStatus("Wait until a complete answer is available before saving it.") }
+            updateState { it.copy(statusMessage = "Wait until a complete answer is available before saving it.") }
             return null
         }
         val answerToSave = state.plainTextAnswer.ifBlank { state.generatedAnswer }.trim()
         if (answerToSave.isBlank()) {
-            updateState { it.withStatus("Generate an answer before saving it.") }
+            updateState { it.copy(statusMessage = "Generate an answer before saving it.") }
             return null
         }
         if (answerToSave.length > AnswerTextWriter.MAX_CHARS) {
-            updateState { it.withStatus("This answer is too large to save as a text result.") }
+            updateState { it.copy(statusMessage = "This answer is too large to save as a text result.") }
             return null
         }
-        updateState { it.withPendingAnswerToSave(answerToSave) }
+        updateState { it.copy(pendingAnswerToSave = answerToSave) }
         return answerToSave
     }
 
     fun saveAnswerToStream(outputStream: OutputStream, answer: String) {
-        updateState { it.withStatus("Saving the answer to your selected location…") }
+        updateState { it.copy(statusMessage = "Saving the answer to your selected location…") }
         workerExecutor.execute {
             try {
                 outputStream.use { stream ->
                     AnswerTextWriter.write(stream, answer)
                 }
                 updateState {
-                    it.withPendingAnswerToSave(null)
-                        .withStatus("Answer saved to the location you selected.")
+                    it.copy(
+                        pendingAnswerToSave = null,
+                        statusMessage = "Answer saved to the location you selected.",
+                    )
                 }
             } catch (e: Exception) {
                 updateState {
-                    it.withStatus("Could not save the answer: ${e.message ?: "storage error"}")
+                    it.copy(statusMessage = "Could not save the answer: ${e.message ?: \"storage error\"}")
                 }
             }
         }
@@ -1177,15 +1179,19 @@ class MainViewModel internal constructor(
 
     fun onSaveAnswerCanceled() {
         updateState {
-            it.withPendingAnswerToSave(null)
-                .withStatus("Save canceled. No file was written.")
+            it.copy(
+                pendingAnswerToSave = null,
+                statusMessage = "Save canceled. No file was written.",
+            )
         }
     }
 
     fun onSaveAnswerMissing() {
         updateState {
-            it.withPendingAnswerToSave(null)
-                .withStatus("The answer is no longer available. Generate it again before saving.")
+            it.copy(
+                pendingAnswerToSave = null,
+                statusMessage = "The answer is no longer available. Generate it again before saving.",
+            )
         }
     }
 

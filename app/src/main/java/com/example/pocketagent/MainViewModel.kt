@@ -1171,7 +1171,7 @@ class MainViewModel internal constructor(
                 }
             } catch (e: Exception) {
                 updateState {
-                    it.copy(statusMessage = "Could not save the answer: ${e.message ?: \"storage error\"}")
+                    it.copy(statusMessage = "Could not save the answer: ${e.message ?: "storage error"}")
                 }
             }
         }

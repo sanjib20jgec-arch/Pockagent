@@ -2,35 +2,39 @@
 
 ## kotlin e: lines
 ```
-55:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:5:30 Conflicting import: imported name 'FragmentActivity' is ambiguous.
-56:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:7:30 Conflicting import: imported name 'FragmentActivity' is ambiguous.
-57:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:303:57 Unresolved reference 'ActivityManager'.
-58:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:304:20 Unresolved reference 'ActivityManager'.
-59:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:305:12 Unresolved reference 'getMemoryInfo'.
-60:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:544:13 Unresolved reference 'answerText'.
+94:e: file:///home/runner/work/Pockagent/Pockagent/app/src/test/java/com/example/pocketagent/AnswerPromptComposerTest.kt:152:30 Unresolved reference 'composePrompt'.
+95:e: file:///home/runner/work/Pockagent/Pockagent/app/src/test/java/com/example/pocketagent/ModelFileStoreTest.kt:112:45 No parameter with name 'expectedBytes' found.
+96:e: file:///home/runner/work/Pockagent/Pockagent/app/src/test/java/com/example/pocketagent/ModelFileStoreTest.kt:122:74 No parameter with name 'expectedBytes' found.
+97:e: file:///home/runner/work/Pockagent/Pockagent/app/src/test/java/com/example/pocketagent/ModelFileStoreTest.kt:122:94 Too many arguments for 'fun importModel(input: InputStream): File'.
+98:e: file:///home/runner/work/Pockagent/Pockagent/app/src/test/java/com/example/pocketagent/ModelFileStoreTest.kt:122:96 Cannot infer type for value parameter 'copied'. Specify it explicitly.
+99:e: file:///home/runner/work/Pockagent/Pockagent/app/src/test/java/com/example/pocketagent/ModelFileStoreTest.kt:122:104 Cannot infer type for value parameter 'total'. Specify it explicitly.
+100:e: file:///home/runner/work/Pockagent/Pockagent/app/src/test/java/com/example/pocketagent/ModelFileStoreTest.kt:123:31 Cannot infer type for type parameter 'A'. Specify it explicitly.
+101:e: file:///home/runner/work/Pockagent/Pockagent/app/src/test/java/com/example/pocketagent/ModelFileStoreTest.kt:123:31 Cannot infer type for type parameter 'B'. Specify it explicitly.
+102:e: file:///home/runner/work/Pockagent/Pockagent/app/src/test/java/com/example/pocketagent/ModelFileStoreTest.kt:123:31 Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+104:e: file:///home/runner/work/Pockagent/Pockagent/app/src/test/java/com/example/pocketagent/ModelFileStoreTest.kt:137:20 Argument type mismatch: actual type is 'Unit', but 'Boolean' was expected.
 ```
 
 ## first failure context
 ```
-> Task :app:configureCMakeDebug[x86_64]
-> Task :app:compileDebugKotlin
-e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:5:30 Conflicting import: imported name 'FragmentActivity' is ambiguous.
-e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:7:30 Conflicting import: imported name 'FragmentActivity' is ambiguous.
-e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:303:57 Unresolved reference 'ActivityManager'.
-e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:304:20 Unresolved reference 'ActivityManager'.
-e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:305:12 Unresolved reference 'getMemoryInfo'.
-e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:544:13 Unresolved reference 'answerText'.
-
-> Task :app:compileDebugKotlin FAILED
-> Task :app:buildCMakeDebug[x86_64]
-gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_2-1795599159510.json
+e: file:///home/runner/work/Pockagent/Pockagent/app/src/test/java/com/example/pocketagent/AnswerPromptComposerTest.kt:152:30 Unresolved reference 'composePrompt'.
+e: file:///home/runner/work/Pockagent/Pockagent/app/src/test/java/com/example/pocketagent/ModelFileStoreTest.kt:112:45 No parameter with name 'expectedBytes' found.
+e: file:///home/runner/work/Pockagent/Pockagent/app/src/test/java/com/example/pocketagent/ModelFileStoreTest.kt:122:74 No parameter with name 'expectedBytes' found.
+e: file:///home/runner/work/Pockagent/Pockagent/app/src/test/java/com/example/pocketagent/ModelFileStoreTest.kt:122:94 Too many arguments for 'fun importModel(input: InputStream): File'.
+e: file:///home/runner/work/Pockagent/Pockagent/app/src/test/java/com/example/pocketagent/ModelFileStoreTest.kt:122:96 Cannot infer type for value parameter 'copied'. Specify it explicitly.
+e: file:///home/runner/work/Pockagent/Pockagent/app/src/test/java/com/example/pocketagent/ModelFileStoreTest.kt:122:104 Cannot infer type for value parameter 'total'. Specify it explicitly.
+e: file:///home/runner/work/Pockagent/Pockagent/app/src/test/java/com/example/pocketagent/ModelFileStoreTest.kt:123:31 Cannot infer type for type parameter 'A'. Specify it explicitly.
+e: file:///home/runner/work/Pockagent/Pockagent/app/src/test/java/com/example/pocketagent/ModelFileStoreTest.kt:123:31 Cannot infer type for type parameter 'B'. Specify it explicitly.
+e: file:///home/runner/work/Pockagent/Pockagent/app/src/test/java/com/example/pocketagent/ModelFileStoreTest.kt:123:31 Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun <A, B> A.to(that: B): Pair<A, B>
+e: file:///home/runner/work/Pockagent/Pockagent/app/src/test/java/com/example/pocketagent/ModelFileStoreTest.kt:137:20 Argument type mismatch: actual type is 'Unit', but 'Boolean' was expected.
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_2-1795599370038.json
 
 [Incubating] Problems report is available at: file:///home/runner/work/Pockagent/Pockagent/build/reports/problems/problems-report.html
 
 FAILURE: Build failed with an exception.
 
 * What went wrong:
-Execution failed for task ':app:compileDebugKotlin'.
+Execution failed for task ':app:compileDebugUnitTestKotlin'.
 > A failure occurred while executing org.jetbrains.kotlin.compilerRunner.btapi.BuildToolsApiCompilationWork
    > Compilation error. See log for more details
 
@@ -40,7 +44,7 @@ Execution failed for task ':app:compileDebugKotlin'.
 > Get more help at https://help.gradle.org.
 
 * Exception is:
-org.gradle.api.tasks.TaskExecutionException: Execution failed for task ':app:compileDebugKotlin'.
+org.gradle.api.tasks.TaskExecutionException: Execution failed for task ':app:compileDebugUnitTestKotlin'.
 	at org.gradle.api.internal.tasks.execution.ExecuteActionsTaskExecuter.lambda$executeIfValid$1(ExecuteActionsTaskExecuter.java:130)
 	at org.gradle.internal.Try$Failure.ifSuccessfulOrElse(Try.java:293)
 	at org.gradle.api.internal.tasks.execution.ExecuteActionsTaskExecuter.executeIfValid(ExecuteActionsTaskExecuter.java:128)

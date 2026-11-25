@@ -188,6 +188,16 @@ class ContextBudgetManagerTest {
     }
 
     @Test
+    fun defaultTokenBudgetAllocates2048ResponseAnd1664HistoryTokens() {
+        val budget = ContextBudgetManager.TokenBudget()
+
+        assertEquals(4096, budget.maxContextTokens)
+        assertEquals(2048, budget.maxResponseTokens)
+        assertEquals(2048, budget.maxInputTokens)
+        assertEquals(1664, budget.historyBudget)
+    }
+
+    @Test
     fun tokenBudgetValidationRejectsInvalidParameters() {
         assertThrows(IllegalArgumentException::class.java) {
             ContextBudgetManager.TokenBudget(maxContextTokens = 0)

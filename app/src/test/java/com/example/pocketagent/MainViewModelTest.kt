@@ -12,7 +12,10 @@ import org.junit.rules.TemporaryFolder
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executor
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 class MainViewModelTest {
 
@@ -531,5 +534,75 @@ class MainViewModelTest {
         viewModel.stopDuplexVoiceSession()
         assertFalse(viewModel.uiState.value.isDuplexActive)
         assertEquals(DuplexVoiceController.DuplexState.IDLE, viewModel.uiState.value.duplexState)
+    }
+
+    @Test
+    fun closeStopsDuplexAndClosesLlmRunner() {
+        viewModel.close()
+
+        assertTrue(fakeLlmRunner.isClosed)
+        assertFalse(viewModel.uiState.value.isDuplexActive)
+    }
+
+    @Test
+    fun stopGenerationDuringActiveStreamTransitionsToStoppedWithPartialText() {
+        val chunkStarted = CountDownLatch(1)
+        val releaseStream = CountDownLatch(1)
+        val workerFinished = CountDownLatch(1)
+        val blockingRunner = object : LlmInferenceRunner {
+            override fun initialize() {}
+            override fun isAvailable(): Boolean = true
+            override fun runInference(
+                prompt: String,
+                systemInstruction: String,
+                maxTokens: Int,
+                onChunk: (String) -> Unit,
+            ): String {
+                onChunk("1. Partial step")
+                chunkStarted.countDown()
+                releaseStream.await(5, TimeUnit.SECONDS)
+                onChunk("\n2. Trailing step")
+                return "1. Partial step\n2. Trailing step"
+            }
+            override fun close() {}
+        }
+        val rawExecutor = Executors.newSingleThreadExecutor()
+        try {
+            val asyncViewModel = MainViewModel(
+                filesDir = filesDir,
+                cacheDir = cacheDir,
+                modelFileStore = ModelFileStore(filesDir),
+                whisperModelStore = WhisperModelStore(filesDir),
+                llmRunner = blockingRunner,
+                whisperTranscriber = fakeWhisperTranscriber,
+                workerExecutor = Executor { task ->
+                    rawExecutor.execute {
+                        try {
+                            task.run()
+                        } finally {
+                            workerFinished.countDown()
+                        }
+                    }
+                },
+                mainDispatcher = { it.run() },
+            )
+
+            asyncViewModel.updateTaskInput("Long running task")
+            asyncViewModel.suggestSteps()
+            assertTrue(chunkStarted.await(5, TimeUnit.SECONDS))
+
+            asyncViewModel.stopGeneration()
+            releaseStream.countDown()
+            assertTrue(workerFinished.await(5, TimeUnit.SECONDS))
+
+            val state = asyncViewModel.uiState.value
+            assertEquals(MainUiState.GenerationStatus.COMPLETED, state.generationStatus)
+            assertEquals("Generation stopped by user.", state.statusMessage)
+            assertFalse(state.isGenerating)
+            assertTrue(state.generatedAnswer.contains("1. Partial step"))
+            assertFalse(state.generatedAnswer.contains("Trailing step"))
+        } finally {
+            rawExecutor.shutdownNow()
+        }
     }
 }

@@ -38,7 +38,7 @@ class ContextBudgetManager(
             // Honest defaults for common 4K-context on-device .litertlm models (e.g. LFM3-Omni 2B).
             // Actual usable context depends on the loaded model/runtime; callers may override per model.
             const val DEFAULT_MAX_CONTEXT_TOKENS = 4096
-            const val DEFAULT_MAX_RESPONSE_TOKENS = 1024
+            const val DEFAULT_MAX_RESPONSE_TOKENS = 2048
             const val DEFAULT_SYSTEM_TOKENS = 384
         }
     }

@@ -22,7 +22,7 @@ package com.example.pocketagent
 object RunawayGuard {
 
     /** A single line repeated this many times in a row counts as a loop. */
-    const val MIN_RUNAWAY_LINE_REPEATS = 4
+    const val MIN_RUNAWAY_LINE_REPEATS = 6
 
     /** A looping tail shorter than this is too small to call degeneration (short answers repeat words). */
     const val MIN_RUNAWAY_TAIL_CHARS = 400
@@ -40,7 +40,7 @@ object RunawayGuard {
     const val MAX_CONSECUTIVE_BLANK_LINES = 24
 
     /** Absolute backstop on answer size, independent of repetition. */
-    const val MAX_ANSWER_CHARS = 12_000
+    const val MAX_ANSWER_CHARS = 24_000
 
 
     /**

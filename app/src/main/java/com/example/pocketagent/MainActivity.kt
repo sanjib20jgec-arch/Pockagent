@@ -71,7 +71,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         private const val MAX_ATTACHMENT_CHARS = MainUiState.MAX_ATTACHMENT_CHARS
         private const val MAX_RESPONSE_TOKENS = MainUiState.MAX_RESPONSE_TOKENS
         /** Hard ceiling so a stalled engine cannot block the worker thread forever. */
-        private const val GENERATION_TIMEOUT_SECONDS = 180L
+        private const val GENERATION_TIMEOUT_SECONDS = 360L
         /** Skip eager startup preload above 1.5 GB so multi-GB models (e.g. LFM3-Omni 3.5 GB) don't OOM idle launches. */
         private const val EAGER_WARMUP_MAX_BYTES = 1_500_000_000L
         /** Reset stateful KV cache before cumulative turns approach the 4096-token EngineConfig cap. */
@@ -1705,7 +1705,10 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                         if (isGeneratingCancelled.get() && !guard.wasCancelled) {
                             guard.cancel()
                         }
-                        guard.accept(accumulated, message.toString())
+                        if (!guard.accept(accumulated, message.toString())) {
+                            conversation.cancel()
+                            streamFinished.countDown()
+                        }
                     }
 
                     override fun onDone() {
@@ -1731,16 +1734,21 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                     "Generation timed out after ${GENERATION_TIMEOUT_SECONDS}s. Try a shorter request."
                 )
             }
-            streamError.get()?.let { error ->
-                conversation.cancel()
-                engineManager.invalidateConversation("streaming failed")
-                throw IllegalStateException("Streaming inference failed.", error)
+            if (!isGeneratingCancelled.get() && !guard.isStopped) {
+                streamError.get()?.let { error ->
+                    conversation.cancel()
+                    engineManager.invalidateConversation("streaming failed")
+                    throw IllegalStateException("Streaming inference failed.", error)
+                }
             }
 
             // The user pressed Stop: the context holds a half-written turn, so start fresh next time.
             if (isGeneratingCancelled.get() || guard.wasCancelled) {
                 conversation.cancel()
                 engineManager.invalidateConversation("generation stopped by user")
+            } else if (guard.runawayFragment != null) {
+                // Runaway guard stopped the turn mid-stream; never reuse a cancelled KV context.
+                engineManager.invalidateConversation("runaway guard stopped")
             }
         } catch (t: Throwable) {
             if (t !is IllegalStateException) {
@@ -4018,6 +4026,13 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         }
     }
 
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (::chatScroll.isInitialized && !isUserReadingUpwards) {
+            scrollChatToBottom()
+        }
+    }
+
     override fun onDestroy() {
         thinkingPulseAnimator.stop()
         recordingPulseAnimator.stop()
@@ -4030,8 +4045,10 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         tts?.shutdown()
         duplexController.stopSession()
         inAppAudioRecorder.cancelRecording()
+        isGeneratingCancelled.set(true)
         streamingRenderer.cancel()
         engineManager.cancelActiveConversation()
+        activeStreamLatch?.countDown()
         // Close native LiteRT-LM and Whisper contexts serially on inferenceExecutor.
         inferenceExecutor.execute {
             engineManager.close()

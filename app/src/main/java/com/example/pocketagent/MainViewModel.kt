@@ -52,11 +52,13 @@ class DefaultLlmInferenceRunner(
          * Hard ceiling for a single voice turn. Short enough that a wedged engine fails visibly
          * instead of hanging the worker thread, long enough for larger 2B INT8 models on CPU.
          */
-        const val DEFAULT_TIMEOUT_SECONDS = 180L
+        const val DEFAULT_TIMEOUT_SECONDS = 360L
         const val WARM_CONTEXT_RESET_THRESHOLD = 2800
     }
 
     @Volatile private var isClosed = false
+    @Volatile private var activeConversation: ConversationHandle? = null
+    @Volatile private var activeStreamLatch: CountDownLatch? = null
 
     override fun initialize() {
         val modelFile = modelFile()
@@ -120,6 +122,8 @@ class DefaultLlmInferenceRunner(
             manager.invalidateConversation("voice context budget reached")
         }
         val conversation = manager.getOrCreateConversation(key, systemInstruction)
+        activeConversation = conversation
+        activeStreamLatch = streamFinished
 
         manager.beginGeneration()
         try {
@@ -152,13 +156,17 @@ class DefaultLlmInferenceRunner(
                     "Voice inference timed out after ${timeoutSeconds}s. Try a shorter request."
                 )
             }
-            streamError.get()?.let { throw IllegalStateException("Streaming inference failed.", it) }
+            if (!isClosed) {
+                streamError.get()?.let { throw IllegalStateException("Streaming inference failed.", it) }
+            }
         } catch (e: Exception) {
             // Any failure leaves the cached conversation in an unknown state; drop it.
             conversation.cancel()
             manager.invalidateConversation(e.message ?: "voice inference failed")
             throw e
         } finally {
+            activeConversation = null
+            activeStreamLatch = null
             manager.endGeneration()
         }
 
@@ -173,6 +181,12 @@ class DefaultLlmInferenceRunner(
 
     override fun close() {
         isClosed = true
+        try {
+            activeConversation?.cancel()
+        } catch (_: Exception) {
+            // Safe best-effort cancel while closing.
+        }
+        activeStreamLatch?.countDown()
         engineManager.close()
     }
 }

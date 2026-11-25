@@ -73,8 +73,58 @@ class RunawayGuardTest {
 
     @Test
     fun stopsOnBufferOverflow() {
-        val huge = "a distinct sentence that keeps growing. ".repeat(400)
+        val huge = (1..500).joinToString("\n") { index ->
+            "Line $index: distinct non-repeating sentence that keeps growing past the cap."
+        }
+        assertTrue(huge.length > RunawayGuard.MAX_ANSWER_CHARS)
         assertTrue(RunawayGuard.shouldStop(huge))
+    }
+
+    @Test
+    fun allowsFiveIdenticalLinesInARowButStopsAtSixOrMore() {
+        val fiveClosingTags = listOf(
+            "<div>",
+            "  <ul>",
+            "    <li>Item</li>",
+            "  </div>",
+            "  </div>",
+            "  </div>",
+            "  </div>",
+            "  </div>",
+        ).joinToString("\n")
+        assertFalse(
+            "5 identical lines in a row must not trigger runaway detection",
+            RunawayGuard.shouldStop(fiveClosingTags),
+        )
+
+        val sixClosingTags = "$fiveClosingTags\n  </div>"
+        assertTrue(
+            "6 identical lines in a row must trigger runaway detection",
+            RunawayGuard.shouldStop(sixClosingTags),
+        )
+        assertEquals("  </div>", RunawayGuard.stuckFragment(sixClosingTags))
+    }
+
+    @Test
+    fun allowsSixteenThousandCharCodeResponseButStopsOverMaxAnswerChars() {
+        val sixteenThousandChars = (1..400).joinToString("\n") { i ->
+            "<div class=\"card-$i\"><span>Item #$i value = ${i * 17}</span></div>"
+        }.take(16_000)
+        assertEquals(16_000, sixteenThousandChars.length)
+        assertFalse(
+            "A 16,000-char non-repeating HTML/code response must not be stopped",
+            RunawayGuard.shouldStop(sixteenThousandChars),
+        )
+
+        val overLimit = (1..450).joinToString("\n") { i ->
+            "<div class=\"card-$i\"><span>Item #$i value = ${i * 17}</span></div>"
+        }
+        assertTrue(overLimit.length > RunawayGuard.MAX_ANSWER_CHARS)
+        assertTrue(
+            "An answer exceeding MAX_ANSWER_CHARS (24,000) must be stopped",
+            RunawayGuard.shouldStop(overLimit),
+        )
+        assertNull(RunawayGuard.stuckFragment(overLimit))
     }
 
     @Test

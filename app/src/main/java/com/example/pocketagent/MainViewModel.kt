@@ -965,7 +965,7 @@ class MainViewModel internal constructor(
      * Enables or disables long-term memory injection and extraction.
      */
     fun setMemoryEnabled(enabled: Boolean) {
-        updateState { it.withMemoryEnabled(enabled) }
+        updateState { it.copy(isMemoryEnabled = enabled) }
     }
 
     /**
@@ -974,7 +974,7 @@ class MainViewModel internal constructor(
     fun refreshNotes() {
         try {
             val notes = notesStore.listNotes()
-            updateState { it.withPersonalNotes(notes) }
+            updateState { it.copy(personalNotes = notes) }
         } catch (_: Exception) {}
     }
 
@@ -1015,7 +1015,7 @@ class MainViewModel internal constructor(
      */
     fun searchNotes(query: String): List<PersonalNotesStore.PersonalNote> {
         val results = notesStore.searchNotes(query)
-        updateState { it.withPersonalNotes(results) }
+        updateState { it.copy(personalNotes = results) }
         return results
     }
 
@@ -1028,7 +1028,7 @@ class MainViewModel internal constructor(
      * Clears active calculation result.
      */
     fun clearActiveCalculation() {
-        updateState { it.withActiveCalculation(null) }
+        updateState { it.copy(activeCalculation = null) }
     }
 
     /**
@@ -1040,11 +1040,11 @@ class MainViewModel internal constructor(
     ) {
         val context = whisperContext
         if (context == 0L) {
-            updateState { it.withStatus("Select a local Whisper model first.") }
+            updateState { it.copy(statusMessage = "Select a local Whisper model first.") }
             return
         }
         if (!llmRunner.isAvailable()) {
-            updateState { it.withStatus("Select a local LiteRT-LM model first.") }
+            updateState { it.copy(statusMessage = "Select a local LiteRT-LM model first.") }
             return
         }
 
@@ -1082,7 +1082,7 @@ class MainViewModel internal constructor(
                     val complete = assistantText.isNotBlank()
                     updateState {
                         it.copy(
-                            generationStatus = GenerationStatus.COMPLETED,
+                            generationStatus = MainUiState.GenerationStatus.COMPLETED,
                             isOutputVisible = true,
                             answerIsComplete = complete,
                             generatedAnswer = if (complete) assistantText else "No answer was returned. Try rephrasing the request.",
@@ -1160,7 +1160,7 @@ class MainViewModel internal constructor(
                 generatedAnswer = "",
                 formattedAnswer = "",
                 plainTextAnswer = "",
-                generationStatus = GenerationStatus.IDLE,
+                generationStatus = MainUiState.GenerationStatus.IDLE,
                 documentCitations = emptyList(),
             )
         }

@@ -1049,8 +1049,11 @@ class MainViewModel internal constructor(
         }
 
         updateState {
-            it.withDuplexActive(true)
-                .withDuplexState(DuplexVoiceController.DuplexState.LISTENING, "Listening for speech…")
+            it.copy(
+                isDuplexActive = true,
+                duplexState = DuplexVoiceController.DuplexState.LISTENING,
+                duplexStatusMessage = "Listening for speech…",
+            )
         }
 
         duplexVoiceController.startSession(
@@ -1058,7 +1061,7 @@ class MainViewModel internal constructor(
             systemInstruction = MainUiState.SYSTEM_INSTRUCTION,
             listener = object : DuplexVoiceController.Listener {
                 override fun onStateChanged(state: DuplexVoiceController.DuplexState, statusMessage: String) {
-                    updateState { it.withDuplexState(state, statusMessage) }
+                    updateState { it.copy(duplexState = state, duplexStatusMessage = statusMessage) }
                     onStateChanged?.invoke(state, statusMessage)
                 }
 
@@ -1067,7 +1070,7 @@ class MainViewModel internal constructor(
                 }
 
                 override fun onUserTranscribed(text: String) {
-                    updateState { it.withTaskInput(text) }
+                    updateState { it.copy(taskInput = text) }
                 }
 
                 override fun onAssistantChunk(chunk: String) {}
@@ -1076,14 +1079,27 @@ class MainViewModel internal constructor(
                     saveTurnToSession(userText, "", assistantText)
                     val formatted = MarkdownFormatter.formatForDisplay(assistantText)
                     val plain = MarkdownFormatter.stripToPlainText(assistantText)
+                    val complete = assistantText.isNotBlank()
                     updateState {
-                        it.withGenerationCompleted(assistantText, formatted, plain)
+                        it.copy(
+                            generationStatus = GenerationStatus.COMPLETED,
+                            isOutputVisible = true,
+                            answerIsComplete = complete,
+                            generatedAnswer = if (complete) assistantText else "No answer was returned. Try rephrasing the request.",
+                            formattedAnswer = if (complete) formatted else "No answer was returned. Try rephrasing the request.",
+                            plainTextAnswer = if (complete) plain else "No answer was returned. Try rephrasing the request.",
+                            statusMessage = if (complete) "Answer ready." else "No answer was returned. Try rephrasing the request.",
+                            errorMessage = null,
+                        )
                     }
                 }
 
                 override fun onError(error: Throwable) {
                     updateState {
-                        it.withDuplexState(DuplexVoiceController.DuplexState.ERROR, error.message ?: "Voice error")
+                        it.copy(
+                            duplexState = DuplexVoiceController.DuplexState.ERROR,
+                            duplexStatusMessage = error.message ?: "Voice error",
+                        )
                     }
                 }
             }
@@ -1103,8 +1119,11 @@ class MainViewModel internal constructor(
     fun stopDuplexVoiceSession() {
         duplexVoiceController.stopSession()
         updateState {
-            it.withDuplexActive(false)
-                .withDuplexState(DuplexVoiceController.DuplexState.IDLE, "")
+            it.copy(
+                isDuplexActive = false,
+                duplexState = DuplexVoiceController.DuplexState.IDLE,
+                duplexStatusMessage = "",
+            )
         }
     }
 
@@ -1123,18 +1142,28 @@ class MainViewModel internal constructor(
             // previous currentSessionId (still null on the first turn) and null out activeSession,
             // dropping the history that was just saved.
             updateState {
-                it.withSessions(
-                    summaries = sessionStore.listSessionSummaries(),
-                    activeId = updated.id,
-                    activeTitle = updated.title,
-                    isPinned = updated.isPinned,
+                it.copy(
+                    sessionSummaries = sessionStore.listSessionSummaries(),
+                    currentSessionId = updated.id,
+                    currentSessionTitle = updated.title,
+                    isSessionPinned = updated.isPinned,
                 )
             }
         } catch (_: Exception) {}
     }
 
     fun clearOutput() {
-        updateState { it.withOutputCleared() }
+        updateState {
+            it.copy(
+                isOutputVisible = false,
+                answerIsComplete = false,
+                generatedAnswer = "",
+                formattedAnswer = "",
+                plainTextAnswer = "",
+                generationStatus = GenerationStatus.IDLE,
+                documentCitations = emptyList(),
+            )
+        }
     }
 
     fun prepareSaveAnswer(): String? {

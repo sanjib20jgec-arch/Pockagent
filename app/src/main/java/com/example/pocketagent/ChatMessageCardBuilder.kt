@@ -905,11 +905,12 @@ object ChatMessageCardBuilder {
             }
         }
 
+        val openMoreMenu: () -> Unit = { handleRef?.showMoreActionsDialog() }
         val compactSpecs = listOf(
             Triple("Copy", "Copy answer", callbacks.onCopyAnswer) to false,
             Triple("Speak", "Read answer aloud", callbacks.onSpeakAnswer) to false,
             Triple("Regenerate", "Regenerate answer", callbacks.onRegenerate) to true,
-            Triple("More ▾", "More answer actions", { handleRef?.showMoreActionsDialog() }) to false,
+            Triple("More ▾", "More answer actions", openMoreMenu) to false,
         )
         for ((index, pair) in compactSpecs.withIndex()) {
             val (spec, latestOnly) = pair

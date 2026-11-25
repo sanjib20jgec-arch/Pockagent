@@ -116,30 +116,22 @@
 196:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:866:15 Unresolved reference 'withSessions'.
 197:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:913:26 Unresolved reference 'withSessionSearch'.
 198:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:933:30 Unresolved reference 'withUserMemories'.
-199:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:968:26 Unresolved reference 'withMemoryEnabled'.
-200:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:977:30 Unresolved reference 'withPersonalNotes'.
-201:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:1018:26 Unresolved reference 'withPersonalNotes'.
-202:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:1031:26 Unresolved reference 'withActiveCalculation'.
-203:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:1043:30 Unresolved reference 'withStatus'.
-204:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:1047:30 Unresolved reference 'withStatus'.
-205:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:1085:48 Unresolved reference 'GenerationStatus'.
-206:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:1163:36 Unresolved reference 'GenerationStatus'.
 ```
 
 ## first failure context
 ```
-e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:968:26 Unresolved reference 'withMemoryEnabled'.
-e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:977:30 Unresolved reference 'withPersonalNotes'.
-e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:1018:26 Unresolved reference 'withPersonalNotes'.
-e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:1031:26 Unresolved reference 'withActiveCalculation'.
-e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:1043:30 Unresolved reference 'withStatus'.
-e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:1047:30 Unresolved reference 'withStatus'.
-e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:1085:48 Unresolved reference 'GenerationStatus'.
-e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:1163:36 Unresolved reference 'GenerationStatus'.
+e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:737:38 Unresolved reference 'withStatus'.
+e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:751:38 Unresolved reference 'withGenerationStopped'.
+e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:754:28 Unresolved reference 'withGenerationError'.
+e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:810:20 Unresolved reference 'withSessions'.
+e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:831:16 Unresolved reference 'withOutputCleared'.
+e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:866:15 Unresolved reference 'withSessions'.
+e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:913:26 Unresolved reference 'withSessionSearch'.
+e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainViewModel.kt:933:30 Unresolved reference 'withUserMemories'.
 
 > Task :app:compileDebugKotlin FAILED
 > Task :app:buildCMakeDebug[x86_64]
-gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_2-1795596203791.json
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_2-1795596457398.json
 
 [Incubating] Problems report is available at: file:///home/runner/work/Pockagent/Pockagent/build/reports/problems/problems-report.html
 

@@ -2,23 +2,23 @@
 
 ## kotlin e: lines
 ```
-55:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:3302:21 Unresolved reference 'audioLevelBar'.
+55:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/ChatMessageCardBuilder.kt:921:27 Argument type mismatch: actual type is '() -> Unit?', but '() -> Unit' was expected.
 ```
 
 ## first failure context
 ```
-> Task :app:generateDebugAssets UP-TO-DATE
 > Task :app:mergeDebugAssets
+> Task :app:processDebugManifestForPackage
 > Task :app:desugarDebugFileDependencies
-> Task :app:processDebugResources
 > Task :app:compressDebugAssets
+> Task :app:processDebugResources
 > Task :app:checkDebugDuplicateClasses
 > Task :app:compileDebugKotlin
 > Task :app:mergeExtDexDebug
 
 > Task :app:compileDebugKotlin FAILED
-e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:3302:21 Unresolved reference 'audioLevelBar'.
-gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_2-1795616509739.json
+e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/ChatMessageCardBuilder.kt:921:27 Argument type mismatch: actual type is '() -> Unit?', but '() -> Unit' was expected.
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_2-1795634307550.json
 
 [Incubating] Problems report is available at: file:///home/runner/work/Pockagent/Pockagent/build/reports/problems/problems-report.html
 

@@ -252,6 +252,34 @@ class MarkdownRichRendererLogicTest {
         )
     }
 
+    @Test
+    fun markdownCodeBlocksIntegrateWithHtmlPreviewDetectionAndStreamingParser() {
+        val markdown = """
+            Try this playable demo:
+            ```html
+            <!DOCTYPE html>
+            <html><body><canvas id="dx" width="320" height="400"></canvas></body></html>
+            ```
+            Helper backend check:
+            ```kotlin
+            fun ping() = true
+            ```
+        """.trimIndent()
+
+        val elements = MarkdownFormatter.parseElements(markdown)
+        val blocks = elements.filterIsInstance<MarkdownFormatter.MarkdownElement.CodeBlock>()
+        assertEquals(2, blocks.size)
+        assertTrue(HtmlArtifactSandbox.isPreviewableCode(blocks[0].language, blocks[0].code))
+        assertFalse(HtmlArtifactSandbox.isPreviewableCode(blocks[1].language, blocks[1].code))
+
+        val streamSegments = StreamingCodePreviewParser.splitForStreamingPreview(markdown)
+            .filterIsInstance<StreamingCodePreviewParser.Segment.Code>()
+        assertEquals(2, streamSegments.size)
+        assertTrue(streamSegments.all { it.isClosed })
+        assertEquals(blocks[0].code, streamSegments[0].code)
+        assertEquals(blocks[1].code, streamSegments[1].code)
+    }
+
     private fun assertValidSortedNonOverlapping(
         spans: List<CodeSyntaxHighlighter.HighlightSpan>,
         length: Int,

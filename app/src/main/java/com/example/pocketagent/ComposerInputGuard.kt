@@ -22,11 +22,14 @@ import android.widget.EditText
  */
 object ComposerInputGuard {
 
-    /** Default cap for the composer input, in dp. Roughly four lines plus padding. */
+    /** Default cap for the composer input, in lines. */
     const val DEFAULT_MAX_LINES = 4
 
-    /** Default pixel height cap for the composer input. */
+    /** Default pixel height cap for the composer input, in dp. */
     const val DEFAULT_MAX_HEIGHT_DP = 124
+
+    /** Expanded line ceiling available while reviewing dictated voice transcripts. */
+    const val DICTATION_REVIEW_MAX_LINES = 6
 
     /**
      * Makes [editText] a bounded, internally-scrolling multiline field.
@@ -47,9 +50,8 @@ object ComposerInputGuard {
             InputType.TYPE_TEXT_FLAG_MULTI_LINE or
             InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
 
-        // Never touch isSingleLine here: it silently restores maxLines to Int.MAX_VALUE.
+        // Never call setSingleLine/isSingleLine here: it resets maxLines to Int.MAX_VALUE.
         editText.setHorizontallyScrolling(false)
-        editText.setSingleLine(false)
 
         val boundedLines = maxLines.coerceAtLeast(1)
         editText.minLines = 1
@@ -61,6 +63,43 @@ object ComposerInputGuard {
         editText.overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
 
         attachScrollInterceptGuard(editText)
+    }
+
+    /**
+     * Computes a bounded multiline ceiling for reviewing a voice transcript without leaking
+     * `Int.MAX_VALUE` if the field's prior `maxLines` was left unbounded.
+     */
+    fun resolveReviewMaxLines(
+        currentMaxLines: Int,
+        minReviewLines: Int = DICTATION_REVIEW_MAX_LINES,
+    ): Int {
+        val safeMinReview = minReviewLines.coerceAtLeast(1)
+        val safeCurrent = if (currentMaxLines in 1 until Int.MAX_VALUE) {
+            currentMaxLines
+        } else {
+            DEFAULT_MAX_LINES
+        }
+        return maxOf(safeCurrent, safeMinReview)
+    }
+
+    /**
+     * Populates [editText] with [mergedText] and re-enables multiline wrapping after assignment so
+     * multi-word voice transcripts unwrap vertically for review instead of scrolling on one line.
+     */
+    fun applyTranscriptForReview(
+        editText: EditText,
+        mergedText: String,
+        maxLinesForReview: Int = 5,
+    ) {
+        val targetMaxLines = resolveReviewMaxLines(editText.maxLines, maxLinesForReview)
+        editText.setText(mergedText)
+        editText.setHorizontallyScrolling(false)
+        editText.minLines = 1
+        editText.maxLines = targetMaxLines
+        val endIndex = editText.text?.length ?: 0
+        editText.setSelection(endIndex)
+        editText.requestLayout()
+        editText.post { editText.requestLayout() }
     }
 
     /**

@@ -147,4 +147,17 @@ class AnswerDirectiveTest {
     fun emptyInputDefaultsToAnsweringRatherThanSteps() {
         assertEquals(AnswerDirective.Intent.FACT, AnswerDirective.classify("   "))
     }
+
+    @Test
+    fun systemInstructionIncludesFormattingHtmlAndToolGroundingGuidance() {
+        val instruction = AnswerDirective.SYSTEM_INSTRUCTION
+        assertTrue(instruction.contains("Markdown"))
+        assertTrue(instruction.contains("```html"))
+        assertTrue(instruction.contains("inline CSS"))
+        assertTrue(instruction.contains("mobile viewports"))
+        assertTrue(instruction.contains("Offline Calculation Verification"))
+        assertTrue(instruction.contains("Relevant Personal Notes"))
+        assertTrue(instruction.contains("Document Context"))
+        assertTrue(instruction.contains("step-by-step reasoning"))
+    }
 }

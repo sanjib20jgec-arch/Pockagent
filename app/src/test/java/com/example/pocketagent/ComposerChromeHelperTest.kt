@@ -170,4 +170,77 @@ class ComposerChromeHelperTest {
         )
         assertEquals(22, result[1].length)
     }
+
+    @Test
+    fun formatDictationLivePreviewReturnsPromptWhenBlankAndNormalizesWhitespace() {
+        assertEquals(
+            "Listening… tap Stop when done",
+            ComposerChromeHelper.formatDictationLivePreview(""),
+        )
+        assertEquals(
+            "Listening… tap Stop when done",
+            ComposerChromeHelper.formatDictationLivePreview("   \n\t  "),
+        )
+        assertEquals(
+            "hello world again",
+            ComposerChromeHelper.formatDictationLivePreview("  hello   \n\t world   again  "),
+        )
+        assertEquals(
+            "exact ten!",
+            ComposerChromeHelper.formatDictationLivePreview("exact ten!", maxChars = 10),
+        )
+    }
+
+    @Test
+    fun formatDictationLivePreviewTruncatesToWordAlignedTailWithinMaxChars() {
+        assertEquals(
+            "…beta gamma",
+            ComposerChromeHelper.formatDictationLivePreview("alpha beta gamma", maxChars = 11),
+        )
+        assertEquals(
+            "…gamma",
+            ComposerChromeHelper.formatDictationLivePreview("alpha beta gamma", maxChars = 9),
+        )
+        assertEquals(
+            "…beta gamma",
+            ComposerChromeHelper.formatDictationLivePreview("alpha beta gamma", maxChars = 12),
+        )
+        assertEquals(
+            "…rokenword",
+            ComposerChromeHelper.formatDictationLivePreview("superlongunbrokenword", maxChars = 10),
+        )
+        assertEquals("…", ComposerChromeHelper.formatDictationLivePreview("hello", maxChars = 1))
+        assertEquals("a", ComposerChromeHelper.formatDictationLivePreview("a", maxChars = 1))
+        assertEquals("", ComposerChromeHelper.formatDictationLivePreview("hello", maxChars = 0))
+
+        val longSpeech = "please summarize the causes of world war two and explain its long term economic consequences across europe"
+        val preview = ComposerChromeHelper.formatDictationLivePreview(longSpeech)
+        assertTrue(preview.startsWith("…"))
+        assertTrue(preview.length <= 110)
+        assertTrue(preview.endsWith("consequences across europe"))
+    }
+
+    @Test
+    fun mergeDictationTranscriptHandlesBlankAndExistingDraftsCleanly() {
+        assertEquals(
+            "Existing draft   ",
+            ComposerChromeHelper.mergeDictationTranscript("Existing draft   ", "   \n "),
+        )
+        assertEquals(
+            "hello world",
+            ComposerChromeHelper.mergeDictationTranscript("", "  hello world  "),
+        )
+        assertEquals(
+            "hello world",
+            ComposerChromeHelper.mergeDictationTranscript("  \n\t ", "  hello world  "),
+        )
+        assertEquals(
+            "Explain quantum computing",
+            ComposerChromeHelper.mergeDictationTranscript("Explain   ", "  quantum computing "),
+        )
+        assertEquals(
+            "First sentence. second sentence.",
+            ComposerChromeHelper.mergeDictationTranscript("First sentence.", "second sentence."),
+        )
+    }
 }

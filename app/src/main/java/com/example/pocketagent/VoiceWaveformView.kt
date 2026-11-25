@@ -9,6 +9,7 @@ import android.graphics.RectF
 import android.util.AttributeSet
 import android.view.View
 import android.view.animation.LinearInterpolator
+import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.pow
 import kotlin.math.sin
@@ -59,7 +60,7 @@ class VoiceWaveformView @JvmOverloads constructor(
         val safeRms = if (rms.isFinite()) rms else 0f
         val scaled = (safeRms * RMS_SCALE).coerceIn(0f, 1f)
         targetAmplitude = scaled.pow(RMS_GAMMA)
-        if (isAttachedToWindow && animator == null) {
+        if (isAttachedToWindow && isShown && animator == null && (!isRestingState() || !isSettledAtRest())) {
             startAnimator()
         }
     }
@@ -72,7 +73,7 @@ class VoiceWaveformView @JvmOverloads constructor(
         if (state != DuplexVoiceController.DuplexState.LISTENING) {
             targetAmplitude = 0f
         }
-        if (isAttachedToWindow && animator == null) {
+        if (isAttachedToWindow && isShown && animator == null && (!isRestingState() || !isSettledAtRest())) {
             startAnimator()
         }
         invalidate()
@@ -83,24 +84,41 @@ class VoiceWaveformView @JvmOverloads constructor(
      * Safe to invoke multiple times.
      */
     fun release() {
-        animator?.apply {
-            removeAllUpdateListeners()
-            removeAllListeners()
-            cancel()
-        }
-        animator = null
-        lastFrameNanos = 0L
+        stopAnimator()
         targetAmplitude = 0f
+        smoothedAmplitude = 0f
     }
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
-        startAnimator()
+        if (isShown && (!isRestingState() || !isSettledAtRest())) {
+            startAnimator()
+        }
+    }
+
+    override fun onVisibilityChanged(changedView: View, visibility: Int) {
+        super.onVisibilityChanged(changedView, visibility)
+        if (isShown && isAttachedToWindow) {
+            if (!isRestingState() || !isSettledAtRest()) {
+                startAnimator()
+            }
+        } else {
+            stopAnimator()
+        }
     }
 
     override fun onDetachedFromWindow() {
         release()
         super.onDetachedFromWindow()
+    }
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val defaultWidth = dp(context, DEFAULT_WIDTH_DP) + paddingLeft + paddingRight
+        val defaultHeight = dp(context, DEFAULT_HEIGHT_DP) + paddingTop + paddingBottom
+        setMeasuredDimension(
+            resolveSize(defaultWidth, widthMeasureSpec),
+            resolveSize(defaultHeight, heightMeasureSpec),
+        )
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -109,19 +127,24 @@ class VoiceWaveformView @JvmOverloads constructor(
         val availHeight = (height - paddingTop - paddingBottom).toFloat()
         if (availWidth <= 0f || availHeight <= 0f) return
 
-        val barWidth = (availWidth / (BAR_COUNT * 1.9f)).coerceAtLeast(2f)
-        val gap = barWidth * 0.9f
+        val maxBarWidth = (availHeight * MAX_BAR_WIDTH_HEIGHT_RATIO).coerceAtLeast(2f)
+        val barWidth = (availWidth / (BAR_COUNT * 1.9f)).coerceIn(2f, maxBarWidth)
+        val maxGap = if (BAR_COUNT > 1) {
+            ((availWidth - BAR_COUNT * barWidth) / (BAR_COUNT - 1)).coerceAtLeast(0f)
+        } else {
+            0f
+        }
+        val gap = (barWidth * 0.9f).coerceAtMost(maxGap)
         val totalWidth = BAR_COUNT * barWidth + (BAR_COUNT - 1) * gap
         val startX = paddingLeft + (availWidth - totalWidth) / 2f
         val centerY = paddingTop + availHeight / 2f
         val maxBarHeight = availHeight * MAX_HEIGHT_FRACTION
-        val cornerRadius = barWidth / 2f
-        val isResting = voiceState == DuplexVoiceController.DuplexState.IDLE ||
-            voiceState == DuplexVoiceController.DuplexState.ERROR
+        val isResting = isRestingState()
 
         for (i in 0 until BAR_COUNT) {
             val level = barHeights[i].coerceIn(MIN_BAR_FRACTION, 1f)
-            val barHeight = maxOf(barWidth, maxBarHeight * level)
+            val barHeight = maxOf(barWidth, maxBarHeight * level).coerceAtMost(availHeight)
+            val cornerRadius = minOf(barWidth, barHeight) / 2f
             val left = startX + i * (barWidth + gap)
             val top = centerY - barHeight / 2f
 
@@ -144,6 +167,29 @@ class VoiceWaveformView @JvmOverloads constructor(
             addUpdateListener { stepFrame() }
             start()
         }
+    }
+
+    private fun stopAnimator() {
+        animator?.apply {
+            removeAllUpdateListeners()
+            removeAllListeners()
+            cancel()
+        }
+        animator = null
+        lastFrameNanos = 0L
+    }
+
+    private fun isRestingState(): Boolean =
+        voiceState == DuplexVoiceController.DuplexState.IDLE ||
+            voiceState == DuplexVoiceController.DuplexState.ERROR
+
+    private fun isSettledAtRest(): Boolean {
+        for (i in 0 until BAR_COUNT) {
+            if (abs(barHeights[i] - MIN_BAR_FRACTION) >= SETTLE_EPSILON) {
+                return false
+            }
+        }
+        return true
     }
 
     private fun stepFrame() {
@@ -191,6 +237,18 @@ class VoiceWaveformView @JvmOverloads constructor(
         for (i in 0 until BAR_COUNT) {
             barHeights[i] += (targetBarHeights[i] - barHeights[i]) * barLerp
         }
+        if (isRestingState() && isSettledAtRest()) {
+            for (i in 0 until BAR_COUNT) {
+                barHeights[i] = MIN_BAR_FRACTION
+            }
+            invalidate()
+            post {
+                if (isAttachedToWindow && isRestingState() && isSettledAtRest()) {
+                    stopAnimator()
+                }
+            }
+            return
+        }
         invalidate()
     }
 
@@ -205,8 +263,12 @@ class VoiceWaveformView @JvmOverloads constructor(
 
     private companion object {
         const val BAR_COUNT = 20
+        const val DEFAULT_WIDTH_DP = 220
+        const val DEFAULT_HEIGHT_DP = 52
         const val MIN_BAR_FRACTION = 0.08f
         const val MAX_HEIGHT_FRACTION = 0.92f
+        const val MAX_BAR_WIDTH_HEIGHT_RATIO = 0.16f
+        const val SETTLE_EPSILON = 0.002f
         const val BELL_FALLOFF = 2.4f
         const val RMS_SCALE = 3.2f
         const val RMS_GAMMA = 0.85f

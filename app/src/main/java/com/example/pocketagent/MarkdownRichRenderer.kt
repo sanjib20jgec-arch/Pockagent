@@ -3,6 +3,7 @@ package com.example.pocketagent
 import android.content.Context
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.InsetDrawable
 import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.text.style.BackgroundColorSpan
@@ -471,6 +472,7 @@ object MarkdownRichRenderer {
         markdown: String,
         palette: UiPalette,
         onCopyCode: (code: String, language: String?) -> Unit,
+        onPreviewCode: ((code: String, language: String?) -> Unit)? = null,
     ) {
         container.removeAllViews()
         if (markdown.isBlank()) return
@@ -509,6 +511,7 @@ object MarkdownRichRenderer {
                         text = buildSpannable(element.text, palette)
                         textSize = 15f
                         setTextColor(palette.ink)
+                        typeface = Typeface.create("sans-serif", Typeface.NORMAL)
                         setLineSpacing(dp(context, 4).toFloat(), 1f)
                         setTextIsSelectable(true)
                         layoutParams = LinearLayout.LayoutParams(
@@ -523,7 +526,9 @@ object MarkdownRichRenderer {
                 }
 
                 is MarkdownFormatter.MarkdownElement.CodeBlock -> {
-                    container.addView(buildCodeBlockCard(context, element, palette, onCopyCode))
+                    container.addView(
+                        buildCodeBlockCard(context, element, palette, onCopyCode, onPreviewCode)
+                    )
                 }
 
                 is MarkdownFormatter.MarkdownElement.BulletItem -> {
@@ -577,6 +582,7 @@ object MarkdownRichRenderer {
         element: MarkdownFormatter.MarkdownElement.CodeBlock,
         palette: UiPalette,
         onCopyCode: (code: String, language: String?) -> Unit,
+        onPreviewCode: ((code: String, language: String?) -> Unit)? = null,
     ): LinearLayout {
         val radiusPx = dp(context, 14).toFloat()
         val strokePx = maxOf(1, dp(context, 1))
@@ -626,6 +632,50 @@ object MarkdownRichRenderer {
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
         headerRow.addView(badgeView)
+
+        if (onPreviewCode != null && HtmlArtifactSandbox.isPreviewableCode(element.language, element.code)) {
+            val previewButton = Button(context).apply {
+                val minTouchH = dp(context, 48)
+                val minTouchW = dp(context, 48)
+                val vInset = dp(context, 6)
+                text = "▶ Preview"
+                contentDescription = "Preview ${element.language ?: "HTML"} in offline sandbox"
+                setAllCaps(false)
+                textSize = 11.5f
+                typeface = Typeface.create("sans-serif", Typeface.BOLD)
+                setTextColor(palette.teal)
+                gravity = Gravity.CENTER
+                minHeight = minTouchH
+                minimumHeight = minTouchH
+                minWidth = minTouchW
+                minimumWidth = minTouchW
+                background = InsetDrawable(
+                    rippleDrawable(
+                        roundedShape(palette.mint, dp(context, 10).toFloat()),
+                        palette.rippleOnMint,
+                    ),
+                    0,
+                    vInset,
+                    0,
+                    vInset,
+                )
+                setPadding(dp(context, 12), dp(context, 10), dp(context, 12), dp(context, 10))
+                backgroundTintList = null
+                stateListAnimator = null
+                isFocusable = true
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply {
+                    marginEnd = dp(context, 6)
+                }
+                setOnClickListener {
+                    performSubtleHaptic(this)
+                    onPreviewCode(element.code, element.language)
+                }
+            }
+            headerRow.addView(previewButton)
+        }
 
         val copyButton = Button(context).apply {
             val minTouchH = dp(context, 48)
@@ -733,6 +783,7 @@ object MarkdownRichRenderer {
             this.text = buildSpannable(text, palette)
             textSize = 15f
             setTextColor(palette.ink)
+            typeface = Typeface.create("sans-serif", Typeface.NORMAL)
             setLineSpacing(dp(context, 4).toFloat(), 1f)
             setTextIsSelectable(true)
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
@@ -831,9 +882,7 @@ object MarkdownRichRenderer {
             text = buildSpannable(cell, palette)
             textSize = 13f
             setTextColor(palette.ink)
-            if (isHeader) {
-                typeface = Typeface.create("sans-serif", Typeface.BOLD)
-            }
+            typeface = Typeface.create("sans-serif", if (isHeader) Typeface.BOLD else Typeface.NORMAL)
             setTextIsSelectable(true)
             setPadding(dp(context, 10), dp(context, 8), dp(context, 10), dp(context, 8))
         }

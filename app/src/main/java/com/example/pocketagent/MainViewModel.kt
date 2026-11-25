@@ -622,18 +622,45 @@ class MainViewModel internal constructor(
         }
 
         isGenerationCancelled.set(false)
+        val generationStartNs = System.nanoTime()
         val calculation = if (task.isNotBlank()) LocalCalculatorTool.tryEvaluate(task) else null
         updateState {
-            it.withLastUserPrompt(task).withThinking().withActiveCalculation(calculation)
+            it.withLastUserPrompt(task)
+                .withThinking()
+                .withActiveCalculation(calculation)
+                .withLiveStage("Preparing prompt")
+                .withAgentSteps(emptyList())
+                .withGenerationMetrics("")
         }
 
         workerExecutor.execute {
             val accumulated = StringBuilder()
             val firstChunk = AtomicBoolean(true)
+            var firstTokenElapsedMs: Long? = null
             var retrievedCitations = emptyList<LocalDocumentRetriever.DocumentCitation>()
+            val stepBadges = mutableListOf<AgentActivityTracker.AgentStepBadge>()
             try {
                 val intent = AnswerDirective.classify(task.ifBlank { attached })
                 val history = conversationHistoryFor(task)
+                val matchedNotes = if (task.isNotBlank()) {
+                    NotesRetriever.findRelevantNotes(task, notesStore.listNotes())
+                } else {
+                    emptyList()
+                }
+                if (matchedNotes.isNotEmpty()) {
+                    stepBadges += AgentActivityTracker.AgentStepBadge(
+                        kind = StepKind.NOTES,
+                        title = "Notes",
+                        detail = matchedNotes.joinToString(", ") { it.title },
+                    )
+                }
+                if (calculation != null) {
+                    stepBadges += AgentActivityTracker.AgentStepBadge(
+                        kind = StepKind.CALCULATOR,
+                        title = "Calculator",
+                        detail = "${calculation.expression} = ${calculation.displayOutput}",
+                    )
+                }
                 val contextToInject = if (attached.isNotBlank()) {
                     val retrieval = LocalDocumentRetriever.retrieveTextWithCitations(
                         query = task,
@@ -642,6 +669,13 @@ class MainViewModel internal constructor(
                         maxChars = MainUiState.MAX_ATTACHMENT_CHARS,
                     )
                     retrievedCitations = retrieval.citations
+                    if (retrievedCitations.isNotEmpty()) {
+                        stepBadges += AgentActivityTracker.AgentStepBadge(
+                            kind = StepKind.DOCUMENT,
+                            title = "Documents",
+                            detail = "${retrievedCitations.size} citation${if (retrievedCitations.size > 1) "s" else ""}",
+                        )
+                    }
                     if (retrieval.promptContext.isNotBlank()) retrieval.promptContext else attached
                 } else {
                     ""
@@ -661,8 +695,20 @@ class MainViewModel internal constructor(
                     }
                     if (candidateFacts.isNotEmpty()) {
                         refreshMemories()
+                        stepBadges += AgentActivityTracker.AgentStepBadge(
+                            kind = StepKind.MEMORY,
+                            title = "Memory Saved",
+                            detail = candidateFacts.first().content,
+                        )
                     }
                     val memoryBlock = userMemoryStore.buildPromptContext(maxTokens = 120)
+                    if (candidateFacts.isEmpty() && memoryBlock.isNotBlank()) {
+                        stepBadges += AgentActivityTracker.AgentStepBadge(
+                            kind = StepKind.MEMORY,
+                            title = "Memory",
+                            detail = "Applied personal context",
+                        )
+                    }
                     ContextBudgetManager().enrichSystemInstructionWithMemory(
                         AnswerDirective.systemInstructionFor(intent),
                         memoryBlock,
@@ -670,6 +716,8 @@ class MainViewModel internal constructor(
                 } else {
                     AnswerDirective.systemInstructionFor(intent)
                 }
+
+                updateState { it.withAgentSteps(stepBadges.toList()) }
 
                 var attempt = 0
                 var result = ""
@@ -680,7 +728,11 @@ class MainViewModel internal constructor(
                     if (isRetry) {
                         synchronized(accumulated) { accumulated.setLength(0) }
                         firstChunk.set(true)
-                        updateState { it.withStatus("Answer needs more detail. Refining on this device…") }
+                        firstTokenElapsedMs = null
+                        updateState {
+                            it.withStatus("Answer needs more detail. Refining on this device…")
+                                .withLiveStage("Refining answer")
+                        }
                     }
 
                     val promptBuild = answerPrompt(
@@ -690,6 +742,7 @@ class MainViewModel internal constructor(
                         isRetry = isRetry,
                         history = history,
                         calculation = calculation,
+                        relevantNotes = matchedNotes,
                     )
                     if (promptBuild.truncatedCount > 0 && !isRetry) {
                         updateState { it.withStatus("Older context trimmed to fit model limit.") }
@@ -698,10 +751,14 @@ class MainViewModel internal constructor(
                     // The guard stops a model that locks onto a phrase and repeats it forever.
                     val guard = GuardedGeneration { currentText ->
                         val isFirst = firstChunk.compareAndSet(true, false)
+                        if (isFirst) {
+                            firstTokenElapsedMs = (System.nanoTime() - generationStartNs) / 1_000_000L
+                        }
                         val formatted = MarkdownFormatter.formatForDisplay(currentText)
                         val plain = MarkdownFormatter.stripToPlainText(currentText)
                         updateState {
                             it.withStreamChunk(currentText, formatted, plain, isFirst)
+                                .let { s -> if (isFirst) s.withLiveStage("Streaming") else s }
                         }
                     }
                     val raw = llmRunner.runInference(
@@ -742,11 +799,20 @@ class MainViewModel internal constructor(
                     return@execute
                 }
 
+                val elapsedMs = ((System.nanoTime() - generationStartNs) / 1_000_000L).coerceAtLeast(0L)
+                val metricsBadge = AgentTelemetryFormatter.formatCompletedBadge(
+                    backendTag = "Local",
+                    elapsedMs = elapsedMs,
+                    finalChars = result.length,
+                    firstTokenElapsedMs = firstTokenElapsedMs,
+                )
                 val finalFormatted = MarkdownFormatter.formatForDisplay(result)
                 val finalPlain = MarkdownFormatter.stripToPlainText(result)
                 updateState {
                     it.withGenerationCompleted(result, finalFormatted, finalPlain)
                         .withDocumentCitations(retrievedCitations)
+                        .withLiveStage("Complete")
+                        .withGenerationMetrics(metricsBadge)
                         .let { done ->
                             val stopped = runawayFragment
                             if (stopped != null && result.isNotBlank()) {
@@ -767,10 +833,12 @@ class MainViewModel internal constructor(
                     updateState {
                         it.withGenerationStopped(currentText, formatted, plain)
                             .withDocumentCitations(retrievedCitations)
+                            .withLiveStage("Stopped")
                     }
                 } else {
                     updateState {
                         it.withGenerationError(e.message ?: "unknown error")
+                            .withLiveStage("Error")
                     }
                 }
             }
@@ -794,7 +862,9 @@ class MainViewModel internal constructor(
         isRetry: Boolean,
         history: List<ChatMessage>,
         calculation: LocalCalculatorTool.CalculationResult? = null,
-    ): AnswerPromptComposer.PromptBuildResult = promptContext.answerPrompt(task, attachment, intent, isRetry, history, calculation)
+        relevantNotes: List<PersonalNotesStore.PersonalNote> = emptyList(),
+    ): AnswerPromptComposer.PromptBuildResult =
+        promptContext.answerPrompt(task, attachment, intent, isRetry, history, calculation, relevantNotes)
 
     /**
      * Halts an in-progress token generation loop cleanly.

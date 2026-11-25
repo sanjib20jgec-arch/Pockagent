@@ -212,4 +212,61 @@ class AnswerPromptComposerTest {
         assertTrue(built.prompt.contains("Offline Calculation Verification:"))
         assertTrue(built.prompt.contains("25 * 4 + 10 = 110"))
     }
+
+    @Test
+    fun injectsRelevantPersonalNotesWhenProvidedAndOmitsWhenEmpty() {
+        val note = PersonalNotesStore.PersonalNote(
+            id = "note-1",
+            title = "Router Setup",
+            content = "Admin portal is 192.168.1.1 and guest SSID is HomeGuest.",
+            tags = listOf("wifi", "network"),
+        )
+
+        val withoutNotes = composer.answerPrompt(
+            task = "What is the router admin address?",
+            attachment = "",
+            intent = AnswerDirective.Intent.FACT,
+            isRetry = false,
+            history = emptyList(),
+        )
+        assertFalse(withoutNotes.prompt.contains("Relevant Personal Notes (local context):"))
+
+        val withNotes = composer.answerPrompt(
+            task = "What is the router admin address?",
+            attachment = "",
+            intent = AnswerDirective.Intent.FACT,
+            isRetry = false,
+            history = emptyList(),
+            relevantNotes = listOf(note),
+        )
+        assertTrue(withNotes.prompt.contains("Relevant Personal Notes (local context):"))
+        assertTrue(withNotes.prompt.contains("- Router Setup: Admin portal is 192.168.1.1 and guest SSID is HomeGuest."))
+        assertTrue(withNotes.prompt.contains("What is the router admin address?"))
+    }
+
+    @Test
+    fun combinesCalculationAndBoundedPersonalNotesCleanly() {
+        val calc = LocalCalculatorTool.tryEvaluate("What is 15% of 2400?")!!
+        val hugeNote = PersonalNotesStore.PersonalNote(
+            id = "note-big",
+            title = "Tax Bracket",
+            content = "Standard rate note " + "detail ".repeat(200),
+        )
+
+        val built = composer.answerPrompt(
+            task = "What is 15% of 2400?",
+            attachment = "",
+            intent = AnswerDirective.Intent.FACT,
+            isRetry = false,
+            history = emptyList(),
+            calculation = calc,
+            relevantNotes = listOf(hugeNote),
+        )
+
+        assertTrue(built.prompt.contains("Offline Calculation Verification:"))
+        assertTrue(built.prompt.contains("15% of 2400 = 360"))
+        assertTrue(built.prompt.contains("Relevant Personal Notes (local context):"))
+        assertTrue(built.prompt.contains("- Tax Bracket:"))
+        assertTrue(built.prompt.length < 2500)
+    }
 }

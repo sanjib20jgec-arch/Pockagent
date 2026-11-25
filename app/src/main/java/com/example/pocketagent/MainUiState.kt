@@ -61,6 +61,9 @@ data class MainUiState(
     val isDuplexActive: Boolean = false,
     val duplexState: DuplexVoiceController.DuplexState = DuplexVoiceController.DuplexState.IDLE,
     val duplexStatusMessage: String = "",
+    val agentSteps: List<AgentActivityTracker.AgentStepBadge> = emptyList(),
+    val liveStageLabel: String = "",
+    val lastGenerationMetrics: String = "",
 ) {
     companion object {
         // Conservative for 4K-context models: ~1700 tokens, leaving room for system/history/response.
@@ -367,5 +370,17 @@ data class MainUiState(
 
     fun withDuplexActive(active: Boolean): MainUiState = copy(
         isDuplexActive = active,
+    )
+
+    fun withAgentSteps(steps: List<AgentActivityTracker.AgentStepBadge>): MainUiState = copy(
+        agentSteps = steps,
+    )
+
+    fun withLiveStage(stage: String): MainUiState = copy(
+        liveStageLabel = stage,
+    )
+
+    fun withGenerationMetrics(metrics: String): MainUiState = copy(
+        lastGenerationMetrics = metrics,
     )
 }

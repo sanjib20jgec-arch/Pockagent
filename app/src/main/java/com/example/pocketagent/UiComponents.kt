@@ -67,9 +67,7 @@ fun styledText(
     this.text = text
     textSize = sizeSp
     setTextColor(color)
-    if (bold) {
-        typeface = Typeface.create("sans-serif", Typeface.BOLD)
-    }
+    typeface = Typeface.create("sans-serif", if (bold) Typeface.BOLD else Typeface.NORMAL)
 }
 
 /** Creates a primary mint-filled pill [Button] with a minimum 48dp touch target. */
@@ -166,6 +164,7 @@ fun iconTouchButton(
     contentDescription = accessibilityLabel
     setAllCaps(false)
     textSize = textSizeSp
+    typeface = Typeface.create("sans-serif", Typeface.NORMAL)
     setTextColor(textColor)
     gravity = Gravity.CENTER
     setPadding(pad, pad, pad, pad)
@@ -281,6 +280,7 @@ fun styleEditText(
     val vPad = dp(context, 12)
     editText.setTextColor(palette.ink)
     editText.setHintTextColor(palette.muted)
+    editText.typeface = Typeface.create("sans-serif", Typeface.NORMAL)
     editText.highlightColor = palette.mint
     editText.setPadding(hPad, vPad, hPad, vPad)
     editText.background = roundedShape(
@@ -333,21 +333,30 @@ fun showStyledAlertDialog(dialog: AlertDialog, palette: UiPalette) {
 
     val titleId = context.resources.getIdentifier("alertTitle", "id", "android")
     if (titleId != 0) {
-        dialog.findViewById<TextView>(titleId)?.setTextColor(palette.ink)
+        dialog.findViewById<TextView>(titleId)?.apply {
+            setTextColor(palette.ink)
+            typeface = Typeface.create("sans-serif", Typeface.BOLD)
+        }
     }
-    dialog.findViewById<TextView>(android.R.id.message)?.setTextColor(palette.muted)
+    dialog.findViewById<TextView>(android.R.id.message)?.apply {
+        setTextColor(palette.muted)
+        typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+    }
 
     dialog.getButton(DialogInterface.BUTTON_POSITIVE)?.apply {
         setTextColor(palette.teal)
         setAllCaps(false)
+        typeface = Typeface.create("sans-serif", Typeface.BOLD)
     }
     dialog.getButton(DialogInterface.BUTTON_NEGATIVE)?.apply {
         setTextColor(palette.muted)
         setAllCaps(false)
+        typeface = Typeface.create("sans-serif", Typeface.BOLD)
     }
     dialog.getButton(DialogInterface.BUTTON_NEUTRAL)?.apply {
         setTextColor(palette.teal)
         setAllCaps(false)
+        typeface = Typeface.create("sans-serif", Typeface.BOLD)
     }
 }
 

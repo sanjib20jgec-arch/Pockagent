@@ -115,6 +115,46 @@ object ComposerChromeHelper {
         }
     }
 
+    /**
+     * Formats live partial speech recognition text for the dictation status banner.
+     *
+     * Collapses repeated whitespace; returns `"Listening… tap Stop when done"` when blank,
+     * and keeps a word-aligned trailing snippet prefixed with `"…"` when exceeding [maxChars].
+     */
+    fun formatDictationLivePreview(partialText: String, maxChars: Int = 110): String {
+        val normalized = partialText.replace(WHITESPACE_REGEX, " ").trim()
+        if (normalized.isEmpty()) return DEFAULT_DICTATION_PROMPT
+        if (maxChars <= 0) return ""
+        if (maxChars == 1) return if (normalized.length > 1) "…" else normalized
+        if (normalized.length <= maxChars) return normalized
+
+        val tailBudget = maxChars - 1
+        val cutIndex = normalized.length - tailBudget
+        val rawTail = normalized.substring(cutIndex)
+        if (normalized[cutIndex - 1] == ' ') {
+            return "…$rawTail"
+        }
+        val firstSpace = rawTail.indexOf(' ')
+        if (firstSpace in 0 until rawTail.length - 1) {
+            return "…" + rawTail.substring(firstSpace + 1)
+        }
+        return "…$rawTail"
+    }
+
+    /**
+     * Joins a trimmed [spokenTranscript] onto [existingDraft] with a single space separator,
+     * returning [existingDraft] unchanged when [spokenTranscript] is blank.
+     */
+    fun mergeDictationTranscript(existingDraft: String, spokenTranscript: String): String {
+        val cleanSpoken = spokenTranscript.trim()
+        if (cleanSpoken.isEmpty()) return existingDraft
+        if (existingDraft.isBlank()) return cleanSpoken
+        return "${existingDraft.trimEnd()} $cleanSpoken"
+    }
+
+    private const val DEFAULT_DICTATION_PROMPT = "Listening… tap Stop when done"
+    private val WHITESPACE_REGEX = Regex("\\s+")
+
     private fun stripModelExtension(displayName: String?): String {
         val trimmed = displayName?.trim().orEmpty()
         val withoutExt = if (trimmed.endsWith(MODEL_EXTENSION, ignoreCase = true)) {
@@ -157,17 +197,19 @@ class ModelStatusPillView(
         val dotSize = dp(context, 8)
         background = dotDrawable
         layoutParams = LayoutParams(dotSize, dotSize).apply {
-            marginEnd = dp(context, 7)
+            marginEnd = dp(context, 5)
         }
     }
 
     private val labelView = styledText(
         context = context,
         text = "Choose model",
-        sizeSp = 12.5f,
+        sizeSp = 12f,
         color = initialPalette.ink,
         bold = true,
     ).apply {
+        typeface = Typeface.create("sans-serif", Typeface.BOLD)
+        textSize = 12f
         maxLines = 1
         isSingleLine = true
         ellipsize = TextUtils.TruncateAt.END
@@ -178,8 +220,9 @@ class ModelStatusPillView(
         orientation = HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
         val minTouch = dp(context, 48)
+        minimumWidth = minTouch
         minimumHeight = minTouch
-        setPadding(dp(context, 12), dp(context, 8), dp(context, 12), dp(context, 8))
+        setPadding(dp(context, 10), dp(context, 8), dp(context, 10), dp(context, 8))
         isClickable = true
         isFocusable = true
         setOnClickListener { onClick() }
@@ -195,6 +238,19 @@ class ModelStatusPillView(
             ),
             initialPalette,
         )
+    }
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val targetMaxWidth = if (MeasureSpec.getMode(widthMeasureSpec) != MeasureSpec.UNSPECIFIED) {
+            (MeasureSpec.getSize(widthMeasureSpec) - paddingLeft - paddingRight - dp(context, 15))
+                .coerceAtLeast(dp(context, 44))
+        } else {
+            Int.MAX_VALUE
+        }
+        if (labelView.maxWidth != targetMaxWidth) {
+            labelView.maxWidth = targetMaxWidth
+        }
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
     }
 
     /** Updates the status dot color, badge text, ink color, ripple background, and description. */
@@ -253,6 +309,9 @@ class ModelStatusPillView(
             rippleColor,
         )
         background = InsetDrawable(capsule, 0, vInset, 0, vInset)
+        // Re-apply explicit View padding after setting InsetDrawable, since View.setBackground()
+        // adopts the drawable's padding (0 horizontal) and would otherwise strip left/right padding.
+        setPadding(dp(context, 10), dp(context, 8), dp(context, 10), dp(context, 8))
     }
 }
 
@@ -292,6 +351,7 @@ object ComposerChromeViews {
                 color = palette.teal,
                 bold = true,
             ).apply {
+                typeface = Typeface.create("sans-serif", Typeface.BOLD)
                 maxLines = 1
                 isSingleLine = true
                 gravity = Gravity.CENTER_VERTICAL
@@ -330,6 +390,10 @@ object ComposerChromeViews {
             color = if (nearBudget) palette.warningInk else palette.muted,
             bold = nearBudget,
         ).apply {
+            typeface = Typeface.create(
+                "sans-serif",
+                if (nearBudget) Typeface.BOLD else Typeface.NORMAL,
+            )
             maxLines = 1
             isSingleLine = true
             gravity = Gravity.CENTER_VERTICAL
@@ -379,6 +443,7 @@ object ComposerChromeViews {
             textColor = palette.teal,
             onClick = onInspect,
         ).apply {
+            typeface = Typeface.create("sans-serif", Typeface.BOLD)
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -396,7 +461,9 @@ object ComposerChromeViews {
             textColor = palette.muted,
             textSizeSp = 18f,
             onClick = onClear,
-        )
+        ).apply {
+            typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+        }
         root.addView(clearButton)
 
         return root
@@ -411,12 +478,12 @@ object ComposerChromeViews {
         onClick: () -> Unit,
     ): Button = Button(context).apply {
         val minTouch = dp(context, 48)
-        val hPad = dp(context, 16)
-        val vPad = dp(context, 10)
+        val hPad = dp(context, 14)
+        val vPad = dp(context, 8)
         text = "↓ Latest"
         contentDescription = "Jump to latest message"
         setAllCaps(false)
-        textSize = 13f
+        textSize = 12.5f
         typeface = Typeface.create("sans-serif", Typeface.BOLD)
         setTextColor(palette.teal)
         gravity = Gravity.CENTER

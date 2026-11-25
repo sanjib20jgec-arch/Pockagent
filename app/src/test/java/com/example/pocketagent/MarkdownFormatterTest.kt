@@ -215,4 +215,99 @@ class MarkdownFormatterTest {
         assertTrue(formatted.contains("────────────────────────────"))
         assertTrue(formatted.contains("Proceed with caution."))
     }
+
+    @Test
+    fun parsesGfmTableWithAlignmentsAndNormalizesUnevenRows() {
+        val input = """
+            Intro paragraph.
+            | Name | Role | Score |
+            | :--- | :---: | ---: |
+            | Alice | Admin | 98 |
+            | Bob | User |
+            | Carol | Guest | 75 | extra |
+            Outro paragraph.
+        """.trimIndent()
+
+        val elements = MarkdownFormatter.parseElements(input)
+        assertEquals(3, elements.size)
+        assertTrue(elements[0] is MarkdownFormatter.MarkdownElement.Paragraph)
+        assertTrue(elements[1] is MarkdownFormatter.MarkdownElement.Table)
+        assertTrue(elements[2] is MarkdownFormatter.MarkdownElement.Paragraph)
+
+        val table = elements[1] as MarkdownFormatter.MarkdownElement.Table
+        assertEquals(listOf("Name", "Role", "Score"), table.headers)
+        assertEquals(3, table.rows.size)
+        assertEquals(listOf("Alice", "Admin", "98"), table.rows[0])
+        assertEquals(listOf("Bob", "User", ""), table.rows[1])
+        assertEquals(listOf("Carol", "Guest", "75"), table.rows[2])
+    }
+
+    @Test
+    fun parsesGfmTableWithoutOuterPipes() {
+        val input = """
+            Metric | Value
+            ---|---
+            Latency | 12ms
+            Throughput | 45 tok/s
+        """.trimIndent()
+
+        val elements = MarkdownFormatter.parseElements(input)
+        assertEquals(1, elements.size)
+        val table = elements[0] as MarkdownFormatter.MarkdownElement.Table
+        assertEquals(listOf("Metric", "Value"), table.headers)
+        assertEquals(
+            listOf(
+                listOf("Latency", "12ms"),
+                listOf("Throughput", "45 tok/s"),
+            ),
+            table.rows,
+        )
+    }
+
+    @Test
+    fun doesNotParsePipeLinesWithoutSeparatorRowAsTable() {
+        val input = """
+            Use A | B for bitwise OR in Kotlin.
+            Another line | with pipes | here.
+            
+            ```text
+            | Col1 | Col2 |
+            | --- | --- |
+            | Val1 | Val2 |
+            ```
+        """.trimIndent()
+
+        val elements = MarkdownFormatter.parseElements(input)
+        assertEquals(2, elements.size)
+        assertTrue(elements[0] is MarkdownFormatter.MarkdownElement.Paragraph)
+        assertTrue(elements[1] is MarkdownFormatter.MarkdownElement.CodeBlock)
+    }
+
+    @Test
+    fun formatsAndStripsTablesCleanlyForDisplayAndTts() {
+        val input = """
+            | **Feature** | Status |
+            | :--- | ---: |
+            | `Tables` | Ready |
+            | [Docs](https://example.com) | Done |
+        """.trimIndent()
+
+        assertTrue(MarkdownFormatter.containsMarkdownSyntax("A | B"))
+
+        val formatted = MarkdownFormatter.formatForDisplay(input)
+        assertTrue(formatted.contains("Feature"))
+        assertTrue(formatted.contains("Status"))
+        assertTrue(formatted.contains("Tables"))
+        assertTrue(formatted.contains("Docs (https://example.com)"))
+        assertTrue(formatted.contains(" | "))
+        assertFalse(formatted.contains("**"))
+
+        val plain = MarkdownFormatter.stripToPlainText(input)
+        assertTrue(plain.contains("Feature, Status"))
+        assertTrue(plain.contains("Tables, Ready"))
+        assertTrue(plain.contains("Docs (https://example.com), Done"))
+        assertFalse(plain.contains("|"))
+        assertFalse(plain.contains("---"))
+        assertFalse(plain.contains("`"))
+    }
 }

@@ -15,6 +15,8 @@ import android.view.View
 import android.widget.Button
 import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
+import android.widget.TableLayout
+import android.widget.TableRow
 import android.widget.TextView
 import java.util.Locale
 
@@ -550,6 +552,10 @@ object MarkdownRichRenderer {
                     container.addView(buildBlockquoteView(context, element.text, palette))
                 }
 
+                is MarkdownFormatter.MarkdownElement.Table -> {
+                    container.addView(buildTableView(context, element, palette))
+                }
+
                 is MarkdownFormatter.MarkdownElement.HorizontalRule -> {
                     val divider = dividerView(context, palette).apply {
                         layoutParams = LinearLayout.LayoutParams(
@@ -782,5 +788,89 @@ object MarkdownRichRenderer {
         row.addView(quoteText)
 
         return row
+    }
+
+    private fun buildTableView(
+        context: Context,
+        table: MarkdownFormatter.MarkdownElement.Table,
+        palette: UiPalette,
+    ): View {
+        val strokePx = maxOf(1, dp(context, 1))
+        val container = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            background = roundedShape(
+                color = palette.surface,
+                radiusPx = dp(context, 12).toFloat(),
+                strokeWidthPx = strokePx,
+                strokeColor = palette.border,
+            )
+            clipToOutline = true
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply {
+                topMargin = dp(context, 6)
+                bottomMargin = dp(context, 8)
+            }
+        }
+
+        val tableLayout = TableLayout(context).apply {
+            isStretchAllColumns = false
+            isShrinkAllColumns = false
+        }
+
+        fun createRowDivider(): View = View(context).apply {
+            setBackgroundColor(palette.border)
+            layoutParams = TableLayout.LayoutParams(
+                TableLayout.LayoutParams.MATCH_PARENT,
+                strokePx,
+            )
+        }
+
+        fun createCellTextView(cell: String, isHeader: Boolean): TextView = TextView(context).apply {
+            text = buildSpannable(cell, palette)
+            textSize = 13f
+            setTextColor(palette.ink)
+            if (isHeader) {
+                typeface = Typeface.create("sans-serif", Typeface.BOLD)
+            }
+            setTextIsSelectable(true)
+            setPadding(dp(context, 10), dp(context, 8), dp(context, 10), dp(context, 8))
+        }
+
+        val headerRow = TableRow(context).apply {
+            setBackgroundColor(palette.surfaceElevated)
+        }
+        for (header in table.headers) {
+            headerRow.addView(createCellTextView(header, isHeader = true))
+        }
+        tableLayout.addView(headerRow)
+
+        if (table.rows.isNotEmpty()) {
+            tableLayout.addView(createRowDivider())
+        }
+
+        for ((rowIndex, row) in table.rows.withIndex()) {
+            val dataRow = TableRow(context)
+            for (cell in row) {
+                dataRow.addView(createCellTextView(cell, isHeader = false))
+            }
+            tableLayout.addView(dataRow)
+            if (rowIndex < table.rows.lastIndex) {
+                tableLayout.addView(createRowDivider())
+            }
+        }
+
+        val scrollView = HorizontalScrollView(context).apply {
+            isHorizontalScrollBarEnabled = true
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            )
+            addView(tableLayout)
+        }
+        container.addView(scrollView)
+
+        return container
     }
 }

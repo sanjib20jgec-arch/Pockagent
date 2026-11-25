@@ -12,10 +12,13 @@ import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
 import android.os.Build
 import android.view.Gravity
+import android.view.HapticFeedbackConstants
 import android.view.View
 import android.view.WindowInsetsController
 import android.widget.Button
 import android.widget.EditText
+import android.widget.ImageButton
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 
@@ -175,6 +178,64 @@ fun iconTouchButton(
     stateListAnimator = null
     isFocusable = true
     setOnClickListener { onClick() }
+}
+
+/** Loads [drawableRes], mutates it, and applies [tintColor] safely. */
+fun tintedVectorDrawable(context: Context, drawableRes: Int, tintColor: Int): Drawable? =
+    context.getDrawable(drawableRes)?.mutate()?.apply {
+        setTint(tintColor)
+    }
+
+/**
+ * Creates an accessible [ImageButton] displaying a tinted vector drawable inside a rounded
+ * ripple container (default 48dp × 48dp touch target).
+ */
+fun vectorIconButton(
+    context: Context,
+    palette: UiPalette,
+    drawableRes: Int,
+    accessibilityLabel: String,
+    tintColor: Int = palette.ink,
+    bgColor: Int = palette.surfaceElevated,
+    borderColor: Int? = palette.border,
+    rippleColor: Int = palette.rippleOnSurface,
+    cornerDp: Int = 24,
+    sizeDp: Int = 48,
+    iconSizeDp: Int = 20,
+    onClick: () -> Unit,
+): ImageButton = ImageButton(context).apply {
+    val touchPx = dp(context, sizeDp)
+    val padPx = dp(context, ((sizeDp - iconSizeDp).coerceAtLeast(0)) / 2)
+    setImageDrawable(tintedVectorDrawable(context, drawableRes, tintColor))
+    scaleType = ImageView.ScaleType.CENTER_INSIDE
+    contentDescription = accessibilityLabel
+    setPadding(padPx, padPx, padPx, padPx)
+    minimumWidth = touchPx
+    minimumHeight = touchPx
+    background = rippleDrawable(
+        roundedShape(
+            color = bgColor,
+            radiusPx = dp(context, cornerDp).toFloat(),
+            strokeWidthPx = if (borderColor != null) maxOf(1, dp(context, 1)) else 0,
+            strokeColor = borderColor,
+        ),
+        rippleColor,
+    )
+    backgroundTintList = null
+    stateListAnimator = null
+    isFocusable = true
+    setOnClickListener { onClick() }
+}
+
+/** Triggers a subtle tactile haptic tick or confirmation pulse on [view]. */
+fun performSubtleHaptic(view: View?, isConfirm: Boolean = false) {
+    view ?: return
+    val constant = if (isConfirm && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        HapticFeedbackConstants.CONFIRM
+    } else {
+        HapticFeedbackConstants.KEYBOARD_TAP
+    }
+    view.performHapticFeedback(constant)
 }
 
 /** Creates a vertical [LinearLayout] card styled with surface/border tokens from [palette]. */

@@ -20,6 +20,7 @@ object MarkdownFormatter {
         data class BulletItem(val indentLevel: Int, val text: String) : MarkdownElement()
         data class NumberedItem(val number: Int, val text: String) : MarkdownElement()
         data class Blockquote(val text: String) : MarkdownElement()
+        data class Table(val headers: List<String>, val rows: List<List<String>>) : MarkdownElement()
         object HorizontalRule : MarkdownElement()
     }
 
@@ -61,7 +62,9 @@ object MarkdownFormatter {
             }
         }
 
-        for (line in lines) {
+        var i = 0
+        while (i < lines.size) {
+            val line = lines[i]
             val fenceMatch = CODE_FENCE_REGEX.matchEntire(line)
             if (fenceMatch != null) {
                 if (inCodeBlock) {
@@ -77,19 +80,44 @@ object MarkdownFormatter {
                     val lang = fenceMatch.groupValues[1].trim()
                     codeLanguage = if (lang.isNotEmpty()) lang else null
                 }
+                i++
                 continue
             }
 
             if (inCodeBlock) {
                 if (codeBuffer.isNotEmpty()) codeBuffer.append('\n')
                 codeBuffer.append(line)
+                i++
                 continue
+            }
+
+            // GFM Table: header row with >= 2 pipe-separated cells followed by valid separator row
+            if (i + 1 < lines.size && line.contains('|')) {
+                val headerCells = parseTableRowCells(line)
+                if (headerCells.size >= 2 && isTableSeparatorRow(lines[i + 1], headerCells.size)) {
+                    flushParagraph()
+                    val colCount = headerCells.size
+                    val rows = mutableListOf<List<String>>()
+                    i += 2
+                    while (i < lines.size) {
+                        val rowLine = lines[i]
+                        if (rowLine.isBlank() || !rowLine.contains('|')) break
+                        if (CODE_FENCE_REGEX.matches(rowLine)) break
+                        val rawCells = parseTableRowCells(rowLine)
+                        if (rawCells.isEmpty()) break
+                        rows.add(normalizeTableRow(rawCells, colCount))
+                        i++
+                    }
+                    elements.add(MarkdownElement.Table(headers = headerCells, rows = rows))
+                    continue
+                }
             }
 
             // Horizontal Rule
             if (HR_REGEX.matches(line)) {
                 flushParagraph()
                 elements.add(MarkdownElement.HorizontalRule)
+                i++
                 continue
             }
 
@@ -100,6 +128,7 @@ object MarkdownFormatter {
                 val level = headerMatch.groupValues[1].length
                 val text = headerMatch.groupValues[2].trim()
                 elements.add(MarkdownElement.Header(level, text))
+                i++
                 continue
             }
 
@@ -110,6 +139,7 @@ object MarkdownFormatter {
                 val indent = bulletMatch.groupValues[1].length / 2
                 val text = bulletMatch.groupValues[2].trim()
                 elements.add(MarkdownElement.BulletItem(indent, text))
+                i++
                 continue
             }
 
@@ -120,6 +150,7 @@ object MarkdownFormatter {
                 val number = numberedMatch.groupValues[2].toIntOrNull() ?: 1
                 val text = numberedMatch.groupValues[3].trim()
                 elements.add(MarkdownElement.NumberedItem(number, text))
+                i++
                 continue
             }
 
@@ -129,12 +160,14 @@ object MarkdownFormatter {
                 flushParagraph()
                 val text = quoteMatch.groupValues[1].trim()
                 elements.add(MarkdownElement.Blockquote(text))
+                i++
                 continue
             }
 
             // Blank line separates paragraphs
             if (line.isBlank()) {
                 flushParagraph()
+                i++
                 continue
             }
 
@@ -143,6 +176,7 @@ object MarkdownFormatter {
                 paragraphBuffer.append('\n')
             }
             paragraphBuffer.append(line)
+            i++
         }
 
         // Flush any trailing elements or unclosed code block (e.g. during streaming)
@@ -155,6 +189,39 @@ object MarkdownFormatter {
         return elements
     }
 
+    private fun parseTableRowCells(line: String): List<String> {
+        val trimmed = line.trim()
+        if (!trimmed.contains('|')) return emptyList()
+        val inner = trimmed
+            .let { if (it.startsWith('|')) it.substring(1) else it }
+            .let { if (it.endsWith('|')) it.substring(0, it.length - 1) else it }
+        return inner.split('|').map { it.trim() }
+    }
+
+    private fun isTableSeparatorRow(line: String, expectedColumns: Int): Boolean {
+        if (!line.contains('|')) return false
+        for (ch in line) {
+            if (ch != '|' && ch != '-' && ch != ':' && !ch.isWhitespace()) {
+                return false
+            }
+        }
+        val cells = parseTableRowCells(line)
+        if (cells.size < 2 || cells.size != expectedColumns) return false
+        return cells.all { cell ->
+            cell.isNotEmpty() && cell.matches(TABLE_SEP_CELL_REGEX)
+        }
+    }
+
+    private fun normalizeTableRow(rawCells: List<String>, colCount: Int): List<String> {
+        if (rawCells.size == colCount) return rawCells
+        if (rawCells.size < colCount) {
+            return rawCells + List(colCount - rawCells.size) { "" }
+        }
+        return rawCells.take(colCount)
+    }
+
+    private val TABLE_SEP_CELL_REGEX = Regex("""^:?-+:?$""")
+
     /**
      * True when [markdown] contains any character that could start a Markdown construct.
      *
@@ -164,7 +231,7 @@ object MarkdownFormatter {
     fun containsMarkdownSyntax(markdown: String): Boolean {
         for (ch in markdown) {
             when (ch) {
-                '#', '*', '_', '`', '>', '[' -> return true
+                '#', '*', '_', '`', '>', '[', '|' -> return true
                 '-' -> return true
             }
         }
@@ -209,6 +276,8 @@ object MarkdownFormatter {
                 val needsExtraLine = element is MarkdownElement.Header ||
                         element is MarkdownElement.CodeBlock ||
                         element is MarkdownElement.HorizontalRule ||
+                        element is MarkdownElement.Table ||
+                        prev is MarkdownElement.Table ||
                         (element is MarkdownElement.Paragraph && (prev is MarkdownElement.BulletItem || prev is MarkdownElement.NumberedItem))
 
                 if (needsExtraLine && !sb.endsWith("\n\n")) {
@@ -252,6 +321,23 @@ object MarkdownFormatter {
                     sb.append("┃ ").append(cleanInlineFormatting(element.text))
                 }
 
+                is MarkdownElement.Table -> {
+                    val cleanHeaders = element.headers.map { cleanInlineFormatting(it) }
+                    val cleanRows = element.rows.map { row -> row.map { cleanInlineFormatting(it) } }
+                    val colWidths = IntArray(cleanHeaders.size) { col ->
+                        val headerLen = cleanHeaders[col].length
+                        val maxRowLen = cleanRows.maxOfOrNull { it.getOrElse(col) { "" }.length } ?: 0
+                        maxOf(headerLen, maxRowLen, 3)
+                    }
+                    fun formatTableRow(cells: List<String>): String =
+                        cells.mapIndexed { col, cell -> cell.padEnd(colWidths[col]) }.joinToString(" | ")
+                    sb.append(formatTableRow(cleanHeaders)).append("\n")
+                    sb.append(colWidths.joinToString("-+-") { "─".repeat(it) })
+                    for (row in cleanRows) {
+                        sb.append("\n").append(formatTableRow(row))
+                    }
+                }
+
                 is MarkdownElement.HorizontalRule -> {
                     sb.append("────────────────────────────")
                 }
@@ -280,6 +366,8 @@ object MarkdownFormatter {
                 val prev = elements[index - 1]
                 val needsExtraLine = element is MarkdownElement.Header ||
                         element is MarkdownElement.CodeBlock ||
+                        element is MarkdownElement.Table ||
+                        prev is MarkdownElement.Table ||
                         (element is MarkdownElement.Paragraph && (prev is MarkdownElement.BulletItem || prev is MarkdownElement.NumberedItem))
                 if (needsExtraLine && !sb.endsWith("\n\n")) {
                     sb.append("\n")
@@ -310,6 +398,24 @@ object MarkdownFormatter {
 
                 is MarkdownElement.Blockquote -> {
                     sb.append(stripInlineSyntax(element.text))
+                }
+
+                is MarkdownElement.Table -> {
+                    val headerLine = element.headers.map { stripInlineSyntax(it) }
+                        .filter { it.isNotEmpty() }
+                        .joinToString(", ")
+                    if (headerLine.isNotEmpty()) {
+                        sb.append(headerLine)
+                    }
+                    for (row in element.rows) {
+                        val rowLine = row.map { stripInlineSyntax(it) }
+                            .filter { it.isNotEmpty() }
+                            .joinToString(", ")
+                        if (rowLine.isNotEmpty()) {
+                            if (sb.isNotEmpty() && !sb.endsWith("\n")) sb.append("\n")
+                            sb.append(rowLine)
+                        }
+                    }
                 }
 
                 is MarkdownElement.HorizontalRule -> {

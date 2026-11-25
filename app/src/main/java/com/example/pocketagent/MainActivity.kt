@@ -27,12 +27,16 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.text.TextUtils
+import android.transition.TransitionManager
 import android.view.Gravity
 import android.view.View
+import android.view.animation.DecelerateInterpolator
 import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
+import android.widget.ImageButton
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.RadioButton
@@ -132,15 +136,16 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     private lateinit var composerCard: LinearLayout
     private lateinit var composerRoot: LinearLayout
     private lateinit var toolsTray: LinearLayout
-    private lateinit var toolsToggleButton: Button
+    private lateinit var toolsToggleButton: ImageButton
     private lateinit var attachmentChipContainer: LinearLayout
     private lateinit var recordingBanner: LinearLayout
     private lateinit var recordingDot: View
     private lateinit var recordingBannerText: TextView
     private lateinit var recordingStopButton: Button
-    private lateinit var composerMicButton: Button
+    private lateinit var composerMicButton: ImageButton
     private lateinit var modelStatusPill: ModelStatusPillView
     private var isToolsTrayOpen = false
+    private var isJumpToBottomVisible = false
     private var lastAttachmentStripSignature: String? = null
     /** True while the user is reading earlier output; suppresses forced auto-scroll. */
     @Volatile private var isUserReadingUpwards = false
@@ -319,15 +324,13 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(12), dp(6), dp(8), dp(6))
         }
-        val mark = TextView(this).apply {
-            text = "P"
-            textSize = 17f
-            typeface = Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER
-            setTextColor(WHITE)
+        val mark = ImageView(this).apply {
+            setImageDrawable(tintedVectorDrawable(this@MainActivity, R.drawable.ic_brand_logo, WHITE))
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            setPadding(dp(7), dp(7), dp(7), dp(7))
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             background = shape(palette.teal, 12)
-            layoutParams = LinearLayout.LayoutParams(dp(34), dp(34))
+            layoutParams = LinearLayout.LayoutParams(dp(36), dp(36))
         }
         brandRow.addView(mark)
         val brand = column().apply {
@@ -348,44 +351,35 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             }
         }
         brandRow.addView(modelStatusPill)
+        brandRow.addView(View(this), LinearLayout.LayoutParams(0, 0, 1f))
 
-        val headerToolsScroll = HorizontalScrollView(this).apply {
-            isHorizontalScrollBarEnabled = false
-            overScrollMode = View.OVER_SCROLL_NEVER
-        }
-        val headerToolsRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        val headerSpecs = listOf(
-            Triple("+ New", "Start a fresh conversation") { startNewConversation() },
-            Triple("☰ Chats", "View saved conversations") { showHistoryDialog() },
-            Triple("🎙️ Voice", "Start continuous hands-free voice duplex mode") { showDuplexVoiceDialog() },
-            Triple("📝 Notes", "Manage sovereign personal notes") { showNotesManagerDialog() },
-            Triple("🧠 Memory", "Manage sovereign long-term memory") { showMemoryCenterDialog() },
-            Triple("🛡️ Privacy", "View privacy audit, appearance, and security controls") { showPrivacyCenterDialog() },
+        val headerActions = listOf(
+            Triple(R.drawable.ic_voice, "Start continuous hands-free voice duplex mode") {
+                showDuplexVoiceDialog()
+            },
+            Triple(R.drawable.ic_add_chat, "Start a fresh conversation") {
+                startNewConversation()
+            },
+            Triple(R.drawable.ic_menu, "Open workspace menu: chats, notes, memory, models, and privacy") {
+                showWorkspaceMenuDialog()
+            },
         )
-        for ((index, spec) in headerSpecs.withIndex()) {
-            val (label, a11y, action) = spec
-            val btn = com.example.pocketagent.pillButton(
+        for ((index, spec) in headerActions.withIndex()) {
+            val (iconRes, a11y, action) = spec
+            val btn = vectorIconButton(
                 context = this,
                 palette = palette,
-                label = label,
+                drawableRes = iconRes,
                 accessibilityLabel = a11y,
-                compact = true,
                 onClick = action,
-            ).apply {
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                ).apply {
-                    if (index < headerSpecs.lastIndex) marginEnd = dp(6)
-                }
-            }
-            headerToolsRow.addView(btn)
+            )
+            brandRow.addView(
+                btn,
+                LinearLayout.LayoutParams(dp(48), dp(48)).apply {
+                    if (index < headerActions.lastIndex) marginEnd = dp(6)
+                },
+            )
         }
-        headerToolsScroll.addView(headerToolsRow)
-        brandRow.addView(headerToolsScroll, LinearLayout.LayoutParams(0, -2, 1f))
         rootLayout.addView(brandRow, LinearLayout.LayoutParams(-1, -2))
 
         // ------------------------------------------------- Zone B: scrolling chat & workspace
@@ -427,8 +421,13 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             }
         )
         heroModelCtaButton = Button(this).apply {
-            text = "📂 Choose .litertlm Model"
+            text = "Choose .litertlm Model"
             contentDescription = "Choose a LiteRT-LM model file to get started"
+            val folderIcon = tintedVectorDrawable(this@MainActivity, R.drawable.ic_folder, WHITE)?.apply {
+                setBounds(0, 0, dp(18), dp(18))
+            }
+            setCompoundDrawables(folderIcon, null, null, null)
+            compoundDrawablePadding = dp(8)
             setAllCaps(false)
             textSize = 13.5f
             typeface = Typeface.create("sans-serif", Typeface.BOLD)
@@ -464,7 +463,8 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         }
         val quickRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         listOf("Summarize a PDF", "Explain a concept", "Draft a message", "Plan my day").forEach { label ->
-            val chip = secondaryOutlineButton(
+            lateinit var chip: Button
+            chip = secondaryOutlineButton(
                 context = this,
                 palette = palette,
                 label = label,
@@ -472,6 +472,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 compact = true,
                 textColor = palette.teal,
             ) {
+                performSubtleHaptic(chip)
                 taskInput.setText(label)
                 taskInput.setSelection(label.length)
                 taskInput.requestFocus()
@@ -515,6 +516,8 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             isUserReadingUpwards = false
             scrollChatToBottom(force = true)
             updateJumpToBottomVisibility()
+        }.apply {
+            visibility = View.GONE
         }
 
         val chatFrame = FrameLayout(this).apply {
@@ -694,26 +697,20 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             gravity = Gravity.BOTTOM
         }
 
-        toolsToggleButton = Button(this).apply {
-            val touchSize = dp(48)
-            text = "＋"
-            contentDescription = "Show attachment and audio tools"
-            setAllCaps(false)
-            textSize = 19f
-            typeface = Typeface.create("sans-serif", Typeface.BOLD)
-            gravity = Gravity.CENTER
-            setTextColor(palette.teal)
-            setPadding(0, 0, 0, 0)
-            minWidth = touchSize
-            minimumWidth = touchSize
-            minHeight = touchSize
-            minimumHeight = touchSize
-            background = rippleDrawable(roundedShape(palette.mint, dp(24).toFloat()), palette.rippleOnMint)
-            backgroundTintList = null
-            stateListAnimator = null
-            isFocusable = true
-            setOnClickListener { toggleToolsTray(force = false) }
-        }
+        toolsToggleButton = vectorIconButton(
+            context = this,
+            palette = palette,
+            drawableRes = R.drawable.ic_plus,
+            accessibilityLabel = "Show attachment and audio tools",
+            tintColor = palette.teal,
+            bgColor = palette.mint,
+            borderColor = null,
+            rippleColor = palette.rippleOnMint,
+            onClick = {
+                performSubtleHaptic(toolsToggleButton)
+                toggleToolsTray(force = false)
+            },
+        )
         composerRoot.addView(toolsToggleButton, LinearLayout.LayoutParams(dp(48), dp(48)).apply {
             marginEnd = dp(7)
         })
@@ -759,30 +756,26 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             scrollBarStyle = View.SCROLLBARS_INSIDE_INSET,
         )
 
-        composerMicButton = Button(this).apply {
-            val touchSize = dp(48)
-            text = "🎙"
-            contentDescription = "Dictate your question"
-            setAllCaps(false)
-            textSize = 17f
-            gravity = Gravity.CENTER
-            setTextColor(palette.teal)
-            setPadding(0, 0, 0, 0)
-            minWidth = touchSize
-            minimumWidth = touchSize
-            minHeight = touchSize
-            minimumHeight = touchSize
-            background = rippleDrawable(roundedShape(palette.mint, dp(24).toFloat()), palette.rippleOnMint)
-            backgroundTintList = null
-            stateListAnimator = null
-            isFocusable = true
-            setOnClickListener { startDictation() }
-        }
+        composerMicButton = vectorIconButton(
+            context = this,
+            palette = palette,
+            drawableRes = R.drawable.ic_mic,
+            accessibilityLabel = "Dictate your question",
+            tintColor = palette.teal,
+            bgColor = palette.mint,
+            borderColor = null,
+            rippleColor = palette.rippleOnMint,
+            onClick = {
+                performSubtleHaptic(composerMicButton)
+                startDictation()
+            },
+        )
         composerRoot.addView(composerMicButton, LinearLayout.LayoutParams(dp(48), dp(48)).apply {
             marginStart = dp(7)
         })
 
         suggestButton = actionButton("Ask", accessibilityLabel = "Send your question and get an answer") {
+            performSubtleHaptic(suggestButton, isConfirm = true)
             suggestSteps()
         }.apply {
             textSize = 15f
@@ -853,9 +846,18 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     /** Opens or closes the `+` tools tray. */
     private fun toggleToolsTray(force: Boolean) {
         val open = if (force) true else !isToolsTrayOpen
+        if (::composerCard.isInitialized && isToolsTrayOpen != open) {
+            TransitionManager.beginDelayedTransition(composerCard)
+        }
         isToolsTrayOpen = open
         toolsTray.visibility = if (open) View.VISIBLE else View.GONE
-        toolsToggleButton.text = if (open) "×" else "＋"
+        toolsToggleButton.setImageDrawable(
+            tintedVectorDrawable(
+                this,
+                if (open) R.drawable.ic_close else R.drawable.ic_plus,
+                palette.teal,
+            )
+        )
         toolsToggleButton.contentDescription =
             if (open) "Hide attachment and audio tools" else "Show attachment and audio tools"
         // The tray opens through the attachment chip's Edit action too, which must reveal the
@@ -877,6 +879,9 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             taskInput.text.isNotBlank() || attachedContext.isNotBlank() ||
             lastPrompt.isNotBlank() || currentSession?.messages?.isNotEmpty() == true
         val welcomeVisibility = if (hasConversation) View.GONE else View.VISIBLE
+        if (heroCard.visibility != welcomeVisibility && ::chatCanvas.isInitialized) {
+            TransitionManager.beginDelayedTransition(chatCanvas)
+        }
         heroCard.visibility = welcomeVisibility
         quickChips.visibility = welcomeVisibility
 
@@ -887,6 +892,10 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
 
         val hasAttachment = attachedContext.isNotBlank()
         if (::attachmentChipContainer.isInitialized) {
+            val nextChipVisibility = if (hasAttachment) View.VISIBLE else View.GONE
+            if (attachmentChipContainer.visibility != nextChipVisibility && ::composerCard.isInitialized) {
+                TransitionManager.beginDelayedTransition(composerCard)
+            }
             if (hasAttachment) {
                 val signature = attachedNames.joinToString("|") + ":" + attachedContext.length
                 attachmentChipContainer.visibility = View.VISIBLE
@@ -942,13 +951,58 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         if (!::jumpToBottomButton.isInitialized || !::chatScroll.isInitialized) return
         val hasContent = ::chatThreadContainer.isInitialized && chatThreadContainer.childCount > 0
         val show = hasContent && isUserReadingUpwards && chatScroll.canScrollVertically(1)
-        jumpToBottomButton.visibility = if (show) View.VISIBLE else View.GONE
+        if (show == isJumpToBottomVisible) return
+        isJumpToBottomVisible = show
+        jumpToBottomButton.animate().cancel()
+        if (show) {
+            if (jumpToBottomButton.visibility != View.VISIBLE) {
+                jumpToBottomButton.alpha = 0f
+                jumpToBottomButton.scaleX = 0.85f
+                jumpToBottomButton.scaleY = 0.85f
+                jumpToBottomButton.visibility = View.VISIBLE
+            }
+            jumpToBottomButton.animate()
+                .alpha(1f)
+                .scaleX(1f)
+                .scaleY(1f)
+                .setDuration(180L)
+                .withEndAction(null)
+                .start()
+        } else {
+            jumpToBottomButton.animate()
+                .alpha(0f)
+                .scaleX(0.85f)
+                .scaleY(0.85f)
+                .setDuration(180L)
+                .withEndAction {
+                    if (!isJumpToBottomVisible) {
+                        jumpToBottomButton.visibility = View.GONE
+                    }
+                }
+                .start()
+        }
+    }
+
+    /** Animates a newly added chat card into view with a subtle fade and upward slide. */
+    private fun animateCardEntrance(view: View) {
+        view.alpha = 0f
+        view.translationY = dp(12).toFloat()
+        view.animate()
+            .alpha(1f)
+            .translationY(0f)
+            .setDuration(220L)
+            .setInterpolator(DecelerateInterpolator())
+            .start()
     }
 
     /** Updates the visible recording banner and pulsing indicator inside the composer card. */
     private fun updateRecordingBanner() {
         if (!::recordingBanner.isInitialized) return
         val isRec = inAppAudioRecorder.isRecordingActive
+        val targetVisibility = if (isRec || isDictating) View.VISIBLE else View.GONE
+        if (recordingBanner.visibility != targetVisibility && ::composerCard.isInitialized) {
+            TransitionManager.beginDelayedTransition(composerCard)
+        }
         if (isRec || isDictating) {
             recordingBannerText.text = if (isRec) {
                 "● Recording audio… Tap Stop"
@@ -1564,11 +1618,15 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     private fun buildCallbacksForAnswer(answerProvider: () -> String): AssistantTurnCallbacks =
         AssistantTurnCallbacks(
             onCopyCode = { code, language ->
+                performSubtleHaptic(chatThreadContainer, isConfirm = true)
                 (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager)
                     .setPrimaryClip(ClipData.newPlainText(language ?: "Code", code))
                 Toast.makeText(this, "Code copied", Toast.LENGTH_SHORT).show()
             },
-            onCopyAnswer = { copyAnswerText(answerProvider()) },
+            onCopyAnswer = {
+                performSubtleHaptic(chatThreadContainer, isConfirm = true)
+                copyAnswerText(answerProvider())
+            },
             onShareAnswer = { shareAnswerText(answerProvider()) },
             onSpeakAnswer = { speakAnswerText(answerProvider()) },
             onSaveAnswer = { saveAnswerToFile() },
@@ -1768,7 +1826,10 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         suggestButton.contentDescription = "Stop generating answer"
         suggestButton.background = ripple(shape(palette.stopCrimson, 16), palette.rippleOnAccent)
         suggestButton.setTextColor(WHITE)
-        suggestButton.setOnClickListener { stopActiveGeneration() }
+        suggestButton.setOnClickListener {
+            performSubtleHaptic(suggestButton)
+            stopActiveGeneration()
+        }
         syncComposerState()
     }
 
@@ -1786,7 +1847,10 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         suggestButton.contentDescription = "Send your question and get an answer"
         suggestButton.background = rippleDrawable(gradient, palette.rippleOnAccent)
         suggestButton.setTextColor(WHITE)
-        suggestButton.setOnClickListener { suggestSteps() }
+        suggestButton.setOnClickListener {
+            performSubtleHaptic(suggestButton, isConfirm = true)
+            suggestSteps()
+        }
         syncComposerState()
         scheduleIdleEngineUnload()
     }
@@ -2070,6 +2134,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         )
         val userCard = ChatMessageCardBuilder.buildUserCard(this, userMsg, palette)
         chatThreadContainer.addView(userCard, marginBottom(10))
+        animateCardEntrance(userCard)
 
         activeAssistantHandle?.setLatestTurn(false)
         val handle = ChatMessageCardBuilder.buildAssistantCard(
@@ -2080,6 +2145,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             callbacks = buildCallbacksForAnswer { latestAssistantText },
         )
         chatThreadContainer.addView(handle.rootCard, marginBottom(12))
+        animateCardEntrance(handle.rootCard)
         activeAssistantHandle = handle
 
         taskInput.setText("")
@@ -2966,6 +3032,94 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         showStyledAlertDialog(dialog, palette)
     }
 
+    /** Opens the workspace menu dialog grouping chats, notes, memory, models, and privacy. */
+    private fun showWorkspaceMenuDialog() {
+        val root = styleDialogContainer(this, palette, paddingDp = 18)
+        root.addView(text("Workspace", 18f, palette.ink, true))
+        root.addView(
+            text("Manage chats, local knowledge, models, and privacy", 12.5f, palette.muted).apply {
+                setPadding(0, dp(4), 0, dp(14))
+            }
+        )
+
+        lateinit var dialog: AlertDialog
+        val items = listOf(
+            Triple(R.drawable.ic_history, "Saved Conversations" to "Browse, search, or resume past chats") {
+                showHistoryDialog()
+            },
+            Triple(R.drawable.ic_notes, "Personal Notes" to "Create and organize sovereign notes") {
+                showNotesManagerDialog()
+            },
+            Triple(R.drawable.ic_memory, "Long-Term Memory" to "Inspect and curate remembered facts") {
+                showMemoryCenterDialog()
+            },
+            Triple(R.drawable.ic_folder, "Model Manager" to "Switch or manage local LiteRT-LM models") {
+                val stored = File(filesDir, "model.litertlm")
+                if (stored.exists() && stored.length() > 0L) showModelManagerDialog() else chooseModel()
+            },
+            Triple(R.drawable.ic_shield, "Privacy & Appearance" to "Privacy audit, theme, and security lock") {
+                showPrivacyCenterDialog()
+            },
+        )
+
+        val listCol = column()
+        for ((index, item) in items.withIndex()) {
+            val (iconRes, copy, action) = item
+            val (itemTitle, itemSubtitle) = copy
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                minimumHeight = dp(48)
+                setPadding(dp(12), dp(10), dp(12), dp(10))
+                elevation = dp(1).toFloat()
+                background = rippleDrawable(
+                    roundedShape(
+                        color = palette.surfaceElevated,
+                        radiusPx = dp(14).toFloat(),
+                        strokeWidthPx = maxOf(1, dp(1)),
+                        strokeColor = palette.border,
+                    ),
+                    palette.rippleOnSurface,
+                )
+                isClickable = true
+                isFocusable = true
+                setOnClickListener {
+                    performSubtleHaptic(it)
+                    dialog.dismiss()
+                    action()
+                }
+            }
+            val iconView = ImageView(this).apply {
+                setImageDrawable(tintedVectorDrawable(this@MainActivity, iconRes, palette.teal))
+                scaleType = ImageView.ScaleType.CENTER_INSIDE
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            }
+            row.addView(iconView, LinearLayout.LayoutParams(dp(24), dp(24)).apply { marginEnd = dp(12) })
+            val textCol = column().apply {
+                addView(text(itemTitle, 14.5f, palette.ink, true))
+                addView(text(itemSubtitle, 12f, palette.muted).apply { setPadding(0, dp(2), 0, 0) })
+            }
+            row.addView(textCol, LinearLayout.LayoutParams(0, -2, 1f))
+            listCol.addView(
+                row,
+                LinearLayout.LayoutParams(-1, -2).apply {
+                    if (index < items.lastIndex) bottomMargin = dp(8)
+                },
+            )
+        }
+        val scroll = ScrollView(this).apply {
+            overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+            addView(listCol)
+        }
+        root.addView(scroll, LinearLayout.LayoutParams(-1, -2))
+
+        dialog = AlertDialog.Builder(this)
+            .setView(root)
+            .setNegativeButton("Close", null)
+            .create()
+        showStyledAlertDialog(dialog, palette)
+    }
+
     private fun showDuplexVoiceDialog() {
         if (engineManager.isGenerationActive || isGeneratingUi) {
             Toast.makeText(this, "Stop active text generation before starting voice mode.", Toast.LENGTH_SHORT).show()
@@ -3001,25 +3155,8 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         }
         dialogView.addView(stateBadge)
 
-        val audioLevelBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
-            max = 100
-            progress = 4
-            progressDrawable = android.graphics.drawable.LayerDrawable(
-                arrayOf(
-                    roundedShape(0x33FFFFFF, dp(4).toFloat()),
-                    android.graphics.drawable.ClipDrawable(
-                        roundedShape(WHITE, dp(4).toFloat()),
-                        Gravity.START,
-                        android.graphics.drawable.ClipDrawable.HORIZONTAL,
-                    ),
-                )
-            ).apply {
-                setId(0, android.R.id.background)
-                setId(1, android.R.id.progress)
-            }
-            contentDescription = "Microphone input audio level"
-        }
-        dialogView.addView(audioLevelBar, LinearLayout.LayoutParams(-1, dp(6)).apply { bottomMargin = dp(12) })
+        val waveformView = VoiceWaveformView(this)
+        dialogView.addView(waveformView, LinearLayout.LayoutParams(-1, dp(52)).apply { bottomMargin = dp(12) })
 
         val transcriptView = TextView(this).apply {
             textSize = 14f
@@ -3056,7 +3193,10 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             )
             backgroundTintList = null
             stateListAnimator = null
-            setOnClickListener { duplexController.interrupt() }
+            setOnClickListener {
+                performSubtleHaptic(it)
+                duplexController.interrupt()
+            }
         }
         btnRow.addView(interruptBtn, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(10) })
 
@@ -3080,6 +3220,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             backgroundTintList = null
             stateListAnimator = null
             setOnClickListener {
+                performSubtleHaptic(it, isConfirm = true)
                 duplexController.stopSession()
                 dialog.dismiss()
             }
@@ -3093,6 +3234,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             .setCancelable(false)
             .create()
         dialog.setOnDismissListener {
+            waveformView.release()
             if (duplexController.isActive) duplexController.stopSession()
             val updatedSess = currentSession
             if (updatedSess != null && updatedSess.messages.size > messageCountBeforeVoice) {
@@ -3119,14 +3261,11 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                         DuplexVoiceController.DuplexState.IDLE -> "Idle"
                     }
                     stateBadge.text = label
-                    if (state != DuplexVoiceController.DuplexState.LISTENING) {
-                        audioLevelBar.progress = 0
-                    }
+                    waveformView.setVoiceState(state)
                 }
 
                 override fun onAmplitude(rms: Float) {
-                    val scaled = (rms * 320f).toInt().coerceIn(4, 100)
-                    audioLevelBar.progress = scaled
+                    waveformView.setAmplitude(rms)
                 }
 
                 override fun onUserTranscribed(text: String) {

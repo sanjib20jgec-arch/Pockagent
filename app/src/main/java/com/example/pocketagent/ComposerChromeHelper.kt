@@ -437,6 +437,9 @@ object ComposerChromeViews {
         backgroundTintList = null
         stateListAnimator = null
         elevation = dp(context, 6).toFloat()
+        alpha = 0f
+        scaleX = 0.88f
+        scaleY = 0.88f
         visibility = View.GONE
         isFocusable = true
         setOnClickListener { onClick() }

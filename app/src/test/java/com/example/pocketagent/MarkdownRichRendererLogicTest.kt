@@ -205,6 +205,53 @@ class MarkdownRichRendererLogicTest {
         assertEquals(expectedOlder, formatTimestampLabel(olderCal.timeInMillis))
     }
 
+    @Test
+    fun tableElementsSupportInlineFormattedCellsAndRejectPlainPipes() {
+        val markdown = """
+            Summary:
+            | Item | Details |
+            | :--- | :---: |
+            | **Model** | `qwen2.5` |
+            | Guide | [Read](https://example.org) |
+            
+            Plain prose with a | pipe and no separator.
+        """.trimIndent()
+
+        val elements = MarkdownFormatter.parseElements(markdown)
+        assertEquals(3, elements.size)
+        assertTrue(elements[0] is MarkdownFormatter.MarkdownElement.Paragraph)
+        assertTrue(elements[1] is MarkdownFormatter.MarkdownElement.Table)
+        assertTrue(elements[2] is MarkdownFormatter.MarkdownElement.Paragraph)
+
+        val table = elements[1] as MarkdownFormatter.MarkdownElement.Table
+        assertEquals(listOf("Item", "Details"), table.headers)
+        assertEquals(2, table.rows.size)
+
+        val boldCell = InlineMarkdownParser.parseInline(table.rows[0][0])
+        assertEquals(
+            listOf(InlineMarkdownParser.StyledSegment("Model", InlineMarkdownParser.InlineStyle.BOLD)),
+            boldCell,
+        )
+
+        val codeCell = InlineMarkdownParser.parseInline(table.rows[0][1])
+        assertEquals(
+            listOf(InlineMarkdownParser.StyledSegment("qwen2.5", InlineMarkdownParser.InlineStyle.CODE)),
+            codeCell,
+        )
+
+        val linkCell = InlineMarkdownParser.parseInline(table.rows[1][1])
+        assertEquals(
+            listOf(
+                InlineMarkdownParser.StyledSegment(
+                    "Read",
+                    InlineMarkdownParser.InlineStyle.LINK,
+                    "https://example.org",
+                )
+            ),
+            linkCell,
+        )
+    }
+
     private fun assertValidSortedNonOverlapping(
         spans: List<CodeSyntaxHighlighter.HighlightSpan>,
         length: Int,

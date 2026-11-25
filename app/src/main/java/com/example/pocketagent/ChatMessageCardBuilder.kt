@@ -150,6 +150,8 @@ class ActiveAssistantCardHandle(
     init {
         showMoreButton.setOnClickListener {
             if (fullMarkdown.isEmpty()) return@setOnClickListener
+            it.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+            android.transition.TransitionManager.beginDelayedTransition(rootCard)
             isCollapsed = !isCollapsed
             renderCurrentMarkdownState()
         }
@@ -497,13 +499,17 @@ object ChatMessageCardBuilder {
         for ((index, pair) in actionSpecs.withIndex()) {
             val (spec, latestOnly) = pair
             val (label, a11y, action) = spec
+            var btnRef: Button? = null
             val btn = secondaryOutlineButton(
                 context = context,
                 palette = palette,
                 label = label,
                 accessibilityLabel = a11y,
                 compact = true,
-                onClick = action,
+                onClick = {
+                    btnRef?.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+                    action()
+                },
             ).apply {
                 if (latestOnly && !isLatest) visibility = View.GONE
                 if (index < actionSpecs.lastIndex) {
@@ -515,6 +521,7 @@ object ChatMessageCardBuilder {
                     }
                 }
             }
+            btnRef = btn
             if (latestOnly) latestOnlyViews += btn
             actionsStrip.addView(btn)
         }

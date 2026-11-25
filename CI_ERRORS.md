@@ -2,76 +2,61 @@
 
 ## kotlin e: lines
 ```
-55:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:5:30 Conflicting import: imported name 'FragmentActivity' is ambiguous.
-56:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:7:30 Conflicting import: imported name 'FragmentActivity' is ambiguous.
-57:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:296:57 Unresolved reference 'ActivityManager'.
-58:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:297:20 Unresolved reference 'ActivityManager'.
-59:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:298:12 Unresolved reference 'getMemoryInfo'.
-60:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:447:21 Unresolved reference 'WHITE'.
-61:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:457:61 Unresolved reference 'WHITE'.
-62:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:474:26 Unresolved reference 'WHITE'.
-63:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:525:9 Unresolved reference 'outputCard'.
-64:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:536:13 Unresolved reference 'outputCard'.
-65:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:537:13 Unresolved reference 'answerText'.
-66:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:539:13 Unresolved reference 'citationsContainer'.
-67:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:540:13 Unresolved reference 'citationsContainer'.
-68:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:542:13 Unresolved reference 'systemActionContainer'.
-69:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:543:13 Unresolved reference 'systemActionContainer'.
-70:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:545:19 Unresolved reference 'refineButton'.
-71:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:545:47 Unresolved reference 'refineButton'.
-72:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:548:9 Unresolved reference 'outputCard'.
-73:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:549:9 Unresolved reference 'stopGeneratingButton'.
-74:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:559:9 Unresolved reference 'outputCard'.
-75:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:559:28 Unresolved reference 'stopGeneratingButton'.
-76:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:889:23 Overload resolution ambiguity between candidates:
-79:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:895:9 Overload resolution ambiguity between candidates:
-82:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:1170:25 No parameter with name 'expectedBytes' found.
-83:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:1171:23 Too many arguments for 'fun importModel(input: InputStream): File'.
-84:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:1171:25 Cannot infer type for value parameter 'copied'. Specify it explicitly.
-85:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:1171:33 Cannot infer type for value parameter 'total'. Specify it explicitly.
-86:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:1172:70 Unresolved reference 'compareTo'.
-87:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:1174:110 Argument type mismatch: actual type is 'Any', but 'Long' was expected.
-88:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:1961:36 Unresolved reference 'estimatedTotalTokens'.
-89:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:2181:74 Unresolved reference 'estimatedTotalTokens'.
-90:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:2181:117 'operator' modifier is required on 'fun <T> Comparable<T>.compareTo(other: T): Int'.
-91:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:2219:37 Unresolved reference 'estimatedTotalTokens'.
-92:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:3029:60 Unresolved reference 'WHITE'.
-93:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:3044:38 Unresolved reference 'WHITE'.
-94:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:3080:26 Unresolved reference 'WHITE'.
-95:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:3109:30 Unresolved reference 'WHITE'.
-96:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:3349:17 Overload resolution ambiguity between candidates:
-99:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:3354:17 Overload resolution ambiguity between candidates:
-102:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:3395:14 Conflicting overloads:
-104:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:3400:9 Overload resolution ambiguity between candidates:
-107:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:3406:14 Conflicting overloads:
-109:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:3413:13 Conflicting overloads:
-111:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:3444:13 Conflicting overloads:
-113:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:3449:14 Conflicting overloads:
-115:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:3454:9 Overload resolution ambiguity between candidates:
-118:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:3460:14 Conflicting overloads:
-120:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:3467:13 Conflicting overloads:
-122:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:3495:13 Conflicting overloads:
-124:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:3504:13 Overload resolution ambiguity between candidates:
-127:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:3508:13 Overload resolution ambiguity between candidates:
-130:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:3521:17 Overload resolution ambiguity between candidates:
-133:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:3526:17 Overload resolution ambiguity between candidates:
-136:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:3531:17 Overload resolution ambiguity between candidates:
+62:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:5:30 Conflicting import: imported name 'FragmentActivity' is ambiguous.
+63:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:7:30 Conflicting import: imported name 'FragmentActivity' is ambiguous.
+64:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:296:57 Unresolved reference 'ActivityManager'.
+65:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:297:20 Unresolved reference 'ActivityManager'.
+66:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:298:12 Unresolved reference 'getMemoryInfo'.
+67:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:447:21 Unresolved reference 'WHITE'.
+68:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:457:61 Unresolved reference 'WHITE'.
+69:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:474:26 Unresolved reference 'WHITE'.
+70:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:525:9 Unresolved reference 'outputCard'.
+71:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:536:13 Unresolved reference 'outputCard'.
+72:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:537:13 Unresolved reference 'answerText'.
+73:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:539:13 Unresolved reference 'citationsContainer'.
+74:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:540:13 Unresolved reference 'citationsContainer'.
+75:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:542:13 Unresolved reference 'systemActionContainer'.
+76:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:543:13 Unresolved reference 'systemActionContainer'.
+77:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:545:19 Unresolved reference 'refineButton'.
+78:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:545:47 Unresolved reference 'refineButton'.
+79:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:548:9 Unresolved reference 'outputCard'.
+80:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:549:9 Unresolved reference 'stopGeneratingButton'.
+81:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:559:9 Unresolved reference 'outputCard'.
+82:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:559:28 Unresolved reference 'stopGeneratingButton'.
+83:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:1170:25 No parameter with name 'expectedBytes' found.
+84:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:1171:23 Too many arguments for 'fun importModel(input: InputStream): File'.
+85:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:1171:25 Cannot infer type for value parameter 'copied'. Specify it explicitly.
+86:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:1171:33 Cannot infer type for value parameter 'total'. Specify it explicitly.
+87:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:1172:70 Unresolved reference 'compareTo'.
+88:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:1174:110 Argument type mismatch: actual type is 'Any', but 'Long' was expected.
+89:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:1961:36 Unresolved reference 'estimatedTotalTokens'.
+90:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:2181:74 Unresolved reference 'estimatedTotalTokens'.
+91:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:2181:117 'operator' modifier is required on 'fun <T> Comparable<T>.compareTo(other: T): Int'.
+92:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:2219:37 Unresolved reference 'estimatedTotalTokens'.
+93:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:3029:60 Unresolved reference 'WHITE'.
+94:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:3044:38 Unresolved reference 'WHITE'.
+95:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:3080:26 Unresolved reference 'WHITE'.
+96:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:3109:30 Unresolved reference 'WHITE'.
+97:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:3395:14 Conflicting overloads:
+99:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:3406:14 Conflicting overloads:
+101:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:3449:14 Conflicting overloads:
+103:e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:3460:14 Conflicting overloads:
 ```
 
 ## first failure context
 ```
-fun updateLockOverlay(): Unit
-fun updateLockOverlay(): Unit
-e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:3526:17 Overload resolution ambiguity between candidates:
-fun updateLockOverlay(): Unit
-fun updateLockOverlay(): Unit
-e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:3531:17 Overload resolution ambiguity between candidates:
-fun updateLockOverlay(): Unit
-fun updateLockOverlay(): Unit
+e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:3109:30 Unresolved reference 'WHITE'.
+e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:3395:14 Conflicting overloads:
+fun onResume(): Unit
+e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:3406:14 Conflicting overloads:
+fun onStop(): Unit
+e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:3449:14 Conflicting overloads:
+fun onResume(): Unit
+e: file:///home/runner/work/Pockagent/Pockagent/app/src/main/java/com/example/pocketagent/MainActivity.kt:3460:14 Conflicting overloads:
+fun onStop(): Unit
 
 > Task :app:compileDebugKotlin FAILED
-> Task :app:buildCMakeDebug[x86_64]
-gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_2-1795597836482.json
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_2-1795598218271.json
 
 [Incubating] Problems report is available at: file:///home/runner/work/Pockagent/Pockagent/build/reports/problems/problems-report.html
 

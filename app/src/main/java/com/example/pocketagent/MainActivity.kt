@@ -3299,7 +3299,8 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
 
                 override fun onError(error: Throwable) {
                     stateBadge.text = "⚠️ Error: ${error.message}"
-                    audioLevelBar.progress = 0
+                    waveformView.setVoiceState(DuplexVoiceController.DuplexState.ERROR)
+                    waveformView.setAmplitude(0f)
                 }
             }
         )

@@ -128,7 +128,30 @@ internal class ModelFileStore(
         }
     }
 
+    /** Removes the stored model file and any partial/backup artifacts from private storage. */
+    fun removeStoredModel() {
+        listOf(
+            modelFile,
+            File(directory, "$MODEL_FILE_NAME.part"),
+            File(directory, "$MODEL_FILE_NAME.backup"),
+        ).forEach { f ->
+            if (f.exists()) f.delete()
+        }
+    }
+
     companion object {
+        /** Clears LiteRT-LM/engine cache files so the next load rebuilds them cleanly. */
+        @JvmStatic
+        fun clearEngineCaches(cacheDir: File) {
+            if (!cacheDir.exists() || !cacheDir.isDirectory) return
+            cacheDir.listFiles()?.forEach { child ->
+                try {
+                    if (child.isDirectory) child.deleteRecursively() else child.delete()
+                } catch (_: Exception) {
+                }
+            }
+        }
+
         const val MODEL_FILE_NAME = "model.litertlm"
         const val DEFAULT_MAX_MODEL_BYTES = 5L * 1024 * 1024 * 1024
         const val DEFAULT_RESERVED_FREE_SPACE_BYTES = 32L * 1024 * 1024

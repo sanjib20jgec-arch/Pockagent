@@ -127,7 +127,7 @@ data class MainUiState(
             ""
         } else {
             attachedNames.joinToString(" · ") +
-                    "\nAttached content limited to ${\"%,d\".format(MAX_ATTACHMENT_CHARS)} characters."
+                    "\nAttached content limited to ${"%,d".format(MAX_ATTACHMENT_CHARS)} characters."
         }
 
     // State Transition Reducers

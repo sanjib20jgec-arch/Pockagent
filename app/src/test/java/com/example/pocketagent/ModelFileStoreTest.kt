@@ -157,7 +157,7 @@ class ModelFileStoreTest {
     @Test
     fun rejectsTooSmallModelWhenMinBytesEnforced() {
         val store = ModelFileStore(temporaryFolder.root, maxBytes = 10_000_000, reservedFreeSpaceBytes = 0)
-        val bytes = ByteArray(1024) { 0x50 } // PK-like but too small with default min
+        val bytes = ByteArray(1024) { 0x50.toByte() } // PK-like but too small with default min
         val ex = assertThrows(IOException::class.java) {
             store.importModel(ByteArrayInputStream(bytes))
         }
@@ -178,7 +178,7 @@ class ModelFileStoreTest {
     fun acceptsZipLikeBinaryModelHeader() {
         val store = ModelFileStore(temporaryFolder.root, maxBytes = 10_000_000, reservedFreeSpaceBytes = 0)
         val bytes = ByteArray(1_200_000)
-        bytes[0] = 0x50; bytes[1] = 0x4B; bytes[2] = 0x03; bytes[3] = 0x04
+        bytes[0] = 0x50.toByte(); bytes[1] = 0x4B.toByte(); bytes[2] = 0x03.toByte(); bytes[3] = 0x04.toByte()
         val result = store.importModel(ByteArrayInputStream(bytes))
         assertTrue(result.exists())
         assertEquals(bytes.size.toLong(), result.length())

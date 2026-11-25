@@ -75,8 +75,8 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         private const val GENERATION_TIMEOUT_SECONDS = 180L
         /** Skip eager startup preload above 1.5 GB so multi-GB models (e.g. LFM3-Omni 3.5 GB) don't OOM idle launches. */
         private const val EAGER_WARMUP_MAX_BYTES = 1_500_000_000L
-        /** Reset stateful KV cache before cumulative turns approach the 4096-token EngineConfig cap. */
-        private const val WARM_CONTEXT_RESET_THRESHOLD = 2800
+        /** Fallback warm-context reset threshold; production uses budget-derived threshold. */
+        private const val WARM_CONTEXT_RESET_THRESHOLD_FALLBACK = 2800
         private const val IDLE_ENGINE_UNLOAD_MS = 120_000L
         private val SYSTEM_INSTRUCTION: String get() = AnswerDirective.SYSTEM_INSTRUCTION
         private var BG = 0xFFF4F7F6.toInt()
@@ -143,7 +143,15 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     private val engineManager = InferenceEngineManager<Engine>()
     private val generationLifecycleTracker = GenerationLifecycleTracker()
     @Volatile private var activeUiGenerationId: Long = 0L
-    private val promptContext = AnswerPromptComposer()
+    private val promptContext = AnswerPromptComposer(
+        ContextBudgetManager(
+            ContextBudgetManager.TokenBudget(
+                safetyMarginTokens = ContextBudgetManager.TokenBudget.DEFAULT_SAFETY_MARGIN_TOKENS,
+            )
+        )
+    )
+    private val warmContextResetThreshold: Int
+        get() = (promptContext.tokenBudget.effectiveInputBudget - 128).coerceAtLeast(1024)
     private val inAppAudioRecorder = InAppAudioRecorder()
     @Volatile private var whisperContext: Long = 0L
     private lateinit var taskInput: EditText
@@ -1621,7 +1629,10 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         isRetry: Boolean,
         history: List<ChatMessage>,
         calculation: LocalCalculatorTool.CalculationResult? = null,
-    ): AnswerPromptComposer.PromptBuildResult = promptContext.answerPrompt(task, attachment, intent, isRetry, history, calculation)
+        systemInstructionForBudget: String = "",
+    ): AnswerPromptComposer.PromptBuildResult = promptContext.answerPrompt(
+        task, attachment, intent, isRetry, history, calculation, systemInstructionForBudget
+    )
 
     /**
      * Runs one inference pass with the runaway guard applied.
@@ -1958,6 +1969,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                     isRetry = true,
                     history = history,
                     calculation = calculation,
+                    systemInstructionForBudget = instruction,
                 )
                 // Different prompt shape: start from a clean context.
                 engineManager.invalidateConversation("refine")
@@ -2229,10 +2241,11 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                     isRetry = false,
                     history = if (isWarm) emptyList() else sessionHistory,
                     calculation = calculation,
+                    systemInstructionForBudget = if (isWarm) "" else effectiveInstruction,
                 )
                 if (isWarm &&
-                    engineManager.cachedConversationTokens + promptBuild.estimatedTotalTokens + MAX_RESPONSE_TOKENS >
-                    WARM_CONTEXT_RESET_THRESHOLD
+                    engineManager.cachedConversationTokens + promptBuild.estimatedTotalTokens >
+                    warmContextResetThreshold
                 ) {
                     engineManager.invalidateConversation("context budget reached")
                     isWarm = false
@@ -2243,6 +2256,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                         isRetry = false,
                         history = sessionHistory,
                         calculation = calculation,
+                        systemInstructionForBudget = effectiveInstruction,
                     )
                 }
                 if (promptBuild.truncatedCount > 0) {
@@ -2261,6 +2275,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                             isRetry = false,
                             history = sessionHistory,
                             calculation = calculation,
+                            systemInstructionForBudget = effectiveInstruction,
                         )
                     },
                 ) {

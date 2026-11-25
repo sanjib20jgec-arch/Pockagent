@@ -18,21 +18,29 @@ class ContextBudgetManager(
         val maxContextTokens: Int = DEFAULT_MAX_CONTEXT_TOKENS,
         val maxResponseTokens: Int = DEFAULT_MAX_RESPONSE_TOKENS,
         val reservedSystemTokens: Int = DEFAULT_SYSTEM_TOKENS,
+        val safetyMarginTokens: Int = 0,
     ) {
         init {
             require(maxContextTokens > 0) { "maxContextTokens must be positive." }
             require(maxResponseTokens > 0) { "maxResponseTokens must be positive." }
             require(reservedSystemTokens >= 0) { "reservedSystemTokens cannot be negative." }
-            require(maxContextTokens > maxResponseTokens + reservedSystemTokens) {
-                "maxContextTokens ($maxContextTokens) must exceed response ($maxResponseTokens) + system ($reservedSystemTokens) reservation."
+            require(safetyMarginTokens >= 0) { "safetyMarginTokens cannot be negative." }
+            require(maxContextTokens > maxResponseTokens + reservedSystemTokens + safetyMarginTokens) {
+                "maxContextTokens ($maxContextTokens) must exceed response ($maxResponseTokens) + " +
+                    "system ($reservedSystemTokens) + safety margin ($safetyMarginTokens) reservation."
             }
         }
 
+        /** Raw input capacity before safety margin; kept for compatibility. */
         val maxInputTokens: Int
             get() = maxContextTokens - maxResponseTokens
 
+        /** Effective input budget after reserving generation output and safety margin. */
+        val effectiveInputBudget: Int
+            get() = (maxContextTokens - maxResponseTokens - safetyMarginTokens).coerceAtLeast(0)
+
         val historyBudget: Int
-            get() = (maxInputTokens - reservedSystemTokens).coerceAtLeast(0)
+            get() = (effectiveInputBudget - reservedSystemTokens).coerceAtLeast(0)
 
         companion object {
             // Honest defaults for common 4K-context on-device .litertlm models (e.g. LFM3-Omni 2B).
@@ -40,6 +48,9 @@ class ContextBudgetManager(
             const val DEFAULT_MAX_CONTEXT_TOKENS = 4096
             const val DEFAULT_MAX_RESPONSE_TOKENS = 1024
             const val DEFAULT_SYSTEM_TOKENS = 384
+            // Conservative margin for heuristic token estimation/template/special-token overhead.
+            // Not applied by the zero-arg constructor for compatibility; production should pass it.
+            const val DEFAULT_SAFETY_MARGIN_TOKENS = 128
         }
     }
 
@@ -148,26 +159,36 @@ class ContextBudgetManager(
 
         // If the newest turn alone exceeds budget, trim its attachment/content so we never
         // overrun a small-context model. The newest turn is still kept (never dropped).
+        // Trimming is char-based heuristic fallback, not tokenizer-accurate.
         if (latestCost > availableTokens && availableTokens > 0) {
             val overhead = 4 // turn header overhead
             val contentTokens = estimateTokens(latest.content)
             val allowedForAttachment = (availableTokens - overhead - contentTokens).coerceAtLeast(0)
             val allowedAttachmentChars = (allowedForAttachment * 3).coerceAtLeast(0)
-            val trimmedAttachment = latest.attachmentContent?.take(allowedAttachmentChars)
+            val trimmedAttachment = if (!latest.attachmentContent.isNullOrEmpty() && allowedAttachmentChars < latest.attachmentContent.length) {
+                latest.attachmentContent.take(allowedAttachmentChars)
+            } else {
+                latest.attachmentContent
+            }
+            val attachmentWasTrimmed = trimmedAttachment != latest.attachmentContent
             val trimmedContent = if (allowedForAttachment <= 0 && contentTokens > availableTokens - overhead) {
-                latest.content.take(((availableTokens - overhead).coerceAtLeast(1)) * 3)
+                val allowedContentChars = ((availableTokens - overhead).coerceAtLeast(1)) * 3
+                val cut = latest.content.take(allowedContentChars).trimEnd()
+                if (cut.length < latest.content.length) "$cut\n[Message trimmed to fit model context budget.]" else latest.content
             } else {
                 latest.content
+            }
+            val contentWasTrimmed = trimmedContent != latest.content
+            val summary = when {
+                attachmentWasTrimmed -> (latest.attachmentSummary ?: "Attachment trimmed to fit model context.")
+                contentWasTrimmed -> (latest.attachmentSummary ?: "Message trimmed to fit model context.")
+                else -> latest.attachmentSummary
             }
             effectiveLatest = latest.copy(
                 content = trimmedContent,
                 attachmentContent = trimmedAttachment,
-                attachmentSummary = if (trimmedAttachment != latest.attachmentContent) {
-                    (latest.attachmentSummary ?: "Attachment trimmed to fit model context.")
-                } else {
-                    latest.attachmentSummary
-                },
-                estimatedTokens = ChatMessage.estimateTokens(trimmedContent, latest.attachmentSummary, trimmedAttachment),
+                attachmentSummary = summary,
+                estimatedTokens = ChatMessage.estimateTokens(trimmedContent, summary, trimmedAttachment),
             )
             latestCost = estimateMessageTokens(effectiveLatest, isHistorical = false)
         }
@@ -228,17 +249,29 @@ class ContextBudgetManager(
 
     /**
      * Constructs a structured multi-turn dialogue prompt with rolling window budget enforcement.
+     *
+     * @param systemInstructionBudgetTokens Estimated tokens consumed by an out-of-band system
+     * instruction (e.g. LiteRT-LM ConversationConfig.systemInstruction). When the system
+     * instruction is not embedded in this prompt text, pass its estimated size here so history
+     * budgeting still reserves space for it. Heuristic only — not tokenizer-accurate.
      */
     fun buildConversationalPrompt(
         systemInstruction: String,
         messages: List<ChatMessage>,
         closingInstruction: String = DEFAULT_INSTRUCTION_NOTE,
+        systemInstructionBudgetTokens: Int = 0,
     ): FormattedPromptResult {
         // Reserve at least the configured system budget even when the system instruction is
         // passed out-of-band (e.g. ConversationConfig.systemInstruction), so we never over-promise
         // input space to history on small-context models.
-        val sysTokens = maxOf(estimateTokens(systemInstruction), budget.reservedSystemTokens)
-        val availableHistoryTokens = (budget.maxInputTokens - sysTokens - estimateTokens(closingInstruction)).coerceAtLeast(0)
+        val sysTokens = maxOf(
+            estimateTokens(systemInstruction),
+            budget.reservedSystemTokens,
+            systemInstructionBudgetTokens.coerceAtLeast(0),
+        )
+        val closingTokens = estimateTokens(closingInstruction)
+        val availableHistoryTokens =
+            (budget.effectiveInputBudget - sysTokens - closingTokens).coerceAtLeast(0)
 
         val pruned = pruneHistory(messages, availableTokens = availableHistoryTokens)
         val sb = StringBuilder()
@@ -268,7 +301,10 @@ class ContextBudgetManager(
         }
 
         val fullPrompt = sb.toString().trim()
-        val estTotal = estimateTokens(fullPrompt)
+        // Include out-of-band system reservation in the estimate so callers do not undercount
+        // input budget usage when the system instruction is passed via ConversationConfig.
+        val outOfBandSystemTokens = if (systemInstruction.isBlank()) sysTokens else 0
+        val estTotal = estimateTokens(fullPrompt) + outOfBandSystemTokens
 
         return FormattedPromptResult(
             prompt = fullPrompt,
@@ -285,9 +321,14 @@ class ContextBudgetManager(
     fun buildGemmaTurnsPrompt(
         systemInstruction: String,
         messages: List<ChatMessage>,
+        systemInstructionBudgetTokens: Int = 0,
     ): FormattedPromptResult {
-        val sysTokens = maxOf(estimateTokens(systemInstruction), budget.reservedSystemTokens)
-        val availableHistoryTokens = (budget.maxInputTokens - sysTokens - 20).coerceAtLeast(0)
+        val sysTokens = maxOf(
+            estimateTokens(systemInstruction),
+            budget.reservedSystemTokens,
+            systemInstructionBudgetTokens.coerceAtLeast(0),
+        )
+        val availableHistoryTokens = (budget.effectiveInputBudget - sysTokens - 20).coerceAtLeast(0)
 
         val pruned = pruneHistory(messages, availableTokens = availableHistoryTokens)
         val sb = StringBuilder()
@@ -329,7 +370,8 @@ class ContextBudgetManager(
         }
 
         val fullPrompt = sb.toString()
-        val estTotal = estimateTokens(fullPrompt)
+        val outOfBandSystemTokens = if (systemInstruction.isBlank()) sysTokens else 0
+        val estTotal = estimateTokens(fullPrompt) + outOfBandSystemTokens
 
         return FormattedPromptResult(
             prompt = fullPrompt,

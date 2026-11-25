@@ -279,7 +279,8 @@ class InferenceEngineManager<T : AutoCloseable>(
         val created = conversationFactory(activeEngine, systemInstruction)
         cachedConversation = created
         cachedKey = key
-        cachedConversationTokens = 0
+        // Seed with system-instruction overhead estimate (heuristic, not tokenizer-accurate).
+        cachedConversationTokens = ChatMessage.estimateTextTokens(systemInstruction) + 8
         conversationCreateCount++
         return created
     }

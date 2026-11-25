@@ -228,6 +228,9 @@ class AnswerPromptComposer(
     private val budget: ContextBudgetManager = ContextBudgetManager(),
 ) {
 
+    val tokenBudget: ContextBudgetManager.TokenBudget
+        get() = budget.budget
+
     /**
      * @param task the user's current request.
      * @param attachment optional untrusted reference text, already bounded.
@@ -245,6 +248,11 @@ class AnswerPromptComposer(
         history: List<ChatMessage>,
         /** Verified offline arithmetic, when the request contained a calculation. */
         calculation: LocalCalculatorTool.CalculationResult? = null,
+        /**
+         * Out-of-band system instruction sent via ConversationConfig.systemInstruction.
+         * Used only for budget reservation; never embedded in prompt text to avoid duplication.
+         */
+        systemInstructionForBudget: String = "",
     ): PromptBuildResult {
         val baseQuestion = task.ifBlank { "Use the attached text to answer my request." }
         // Give the model the computed result so it reports the number instead of guessing or
@@ -272,6 +280,7 @@ class AnswerPromptComposer(
             systemInstruction = "",
             messages = history + latest,
             closingInstruction = closing,
+            systemInstructionBudgetTokens = ChatMessage.estimateTextTokens(systemInstructionForBudget),
         )
         return PromptBuildResult(result.prompt, result.truncatedCount, result.estimatedTotalTokens)
     }

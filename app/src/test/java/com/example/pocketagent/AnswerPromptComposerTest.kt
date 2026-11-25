@@ -161,4 +161,78 @@ class AnswerPromptComposerTest {
         assertTrue(built.truncatedCount > 0)
         assertTrue(built.prompt.contains(question))
     }
+
+
+    @Test
+    fun outOfBandSystemInstructionIsReservedButNotEmbedded() {
+        val manager = ContextBudgetManager(
+            ContextBudgetManager.TokenBudget(512, 128, 64, 0)
+        )
+        val composer = AnswerPromptComposer(manager)
+        val largeSystemInstruction = "System rule. ".repeat(200)
+        val result = composer.answerPrompt(
+            task = "What is 2+2?",
+            attachment = "",
+            intent = AnswerDirective.Intent.FACT,
+            isRetry = false,
+            history = (1..12).flatMap { i ->
+                listOf(ChatMessage.user("Old question $i " + "word ".repeat(30)), ChatMessage.assistant("Old answer $i " + "word ".repeat(30)))
+            },
+            systemInstructionForBudget = largeSystemInstruction,
+        )
+        assertFalse("Out-of-band system instruction must not be duplicated in prompt text", result.prompt.contains(largeSystemInstruction))
+        assertTrue(result.truncatedCount > 0)
+        assertTrue(result.estimatedTotalTokens > 0)
+    }
+
+    @Test
+    fun sessionHistoryPassedInIsOnlyHistoryUsed() {
+        val sessionA = listOf(
+            ChatMessage.user("Session A question"),
+            ChatMessage.assistant("Session A answer"),
+        )
+        val prompt = composer.answerPrompt(
+            task = "Follow up",
+            attachment = "",
+            intent = AnswerDirective.Intent.FACT,
+            isRetry = false,
+            history = sessionA,
+        ).prompt
+        assertTrue(prompt.contains("Session A question"))
+        assertTrue(prompt.contains("Session A answer"))
+        assertFalse(prompt.contains("Session B question"))
+    }
+
+    @Test
+    fun generationReserveAndSafetyMarginReduceHistoryBudget() {
+        val tight = AnswerPromptComposer(
+            ContextBudgetManager(ContextBudgetManager.TokenBudget(700, 256, 64, 64))
+        )
+        val loose = AnswerPromptComposer(
+            ContextBudgetManager(ContextBudgetManager.TokenBudget(700, 128, 64, 0))
+        )
+        val history = (1..20).flatMap { i ->
+            listOf(ChatMessage.user("Q$i " + "detail ".repeat(20)), ChatMessage.assistant("A$i " + "detail ".repeat(20)))
+        }
+        val tightResult = tight.answerPrompt("Now?", "", AnswerDirective.Intent.FACT, false, history)
+        val looseResult = loose.answerPrompt("Now?", "", AnswerDirective.Intent.FACT, false, history)
+        assertTrue(tightResult.truncatedCount >= looseResult.truncatedCount)
+        assertTrue(tightResult.prompt.contains("Now?"))
+    }
+
+    @Test
+    fun currentUserRequestIsPreservedWhenHistoryIsTruncated() {
+        val history = (1..30).flatMap { i ->
+            listOf(ChatMessage.user("History $i " + "x ".repeat(40)), ChatMessage.assistant("Reply $i " + "y ".repeat(40)))
+        }
+        val result = composer.answerPrompt(
+            task = "This is the current important question",
+            attachment = "",
+            intent = AnswerDirective.Intent.FACT,
+            isRetry = false,
+            history = history,
+        )
+        assertTrue(result.prompt.contains("This is the current important question"))
+        assertTrue(result.truncatedCount > 0)
+    }
 }

@@ -209,13 +209,17 @@ class ContextBudgetManagerTest {
                 reservedSystemTokens = 200,
             )
         )
-        val messages = listOf(
-            ChatMessage(role = ChatMessage.Role.USER, content = "Hello"),
-        )
-        val outOfBand = manager.buildConversationalPrompt("", messages)
-        val inBand = manager.buildConversationalPrompt("System: be helpful.", messages)
-        // Out-of-band must not give more history room than an explicit system instruction reservation.
-        assertTrue(outOfBand.estimatedTotalTokens <= inBand.estimatedTotalTokens + 40)
+        val longHistory = (1..20).flatMap { i ->
+            listOf(
+                ChatMessage.user("Question $i " + "detail ".repeat(20)),
+                ChatMessage.assistant("Answer $i " + "info ".repeat(20)),
+            )
+        } + ChatMessage.user("Latest question")
+        val outOfBand = manager.buildConversationalPrompt("", longHistory)
+        val inBand = manager.buildConversationalPrompt("System: be helpful.", longHistory)
+        // Out-of-band must not give more history room than an explicit in-band system instruction reservation.
+        assertTrue(outOfBand.retainedMessages.size <= inBand.retainedMessages.size)
+        assertTrue(outOfBand.estimatedTotalTokens <= manager.budget.maxContextTokens)
     }
 
     @Test
@@ -237,5 +241,124 @@ class ContextBudgetManagerTest {
         assertNotNull(retained.attachmentContent)
         assertTrue("Latest attachment should be trimmed to fit budget", retained.attachmentContent!!.length < hugeAttachment.length)
         assertTrue(result.estimatedTotalTokens <= 256)
+    }
+
+
+    @Test
+    fun effectiveInputBudgetSubtractsResponseReserveAndSafetyMargin() {
+        val budget = ContextBudgetManager.TokenBudget(
+            maxContextTokens = 4096,
+            maxResponseTokens = 1024,
+            reservedSystemTokens = 384,
+            safetyMarginTokens = 128,
+        )
+        assertEquals(2944, budget.effectiveInputBudget)
+        assertEquals(2560, budget.historyBudget)
+    }
+
+    @Test
+    fun buildPromptRespectsEffectiveInputBudgetWithSafetyMargin() {
+        val manager = ContextBudgetManager(
+            ContextBudgetManager.TokenBudget(
+                maxContextTokens = 512,
+                maxResponseTokens = 128,
+                reservedSystemTokens = 64,
+                safetyMarginTokens = 32,
+            )
+        )
+        val history = (1..30).flatMap { i ->
+            listOf(ChatMessage.user("U$i " + "word ".repeat(30)), ChatMessage.assistant("A$i " + "word ".repeat(30)))
+        } + ChatMessage.user("Latest request")
+        val result = manager.buildConversationalPrompt("", history)
+        // effectiveInputBudget = 512-128-32 = 352; estimate includes out-of-band system reserve.
+        assertTrue(result.estimatedTotalTokens <= manager.budget.maxContextTokens - manager.budget.maxResponseTokens)
+        assertEquals("Latest request", result.retainedMessages.last().content)
+    }
+
+    @Test
+    fun outOfBandSystemInstructionBudgetReducesHistoryRoom() {
+        val noReserve = ContextBudgetManager(
+            ContextBudgetManager.TokenBudget(1024, 256, 64, 0)
+        ).buildConversationalPrompt("", (1..20).flatMap {
+            listOf(ChatMessage.user("Q$it " + "detail ".repeat(20)), ChatMessage.assistant("A$it " + "detail ".repeat(20)))
+        } + ChatMessage.user("Latest"), systemInstructionBudgetTokens = 0)
+
+        val bigReserve = ContextBudgetManager(
+            ContextBudgetManager.TokenBudget(1024, 256, 64, 0)
+        ).buildConversationalPrompt("", (1..20).flatMap {
+            listOf(ChatMessage.user("Q$it " + "detail ".repeat(20)), ChatMessage.assistant("A$it " + "detail ".repeat(20)))
+        } + ChatMessage.user("Latest"), systemInstructionBudgetTokens = 400)
+
+        assertTrue(bigReserve.retainedMessages.size <= noReserve.retainedMessages.size)
+        assertTrue(bigReserve.truncatedCount >= noReserve.truncatedCount)
+    }
+
+    @Test
+    fun historyTruncatesAtMessageBoundariesAndKeepsOrdering() {
+        val manager = ContextBudgetManager(
+            ContextBudgetManager.TokenBudget(300, 64, 32, 0)
+        )
+        val messages = listOf(
+            ChatMessage.user("Old user 1"),
+            ChatMessage.assistant("Old assistant 1"),
+            ChatMessage.user("Old user 2"),
+            ChatMessage.assistant("Old assistant 2"),
+            ChatMessage.user("Recent user"),
+            ChatMessage.assistant("Recent assistant"),
+            ChatMessage.user("Latest user"),
+        )
+        val result = manager.buildConversationalPrompt("", messages)
+        val retained = result.retainedMessages
+        assertEquals("Latest user", retained.last().content)
+        // No partial messages: every retained message is one of the originals (or compacted copy).
+        val originalContents = messages.map { it.content }.toSet()
+        assertTrue(retained.all { originalContents.contains(it.content) })
+        // Ordering preserved.
+        val indices = retained.map { m -> messages.indexOfFirst { it.content == m.content } }
+        assertEquals(indices.sorted(), indices)
+    }
+
+    @Test
+    fun oversizedCurrentUserMessageIsKeptButTrimmedExplicitly() {
+        val manager = ContextBudgetManager(
+            ContextBudgetManager.TokenBudget(220, 48, 24, 0)
+        )
+        val huge = "A".repeat(5000)
+        val result = manager.buildConversationalPrompt("", listOf(ChatMessage.user(huge, attachmentContent = "B".repeat(4000))))
+        assertEquals(1, result.retainedMessages.size)
+        val msg = result.retainedMessages.first()
+        assertEquals(ChatMessage.Role.USER, msg.role)
+        assertTrue(msg.content.length < huge.length)
+        assertTrue(msg.content.contains("[Message trimmed to fit model context budget.]") || msg.attachmentContent == null || msg.attachmentContent!!.length < 4000)
+    }
+
+    @Test
+    fun emptyHistoryAndShortConversationDoNotTruncate() {
+        val manager = ContextBudgetManager()
+        val empty = manager.buildConversationalPrompt("", emptyList())
+        assertTrue(empty.retainedMessages.isEmpty())
+        assertEquals(0, empty.truncatedCount)
+
+        val short = manager.buildConversationalPrompt("", listOf(
+            ChatMessage.user("Hello"),
+            ChatMessage.assistant("Hi"),
+            ChatMessage.user("How are you?"),
+        ))
+        assertEquals(3, short.retainedMessages.size)
+        assertEquals(0, short.truncatedCount)
+    }
+
+    @Test
+    fun documentAttachmentDoesNotOverflowBudget() {
+        val manager = ContextBudgetManager(
+            ContextBudgetManager.TokenBudget(512, 128, 64, 32)
+        )
+        val doc = "Document line. ".repeat(2000)
+        val result = manager.buildConversationalPrompt("", listOf(
+            ChatMessage.user("Summarize this document", attachmentContent = doc),
+        ))
+        assertTrue(result.estimatedTotalTokens <= manager.budget.maxContextTokens)
+        assertTrue(result.hasDemarcatedAttachments)
+        assertEquals(1, result.retainedMessages.size)
     }
 }

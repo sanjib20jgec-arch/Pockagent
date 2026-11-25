@@ -849,15 +849,17 @@ class MainViewModel internal constructor(
                 }
 
                 val finalText = if (isGenerationCancelled.get() || !isCurrentGeneration()) {
-                    synchronized(accumulated) { accumulated.toString().trim() }
+                    synchronized(accumulated) { accumulated.toString().trim() }.ifBlank { result.trim() }
                 } else {
                     result
                 }
                 val finalFormatted = MarkdownFormatter.formatForDisplay(finalText)
                 val finalPlain = MarkdownFormatter.stripToPlainText(finalText)
 
-                // Persist to originating session if this is still the current generation; never write to another session.
-                if (isCurrentGeneration() && finalText.isNotBlank()) {
+                // Persist to the originating session. This must happen even if the user switched away or
+                // cancelled, so the originating conversation keeps its partial/final answer and no stale
+                // content leaks into the newly selected session.
+                if (finalText.isNotBlank()) {
                     saveTurnToSession(task, attached, finalText, originatingSessionId)
                 }
 

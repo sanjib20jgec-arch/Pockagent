@@ -2,7 +2,7 @@ package com.example.pocketagent
 
 import android.Manifest
 import android.app.Activity
-import androidx.fragment.app.FragmentActivity
+import android.app.ActivityManager
 import android.app.AlertDialog
 import androidx.fragment.app.FragmentActivity
 import android.content.ActivityNotFoundException
@@ -158,6 +158,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
 
     // Legacy output-card views (kept for compatibility with older UI paths)
     private lateinit var outputCard: LinearLayout
+    private lateinit var answerText: TextView
     private lateinit var stopGeneratingButton: android.widget.Button
     private lateinit var citationsContainer: LinearLayout
     private lateinit var systemActionContainer: LinearLayout

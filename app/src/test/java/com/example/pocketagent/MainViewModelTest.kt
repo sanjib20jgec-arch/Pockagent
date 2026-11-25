@@ -12,7 +12,11 @@ import org.junit.rules.TemporaryFolder
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executor
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 
 class MainViewModelTest {
 
@@ -39,14 +43,18 @@ class MainViewModelTest {
         override fun initialize() {}
         override fun isAvailable(): Boolean = available
 
+        var lastConversationSessionId: String? = null
+
         override fun runInference(
             prompt: String,
             systemInstruction: String,
             maxTokens: Int,
             onChunk: (String) -> Unit,
+            conversationSessionId: String?,
         ): String {
             lastPrompt = prompt
             lastSystemInstruction = systemInstruction
+            lastConversationSessionId = conversationSessionId
             if (shouldThrow) throw IllegalStateException("Simulated LLM engine failure")
             val override = responseToReturn
             if (override != null) {
@@ -531,5 +539,279 @@ class MainViewModelTest {
         viewModel.stopDuplexVoiceSession()
         assertFalse(viewModel.uiState.value.isDuplexActive)
         assertEquals(DuplexVoiceController.DuplexState.IDLE, viewModel.uiState.value.duplexState)
+    }
+
+    // --- P0: Session isolation & conversation state integrity ---
+
+    @Test
+    fun sessionAHistoryDoesNotAppearInSessionB() {
+        fakeLlmRunner.available = true
+        viewModel.createNewSession()
+        val sessionA = viewModel.uiState.value.currentSessionId!!
+
+        fakeLlmRunner.responseToReturn = "Alpha answer"
+        viewModel.updateTaskInput("Alpha question")
+        viewModel.suggestSteps()
+
+        viewModel.createNewSession()
+        val sessionB = viewModel.uiState.value.currentSessionId!!
+        assertTrue(sessionA != sessionB)
+
+        fakeLlmRunner.responseToReturn = "Beta answer"
+        viewModel.updateTaskInput("Beta question")
+        viewModel.suggestSteps()
+
+        val promptB = fakeLlmRunner.lastPrompt!!
+        assertTrue(promptB.contains("Beta question"))
+        assertFalse("Session A content must not leak into Session B prompt", promptB.contains("Alpha question"))
+        assertFalse("Session A content must not leak into Session B prompt", promptB.contains("Alpha answer"))
+    }
+
+    @Test
+    fun newChatStartsWithNoPreviousConversationMessages() {
+        fakeLlmRunner.available = true
+        viewModel.createNewSession()
+        fakeLlmRunner.responseToReturn = "First answer"
+        viewModel.updateTaskInput("First question")
+        viewModel.suggestSteps()
+
+        viewModel.createNewSession()
+        fakeLlmRunner.responseToReturn = "Fresh answer"
+        viewModel.updateTaskInput("Fresh question")
+        viewModel.suggestSteps()
+
+        val prompt = fakeLlmRunner.lastPrompt!!
+        assertFalse(prompt.contains("First question"))
+        assertFalse(prompt.contains("First answer"))
+        assertTrue(prompt.contains("Fresh question"))
+    }
+
+    @Test
+    fun switchingSessionsRestoresCorrectConversation() {
+        fakeLlmRunner.available = true
+        viewModel.createNewSession()
+        val a = viewModel.uiState.value.currentSessionId!!
+        fakeLlmRunner.responseToReturn = "Answer A"
+        viewModel.updateTaskInput("Question A")
+        viewModel.suggestSteps()
+
+        viewModel.createNewSession()
+        val b = viewModel.uiState.value.currentSessionId!!
+        fakeLlmRunner.responseToReturn = "Answer B"
+        viewModel.updateTaskInput("Question B")
+        viewModel.suggestSteps()
+
+        viewModel.switchSession(a)
+        assertEquals(a, viewModel.uiState.value.currentSessionId)
+        assertTrue(viewModel.uiState.value.generatedAnswer.contains("Answer A"))
+
+        viewModel.switchSession(b)
+        assertEquals(b, viewModel.uiState.value.currentSessionId)
+        assertTrue(viewModel.uiState.value.generatedAnswer.contains("Answer B"))
+    }
+
+    @Test
+    fun responseIsPersistedToOriginatingSession() {
+        fakeLlmRunner.available = true
+        viewModel.createNewSession()
+        val a = viewModel.uiState.value.currentSessionId!!
+        fakeLlmRunner.responseToReturn = "Persisted answer"
+        viewModel.updateTaskInput("Persisted question")
+        viewModel.suggestSteps()
+
+        val exportedA = viewModel.exportSession(a, asMarkdown = true)
+        assertNotNull(exportedA)
+        assertTrue(exportedA!!.contains("Persisted question"))
+        assertTrue(exportedA.contains("Persisted answer"))
+    }
+
+    @Test
+    fun switchingSessionsDuringGenerationDoesNotCorruptSelectedSession() {
+        val bg = Executors.newSingleThreadExecutor()
+        try {
+            val started = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            val runner = object : LlmInferenceRunner {
+                override fun initialize() {}
+                override fun isAvailable(): Boolean = true
+                override fun runInference(
+                    prompt: String,
+                    systemInstruction: String,
+                    maxTokens: Int,
+                    onChunk: (String) -> Unit,
+                    conversationSessionId: String?,
+                ): String {
+                    started.countDown()
+                    release.await(5, TimeUnit.SECONDS)
+                    onChunk("Late answer")
+                    return "Late answer"
+                }
+                override fun close() {}
+            }
+            val vm = MainViewModel(
+                filesDir = filesDir,
+                cacheDir = cacheDir,
+                modelFileStore = ModelFileStore(filesDir, minBytes = 1L),
+                whisperModelStore = WhisperModelStore(filesDir),
+                llmRunner = runner,
+                whisperTranscriber = fakeWhisperTranscriber,
+                workerExecutor = bg,
+                mainDispatcher = { it.run() },
+            )
+            vm.createNewSession()
+            val a = vm.uiState.value.currentSessionId!!
+            vm.createNewSession()
+            val b = vm.uiState.value.currentSessionId!!
+            vm.switchSession(a)
+
+            vm.updateTaskInput("Question for A")
+            vm.suggestSteps()
+            assertTrue("Generation should start", started.await(3, TimeUnit.SECONDS))
+
+            // Switch to B while A is generating
+            vm.switchSession(b)
+            assertEquals(b, vm.uiState.value.currentSessionId)
+            assertEquals("", vm.uiState.value.generatedAnswer)
+
+            release.countDown()
+            // wait for worker to finish
+            bg.submit { }.get(3, TimeUnit.SECONDS)
+            Thread.sleep(100)
+
+            // B must remain clean
+            assertEquals(b, vm.uiState.value.currentSessionId)
+            assertFalse("B must not show A's answer", vm.uiState.value.generatedAnswer.contains("Late answer"))
+            val exportedB = vm.exportSession(b, asMarkdown = true)
+            assertFalse("B must not be contaminated", exportedB?.contains("Late answer") == true)
+
+            // A should retain its own answer (persisted to originating session)
+            val exportedA = vm.exportSession(a, asMarkdown = true)
+            assertTrue("A should keep its response", exportedA?.contains("Late answer") == true)
+        } finally {
+            bg.shutdownNow()
+        }
+    }
+
+    @Test
+    fun cancellationDoesNotContaminateNextGeneration() {
+        val bg = Executors.newSingleThreadExecutor()
+        try {
+            val started = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            val runner = object : LlmInferenceRunner {
+                @Volatile var mode: String = "block"
+                override fun initialize() {}
+                override fun isAvailable(): Boolean = true
+                override fun runInference(
+                    prompt: String,
+                    systemInstruction: String,
+                    maxTokens: Int,
+                    onChunk: (String) -> Unit,
+                    conversationSessionId: String?,
+                ): String {
+                    if (mode == "block") {
+                        started.countDown()
+                        release.await(5, TimeUnit.SECONDS)
+                        onChunk("Stale")
+                        return "Stale"
+                    }
+                    onChunk("Fresh answer")
+                    return "Fresh answer"
+                }
+                override fun close() {}
+            }
+            val vm = MainViewModel(
+                filesDir = filesDir,
+                cacheDir = cacheDir,
+                modelFileStore = ModelFileStore(filesDir, minBytes = 1L),
+                whisperModelStore = WhisperModelStore(filesDir),
+                llmRunner = runner,
+                whisperTranscriber = fakeWhisperTranscriber,
+                workerExecutor = bg,
+                mainDispatcher = { it.run() },
+            )
+            vm.createNewSession()
+            vm.updateTaskInput("First")
+            vm.suggestSteps()
+            assertTrue(started.await(3, TimeUnit.SECONDS))
+            vm.stopGeneration()
+            release.countDown()
+            bg.submit { }.get(3, TimeUnit.SECONDS)
+            Thread.sleep(100)
+
+            runner.mode = "fresh"
+            vm.updateTaskInput("Second")
+            vm.suggestSteps()
+            bg.submit { }.get(3, TimeUnit.SECONDS)
+            Thread.sleep(100)
+
+            assertEquals("Fresh answer", vm.uiState.value.generatedAnswer)
+            assertFalse(vm.uiState.value.generatedAnswer.contains("Stale"))
+        } finally {
+            bg.shutdownNow()
+        }
+    }
+
+    @Test
+    fun sessionResetClearsOnlyIntendedConversationState() {
+        fakeLlmRunner.available = true
+        viewModel.createNewSession()
+        val a = viewModel.uiState.value.currentSessionId!!
+        fakeLlmRunner.responseToReturn = "A answer"
+        viewModel.updateTaskInput("A question")
+        viewModel.suggestSteps()
+
+        viewModel.createNewSession()
+        val b = viewModel.uiState.value.currentSessionId!!
+        assertTrue(a != b)
+        assertEquals("", viewModel.uiState.value.generatedAnswer)
+        assertEquals(MainUiState.GenerationStatus.IDLE, viewModel.uiState.value.generationStatus)
+
+        val exportedA = viewModel.exportSession(a, asMarkdown = true)
+        assertTrue(exportedA!!.contains("A question"))
+        assertTrue(exportedA.contains("A answer"))
+    }
+
+    @Test
+    fun contextConstructionUsesCorrectSessionHistory() {
+        fakeLlmRunner.available = true
+        viewModel.createNewSession()
+        val a = viewModel.uiState.value.currentSessionId!!
+        fakeLlmRunner.responseToReturn = "A1"
+        viewModel.updateTaskInput("Question A1")
+        viewModel.suggestSteps()
+        fakeLlmRunner.responseToReturn = "A2"
+        viewModel.updateTaskInput("Question A2")
+        viewModel.suggestSteps()
+
+        viewModel.createNewSession()
+        val b = viewModel.uiState.value.currentSessionId!!
+        fakeLlmRunner.responseToReturn = "B1"
+        viewModel.updateTaskInput("Question B1")
+        viewModel.suggestSteps()
+
+        viewModel.switchSession(a)
+        fakeLlmRunner.responseToReturn = "A3"
+        viewModel.updateTaskInput("Question A3")
+        viewModel.suggestSteps()
+
+        val prompt = fakeLlmRunner.lastPrompt!!
+        assertTrue(prompt.contains("Question A1"))
+        assertTrue(prompt.contains("A1"))
+        assertTrue(prompt.contains("Question A2"))
+        assertTrue(prompt.contains("A2"))
+        assertFalse("Session B must not appear in A prompt", prompt.contains("Question B1"))
+        assertFalse("Session B must not appear in A prompt", prompt.contains("B1"))
+    }
+
+    @Test
+    fun generationPassesOriginatingSessionIdToRunner() {
+        fakeLlmRunner.available = true
+        viewModel.createNewSession()
+        val sessionId = viewModel.uiState.value.currentSessionId!!
+        fakeLlmRunner.responseToReturn = "ok"
+        viewModel.updateTaskInput("hello")
+        viewModel.suggestSteps()
+        assertEquals(sessionId, fakeLlmRunner.lastConversationSessionId)
     }
 }

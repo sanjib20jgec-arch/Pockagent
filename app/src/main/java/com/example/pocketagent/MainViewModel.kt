@@ -31,6 +31,7 @@ interface LlmInferenceRunner : Closeable {
         systemInstruction: String,
         maxTokens: Int,
         onChunk: (String) -> Unit,
+        conversationSessionId: String? = null,
     ): String
 }
 
@@ -77,18 +78,19 @@ class DefaultLlmInferenceRunner(
         systemInstruction: String,
         maxTokens: Int,
         onChunk: (String) -> Unit,
+        conversationSessionId: String?,
     ): String {
         val modelFile = modelFile()
         require(modelFile.exists()) { "Choose a compatible .litertlm model first." }
         check(!isClosed) { "Inference runner is closed." }
 
         return try {
-            runInferencePass(modelFile, prompt, systemInstruction, maxTokens, onChunk)
+            runInferencePass(modelFile, prompt, systemInstruction, maxTokens, onChunk, conversationSessionId)
         } catch (gpuFailure: Throwable) {
             if (!isClosed && engineManager.activeBackend == ActiveBackend.GPU) {
                 val reason = gpuFailure.message ?: gpuFailure.javaClass.simpleName
                 if (engineManager.fallbackToCpuAfterRuntimeFailure(reason, modelFile, cacheDir)) {
-                    return runInferencePass(modelFile, prompt, systemInstruction, maxTokens, onChunk)
+                    return runInferencePass(modelFile, prompt, systemInstruction, maxTokens, onChunk, conversationSessionId)
                 }
             }
             throw gpuFailure
@@ -101,6 +103,7 @@ class DefaultLlmInferenceRunner(
         systemInstruction: String,
         maxTokens: Int,
         onChunk: (String) -> Unit,
+        conversationSessionId: String?,
     ): String {
         val generated = StringBuilder()
         val streamFinished = CountDownLatch(1)
@@ -109,7 +112,7 @@ class DefaultLlmInferenceRunner(
         val manager = engineManager
         manager.getOrInitializeEngine(modelFile, cacheDir)
         val key = manager.conversationKey(
-            sessionId = "voice",
+            sessionId = conversationSessionId ?: "voice",
             modelPath = modelFile.absolutePath,
             systemInstruction = systemInstruction,
             attachmentHash = 0,
@@ -251,6 +254,8 @@ class MainViewModel internal constructor(
     private val observers = CopyOnWriteArrayList<(MainUiState) -> Unit>()
     @Volatile private var whisperContext: Long = 0L
     private val isGenerationCancelled = AtomicBoolean(false)
+    private val generationId = java.util.concurrent.atomic.AtomicLong(0L)
+    @Volatile private var activeGenerationId: Long = 0L
     @Volatile private var activeSession: ConversationSession? = null
     private val audioRecorder by lazy { InAppAudioRecorder() }
     val duplexVoiceController by lazy {
@@ -702,12 +707,25 @@ class MainViewModel internal constructor(
             return
         }
 
+        // Bind generation to the originating session to prevent cross-session contamination.
+        val originatingSession = activeSession
+            ?: ConversationSession.createWithInitialPrompt(task.ifBlank { "Conversation" }).also { created ->
+                try { sessionStore.saveSession(created) } catch (_: Exception) {}
+                activeSession = created
+            }
+        val originatingSessionId = originatingSession.id
+
+        val myGenerationId = generationId.incrementAndGet()
+        activeGenerationId = myGenerationId
         isGenerationCancelled.set(false)
         val calculation = if (task.isNotBlank()) LocalCalculatorTool.tryEvaluate(task) else null
         updateState {
             it.copy(
                 lastUserPrompt = task,
-                canRegenerate = (task).isNotBlank(),
+                canRegenerate = task.isNotBlank(),
+                currentSessionId = originatingSessionId,
+                currentSessionTitle = originatingSession.title,
+                isSessionPinned = originatingSession.isPinned,
             ).copy(generationStatus = MainUiState.GenerationStatus.THINKING, isOutputVisible = true, answerIsComplete = false, generatedAnswer = "Working on it…", formattedAnswer = "Working on it…", plainTextAnswer = "Working on it…", statusMessage = "Answering on this device…", errorMessage = null, activeCalculation = calculation)
         }
 
@@ -715,9 +733,11 @@ class MainViewModel internal constructor(
             val accumulated = StringBuilder()
             val firstChunk = AtomicBoolean(true)
             var retrievedCitations = emptyList<LocalDocumentRetriever.DocumentCitation>()
+            fun isCurrentGeneration(): Boolean = activeGenerationId == myGenerationId
+            fun isSessionActive(): Boolean = activeSession?.id == originatingSessionId
             try {
                 val intent = AnswerDirective.classify(task.ifBlank { attached })
-                val history = conversationHistoryFor(task)
+                val history = promptContext.historyFor(originatingSession.messages, task)
                 val calculation = if (task.isNotBlank()) LocalCalculatorTool.tryEvaluate(task) else null
                 val contextToInject = if (attached.isNotBlank()) {
                     val retrieval = LocalDocumentRetriever.retrieveTextWithCitations(
@@ -765,7 +785,9 @@ class MainViewModel internal constructor(
                     if (isRetry) {
                         synchronized(accumulated) { accumulated.setLength(0) }
                         firstChunk.set(true)
-                        updateState { it.copy(statusMessage = "Answer needs more detail. Refining on this device…") }
+                        if (isCurrentGeneration() && isSessionActive()) {
+                            updateState { if (it.currentSessionId != originatingSessionId) it else it.copy(statusMessage = "Answer needs more detail. Refining on this device…") }
+                        }
                     }
 
                     val promptBuild = promptContext.answerPrompt(
@@ -776,17 +798,18 @@ class MainViewModel internal constructor(
                         history = history,
                         calculation = calculation,
                     )
-                    if (promptBuild.truncatedCount > 0 && !isRetry) {
-                        updateState { it.copy(statusMessage = "Older context trimmed to fit model limit.") }
+                    if (promptBuild.truncatedCount > 0 && !isRetry && isCurrentGeneration() && isSessionActive()) {
+                        updateState { if (it.currentSessionId != originatingSessionId) it else it.copy(statusMessage = "Older context trimmed to fit model limit.") }
                     }
                     val prompt = promptBuild.prompt
                     // The guard stops a model that locks onto a phrase and repeats it forever.
                     val guard = GuardedGeneration { currentText ->
+                        if (!isCurrentGeneration() || !isSessionActive()) return@GuardedGeneration
                         val isFirst = firstChunk.compareAndSet(true, false)
                         val formatted = MarkdownFormatter.formatForDisplay(currentText)
                         val plain = MarkdownFormatter.stripToPlainText(currentText)
                         updateState {
-                            it.copy(
+                            if (it.currentSessionId != originatingSessionId) it else it.copy(
                                 generationStatus = MainUiState.GenerationStatus.STREAMING,
                                 isOutputVisible = true,
                                 generatedAnswer = currentText,
@@ -802,11 +825,12 @@ class MainViewModel internal constructor(
                         systemInstruction = effectiveInstruction,
                         maxTokens = MainUiState.MAX_RESPONSE_TOKENS,
                         onChunk = { chunk ->
-                            if (isGenerationCancelled.get()) {
+                            if (isGenerationCancelled.get() || !isCurrentGeneration() || !isSessionActive()) {
                                 guard.cancel()
                             }
                             guard.accept(accumulated, chunk)
                         },
+                        conversationSessionId = originatingSessionId,
                     )
                     runawayFragment = guard.runawayFragment
                     result = AnswerFinalizer.finalize(
@@ -823,74 +847,70 @@ class MainViewModel internal constructor(
                     attempt++
                 }
 
-                if (isGenerationCancelled.get()) {
-                    val currentText = synchronized(accumulated) { accumulated.toString().trim() }
-                    val formatted = MarkdownFormatter.formatForDisplay(currentText)
-                    val plain = MarkdownFormatter.stripToPlainText(currentText)
-                    updateState { it.copy(
-                        generationStatus = MainUiState.GenerationStatus.COMPLETED,
-                        isOutputVisible = true,
-                        answerIsComplete = (currentText).isNotBlank(),
-                        generatedAnswer = currentText,
-                        formattedAnswer = formatted,
-                        plainTextAnswer = plain,
-                        statusMessage = "Generation stopped by user.",
-                        errorMessage = null,
-                        canRegenerate = it.lastUserPrompt.isNotBlank(),
-                    ).copy(documentCitations = retrievedCitations) }
-                    return@execute
+                val finalText = if (isGenerationCancelled.get() || !isCurrentGeneration()) {
+                    synchronized(accumulated) { accumulated.toString().trim() }
+                } else {
+                    result
+                }
+                val finalFormatted = MarkdownFormatter.formatForDisplay(finalText)
+                val finalPlain = MarkdownFormatter.stripToPlainText(finalText)
+
+                // Persist to originating session if this is still the current generation; never write to another session.
+                if (isCurrentGeneration() && finalText.isNotBlank()) {
+                    saveTurnToSession(task, attached, finalText, originatingSessionId)
                 }
 
-                val finalFormatted = MarkdownFormatter.formatForDisplay(result)
-                val finalPlain = MarkdownFormatter.stripToPlainText(result)
-                updateState {
-                    run {
-                        val complete = (result).isNotBlank()
-                        it.copy(
-                            generationStatus = MainUiState.GenerationStatus.COMPLETED,
-                            isOutputVisible = true,
-                            answerIsComplete = complete,
-                            generatedAnswer = if (complete) result else "No answer was returned. Try rephrasing the request.",
-                            formattedAnswer = if (complete) finalFormatted else "No answer was returned. Try rephrasing the request.",
-                            plainTextAnswer = if (complete) finalPlain else "No answer was returned. Try rephrasing the request.",
-                            statusMessage = if (complete) "Answer ready." else "No answer was returned. Try rephrasing the request.",
-                            errorMessage = null,
-                        )
-                    }
-                        .copy(documentCitations = retrievedCitations)
-                        .let { done ->
-                            val stopped = runawayFragment
-                            if (stopped != null && result.isNotBlank()) {
-                                done.copy(statusMessage = RunawayGuard.stoppedNotice(stopped))
-                            } else {
-                                done
+                if (isCurrentGeneration() && isSessionActive()) {
+                    updateState { state ->
+                        if (state.currentSessionId != originatingSessionId) state else {
+                            val stoppedByUser = isGenerationCancelled.get()
+                            val complete = finalText.isNotBlank()
+                            state.copy(
+                                generationStatus = MainUiState.GenerationStatus.COMPLETED,
+                                isOutputVisible = true,
+                                answerIsComplete = complete,
+                                generatedAnswer = if (complete) finalText else "No answer was returned. Try rephrasing the request.",
+                                formattedAnswer = if (complete) finalFormatted else "No answer was returned. Try rephrasing the request.",
+                                plainTextAnswer = if (complete) finalPlain else "No answer was returned. Try rephrasing the request.",
+                                statusMessage = when {
+                                    stoppedByUser -> "Generation stopped by user."
+                                    complete -> "Answer ready."
+                                    else -> "No answer was returned. Try rephrasing the request."
+                                },
+                                errorMessage = null,
+                                canRegenerate = state.lastUserPrompt.isNotBlank(),
+                            ).copy(documentCitations = retrievedCitations).let { done ->
+                                val stopped = runawayFragment
+                                if (!stoppedByUser && stopped != null && finalText.isNotBlank()) {
+                                    done.copy(statusMessage = RunawayGuard.stoppedNotice(stopped))
+                                } else done
                             }
                         }
+                    }
                 }
-
-                // Persist turns to the active session
-                saveTurnToSession(task, attached, result)
             } catch (e: Exception) {
-                if (isGenerationCancelled.get()) {
-                    val currentText = synchronized(accumulated) { accumulated.toString().trim() }
-                    val formatted = MarkdownFormatter.formatForDisplay(currentText)
-                    val plain = MarkdownFormatter.stripToPlainText(currentText)
-                    updateState {
-                        it.copy(
-                            generationStatus = MainUiState.GenerationStatus.COMPLETED,
-                            isOutputVisible = true,
-                            answerIsComplete = currentText.isNotBlank(),
-                            generatedAnswer = currentText,
-                            formattedAnswer = formatted,
-                            plainTextAnswer = plain,
-                            statusMessage = "Generation stopped by user.",
-                            errorMessage = null,
-                            canRegenerate = it.lastUserPrompt.isNotBlank(),
-                        )
+                if (isGenerationCancelled.get() || !isCurrentGeneration() || !isSessionActive()) {
+                    if (isCurrentGeneration() && isSessionActive()) {
+                        val currentText = synchronized(accumulated) { accumulated.toString().trim() }
+                        val formatted = MarkdownFormatter.formatForDisplay(currentText)
+                        val plain = MarkdownFormatter.stripToPlainText(currentText)
+                        updateState { state ->
+                            if (state.currentSessionId != originatingSessionId) state else state.copy(
+                                generationStatus = MainUiState.GenerationStatus.COMPLETED,
+                                isOutputVisible = true,
+                                answerIsComplete = currentText.isNotBlank(),
+                                generatedAnswer = currentText,
+                                formattedAnswer = formatted,
+                                plainTextAnswer = plain,
+                                statusMessage = "Generation stopped by user.",
+                                errorMessage = null,
+                                canRegenerate = state.lastUserPrompt.isNotBlank(),
+                            )
+                        }
                     }
                 } else {
-                    updateState {
-                        it.copy(
+                    updateState { state ->
+                        if (state.currentSessionId != originatingSessionId) state else state.copy(
                             generationStatus = MainUiState.GenerationStatus.ERROR,
                             isOutputVisible = false,
                             answerIsComplete = false,
@@ -1229,7 +1249,7 @@ class MainViewModel internal constructor(
                 override fun onAssistantChunk(chunk: String) {}
 
                 override fun onTurnComplete(userText: String, assistantText: String) {
-                    saveTurnToSession(userText, "", assistantText)
+                    saveTurnToSession(userText, "", assistantText, activeSession?.id)
                     val formatted = MarkdownFormatter.formatForDisplay(assistantText)
                     val plain = MarkdownFormatter.stripToPlainText(assistantText)
                     val complete = assistantText.isNotBlank()
@@ -1280,9 +1300,28 @@ class MainViewModel internal constructor(
         }
     }
 
-    private fun saveTurnToSession(task: String, attachedContext: String, answer: String) {
+    private fun saveTurnToSession(
+        task: String,
+        attachedContext: String,
+        answer: String,
+        originatingSessionId: String? = null,
+    ) {
         try {
-            val current = activeSession ?: ConversationSession.createWithInitialPrompt(task.ifBlank { "Conversation" })
+            val targetId = originatingSessionId ?: activeSession?.id
+            val current = when {
+                targetId != null -> sessionStore.getSession(targetId) ?: activeSession
+                else -> activeSession
+            } ?: ConversationSession.createWithInitialPrompt(task.ifBlank { "Conversation" })
+
+            // Never silently write a completed turn into a different session than it came from.
+            if (originatingSessionId != null && activeSession?.id != originatingSessionId) {
+                val updated = current.withMessage(
+                    ChatMessage.user(task, attachmentContent = if (attachedContext.isNotBlank()) attachedContext else null)
+                ).withMessage(ChatMessage.assistant(answer))
+                sessionStore.saveSession(updated)
+                return
+            }
+
             val userMsg = ChatMessage.user(
                 content = task,
                 attachmentContent = if (attachedContext.isNotBlank()) attachedContext else null
@@ -1291,11 +1330,9 @@ class MainViewModel internal constructor(
             val updated = current.withMessage(userMsg).withMessage(assistantMsg)
             sessionStore.saveSession(updated)
             activeSession = updated
-            // Point the UI state at this session explicitly. refreshSessions() would read the
-            // previous currentSessionId (still null on the first turn) and null out activeSession,
-            // dropping the history that was just saved.
             updateState {
-                it.copy(
+                if (originatingSessionId != null && it.currentSessionId != originatingSessionId) it
+                else it.copy(
                     sessionSummaries = sessionStore.listSessionSummaries(),
                     currentSessionId = updated.id,
                     currentSessionTitle = updated.title,

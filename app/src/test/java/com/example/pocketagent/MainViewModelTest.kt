@@ -96,7 +96,7 @@ class MainViewModelTest {
         viewModel = MainViewModel(
             filesDir = filesDir,
             cacheDir = cacheDir,
-            modelFileStore = ModelFileStore(filesDir),
+            modelFileStore = ModelFileStore(filesDir, minBytes = 1L),
             whisperModelStore = WhisperModelStore(filesDir),
             llmRunner = fakeLlmRunner,
             whisperTranscriber = fakeWhisperTranscriber,

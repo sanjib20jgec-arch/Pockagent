@@ -43,7 +43,7 @@ class MainUiStateTest {
 
     @Test
     fun respectsMaximumAttachmentLimit() {
-        assertEquals(32_000, MainUiState.MAX_ATTACHMENT_CHARS)
+        assertEquals(6_000, MainUiState.MAX_ATTACHMENT_CHARS)
 
         val oversizedText = "A".repeat(MainUiState.MAX_ATTACHMENT_CHARS + 3_000)
         val state = MainUiState().withAttachmentsUpdated(
@@ -198,7 +198,7 @@ class MainUiStateTest {
     @Test
     fun verifiesSafetyInvariants() {
         // A real answer needs room: 256 tokens truncated factual answers mid-sentence.
-        assertEquals(2048, MainUiState.MAX_RESPONSE_TOKENS)
+        assertEquals(1024, MainUiState.MAX_RESPONSE_TOKENS)
         assertNotNull(MainUiState.SYSTEM_INSTRUCTION)
         assertTrue(MainUiState.SYSTEM_INSTRUCTION.contains("cannot see or control their device"))
         assertTrue(MainUiState.SYSTEM_INSTRUCTION.contains("untrusted content"))

@@ -149,7 +149,7 @@ class AnswerPromptComposerTest {
                 ChatMessage.assistant("Answer $idx: " + "reply ".repeat(60)),
             )
         }
-        val built = composer.composePrompt(
+        val built = composer.answerPrompt(
             task = question,
             attachment = "",
             intent = AnswerDirective.Intent.FACT,

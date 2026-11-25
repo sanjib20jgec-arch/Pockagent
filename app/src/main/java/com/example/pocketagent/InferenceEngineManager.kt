@@ -89,6 +89,16 @@ class InferenceEngineManager<T : AutoCloseable>(
     },
 ) : AutoCloseable {
 
+    companion object {
+        // Conservative decoding defaults for small on-device models: reduce repetition/looping
+        // while keeping answers coherent. RunawayGuard remains a secondary backstop.
+        // NOTE: SamplerConfig wiring is version-sensitive across LiteRT-LM releases;
+        // keep defaults documented here and wire explicitly once API is verified in CI/device.
+        const val DEFAULT_TOP_K = 40
+        const val DEFAULT_TOP_P = 0.95f
+        const val DEFAULT_TEMPERATURE = 0.8f
+    }
+
     @Volatile var engine: T? = null
         private set
 

@@ -235,7 +235,7 @@ class AnswerPromptComposer(
      * @param isRetry true for the single corrective retry after a dodged answer.
      * @param history earlier turns of the conversation, oldest first.
      */
-    data class PromptBuildResult(val prompt: String, val truncatedCount: Int)
+    data class PromptBuildResult(val prompt: String, val truncatedCount: Int, val estimatedTotalTokens: Int = 0)
 
     fun answerPrompt(
         task: String,
@@ -273,7 +273,7 @@ class AnswerPromptComposer(
             messages = history + latest,
             closingInstruction = closing,
         )
-        return PromptBuildResult(result.prompt, result.truncatedCount)
+        return PromptBuildResult(result.prompt, result.truncatedCount, result.estimatedTotalTokens)
     }
 
     /**

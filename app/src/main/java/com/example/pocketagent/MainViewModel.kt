@@ -53,7 +53,7 @@ class DefaultLlmInferenceRunner(
          * instead of hanging the worker thread, long enough for larger 2B INT8 models on CPU.
          */
         const val DEFAULT_TIMEOUT_SECONDS = 180L
-        const val WARM_CONTEXT_RESET_THRESHOLD = 3400
+        const val WARM_CONTEXT_RESET_THRESHOLD = 2800
     }
 
     @Volatile private var isClosed = false
@@ -309,12 +309,24 @@ class MainViewModel internal constructor(
         refreshNotes()
         val model = modelFileStore.modelFile
         if (model.exists() && model.length() > 0) {
-            updateState { it.withModelReady(model.length()) }
+            updateState { it.copy(
+                isModelReady = true,
+                isModelImporting = false,
+                modelSizeBytes = model.length(),
+                modelText = "MODEL READY  ·  ${MainUiState.formatBytes(model.length())}",
+                statusMessage = "Model ready. Ask anything, dictate, or attach text/PDF (selectable text only).",
+                errorMessage = null,
+            ) }
         }
 
         val whisperFile = whisperModelStore.modelFile
         if (whisperFile.isFile) {
-            updateState { it.withWhisperLoading("Loading saved local Whisper model…") }
+            updateState { it.copy(
+            isWhisperLoading = true,
+            whisperModelText = "Loading saved local Whisper model…",
+            statusMessage = "Loading a user-selected ggml model locally. Large models may take time and memory.",
+            errorMessage = null,
+        ) }
             workerExecutor.execute {
                 try {
                     whisperModelStore.discardCandidate()
@@ -325,13 +337,27 @@ class MainViewModel internal constructor(
                     require(loaded != 0L) { "Saved ggml model could not be loaded." }
                     whisperContext = loaded
                     updateState {
-                        it.withWhisperReady(whisperFile.name, whisperFile.length())
-                            .withStatus("Local Whisper model ready. Choose a bounded PCM WAV file to transcribe.")
+                        it.copy(
+                            isWhisperModelReady = true,
+                            isWhisperLoading = false,
+                            whisperModelSizeBytes = whisperFile.length(),
+                            whisperModelText = "Whisper model ready: ${(whisperFile.name).take(80)} (stored locally).",
+                            statusMessage = "Whisper model loaded. Choose a bounded PCM WAV file to transcribe locally.",
+                            errorMessage = null,
+                        )
+                            .copy(statusMessage = "Local Whisper model ready. Choose a bounded PCM WAV file to transcribe.")
                     }
                 } catch (e: Exception) {
                     whisperContext = 0L
                     updateState {
-                        it.withWhisperLoadFailed(e.message ?: "unsupported model", restoredPrevious = false)
+                        it.copy(
+                            isWhisperLoading = false,
+                            isWhisperModelReady = false,
+                            whisperModelText = if (false) "Previous local Whisper model restored."
+                            else "No local Whisper model loaded. Choose a valid ggml .bin file (max 512 MB).",
+                            statusMessage = "Could not load Whisper model: ${e.message ?: "unsupported model"}",
+                            errorMessage = e.message ?: "unsupported model",
+                        )
                     }
                 }
             }
@@ -339,7 +365,7 @@ class MainViewModel internal constructor(
     }
 
     fun onTaskInputChanged(text: String) {
-        updateState { it.withTaskInput(text) }
+        updateState { it.copy(taskInput = text) }
     }
 
     /** Alias used when restoring a prompt from history or a regenerate request. */
@@ -348,16 +374,16 @@ class MainViewModel internal constructor(
     }
 
     fun onTtsReady(ready: Boolean) {
-        updateState { it.withTtsReady(ready) }
+        updateState { it.copy(isTtsReady = ready) }
     }
 
     fun importModel(displayName: String?, inputStreamProvider: () -> InputStream?) {
         if (displayName != null && !displayName.endsWith(".litertlm", ignoreCase = true)) {
-            updateState { it.withStatus("Choose a LiteRT-LM model file ending in .litertlm.") }
+            updateState { it.copy(statusMessage = "Choose a LiteRT-LM model file ending in .litertlm.") }
             return
         }
 
-        updateState { it.withModelImporting() }
+        updateState { it.copy(isModelImporting = true, statusMessage = "Staging selected model on this device…") }
         workerExecutor.execute {
             try {
                 llmRunner.close()
@@ -365,16 +391,27 @@ class MainViewModel internal constructor(
                     modelFileStore.importModel(input)
                 } ?: error("Could not open the selected file.")
 
-                updateState { it.withModelReady(target.length()) }
+                updateState { it.copy(
+                isModelReady = true,
+                isModelImporting = false,
+                modelSizeBytes = target.length(),
+                modelText = "MODEL READY  ·  ${MainUiState.formatBytes(target.length())}",
+                statusMessage = "Model ready. Ask anything, dictate, or attach text/PDF (selectable text only).",
+                errorMessage = null,
+            ) }
             } catch (e: Exception) {
                 File(filesDir, "model.litertlm.part").delete()
-                updateState { it.withModelImportFailed(e.message ?: "unknown error") }
+                updateState { it.copy(
+                isModelImporting = false,
+                statusMessage = "Model import failed: ${e.message ?: "unknown error"}",
+                errorMessage = e.message ?: "unknown error",
+            ) }
             }
         }
     }
 
     fun importTextFiles(files: List<Pair<String, InputStream?>>) {
-        updateState { it.withStatus("Reading selected text file${if (files.size > 1) "s" else ""}…") }
+        updateState { it.copy(statusMessage = "Reading selected text file${if (files.size > 1) "s" else ""}…") }
         workerExecutor.execute {
             try {
                 val content = StringBuilder()
@@ -392,20 +429,23 @@ class MainViewModel internal constructor(
                 require(content.isNotBlank()) { "The selected files are empty." }
                 val truncated = content.toString().take(MainUiState.MAX_ATTACHMENT_CHARS)
                 updateState {
-                    it.withAttachmentsUpdated(
-                        newContext = truncated,
-                        newNames = names,
-                        status = "Text attached. Review the preview, then add your question.",
+                    it.copy(
+                        attachedContext = truncated,
+                        attachedNames = names,
+                        attachmentPreviewExpanded = false,
+                        transcriptReviewPending = false,
+                        statusMessage = "Text attached. Review the preview, then add your question.",
+                        errorMessage = null,
                     )
                 }
             } catch (e: Exception) {
-                updateState { it.withStatus("Could not attach text: ${e.message ?: "unknown error"}") }
+                updateState { it.copy(statusMessage = "Could not attach text: ${e.message ?: "unknown error"}") }
             }
         }
     }
 
     fun importPdf(displayName: String?, context: Context, inputStreamProvider: () -> InputStream?) {
-        updateState { it.withStatus("Reading selected PDF on this device…") }
+        updateState { it.copy(statusMessage = "Reading selected PDF on this device…") }
         workerExecutor.execute {
             try {
                 val current = _uiState.value.attachedContext
@@ -432,11 +472,18 @@ class MainViewModel internal constructor(
                 }
 
                 updateState {
-                    it.withAttachmentsUpdated(newContext, newNames, status)
+                    it.copy(
+                        attachedContext = (newContext).take(MainUiState.MAX_ATTACHMENT_CHARS),
+                        attachedNames = newNames,
+                        attachmentPreviewExpanded = false,
+                        transcriptReviewPending = false,
+                        statusMessage = status,
+                        errorMessage = null,
+                    )
                 }
             } catch (e: Exception) {
                 updateState {
-                    it.withStatus("Could not attach PDF: ${e.message ?: "unsupported or unreadable PDF"}")
+                    it.copy(statusMessage = "Could not attach PDF: ${e.message ?: "unsupported or unreadable PDF"}")
                 }
             }
         }
@@ -446,13 +493,18 @@ class MainViewModel internal constructor(
         val name = rawName ?: "Selected model"
         if (!name.endsWith(".bin", ignoreCase = true)) {
             updateState {
-                it.withStatus("Choose a whisper.cpp ggml model file ending in .bin. No model is bundled with PocketAgent.")
+                it.copy(statusMessage = "Choose a whisper.cpp ggml model file ending in .bin. No model is bundled with PocketAgent.")
             }
             return
         }
 
         val displayName = name.replace(Regex("[\\r\\n]+"), " ").take(80)
-        updateState { it.withWhisperLoading() }
+        updateState { it.copy(
+            isWhisperLoading = true,
+            whisperModelText = "Staging and loading the selected local Whisper model…",
+            statusMessage = "Loading a user-selected ggml model locally. Large models may take time and memory.",
+            errorMessage = null,
+        ) }
 
         workerExecutor.execute {
             var candidateContext = 0L
@@ -476,7 +528,14 @@ class MainViewModel internal constructor(
 
                 val committedSize = whisperModelStore.modelFile.length()
                 updateState {
-                    it.withWhisperReady(displayName, committedSize)
+                    it.copy(
+                            isWhisperModelReady = true,
+                            isWhisperLoading = false,
+                            whisperModelSizeBytes = committedSize,
+                            whisperModelText = "Whisper model ready: ${(displayName).take(80)} (stored locally).",
+                            statusMessage = "Whisper model loaded. Choose a bounded PCM WAV file to transcribe locally.",
+                            errorMessage = null,
+                        )
                 }
             } catch (e: Exception) {
                 if (candidateContext != 0L) whisperTranscriber.release(candidateContext)
@@ -492,14 +551,21 @@ class MainViewModel internal constructor(
                 }
 
                 updateState {
-                    it.withWhisperLoadFailed(e.message ?: "unsupported model file", whisperContext != 0L)
+                    it.copy(
+                            isWhisperLoading = false,
+                            isWhisperModelReady = false,
+                            whisperModelText = if (false) "Previous local Whisper model restored."
+                            else "No local Whisper model loaded. Choose a valid ggml .bin file (max 512 MB).",
+                            statusMessage = "Could not load Whisper model: ${e.message ?: "unsupported model file"}",
+                            errorMessage = e.message ?: "unsupported model file",
+                        )
                 }
             }
         }
     }
 
     fun removeWhisperModel() {
-        updateState { it.withStatus("Removing the local Whisper model…") }
+        updateState { it.copy(statusMessage = "Removing the local Whisper model…") }
         workerExecutor.execute {
             try {
                 val context = whisperContext
@@ -509,21 +575,32 @@ class MainViewModel internal constructor(
                 if (whisperModelStore.modelFile.exists() && !whisperModelStore.modelFile.delete()) {
                     error("Could not remove the stored model file.")
                 }
-                updateState { it.withWhisperModelRemoved() }
+                updateState { it.copy(
+                isWhisperModelReady = false,
+                isWhisperLoading = false,
+                whisperModelSizeBytes = 0L,
+                whisperModelText = "No local Whisper model selected.",
+                statusMessage = "Local Whisper model removed.",
+                errorMessage = null,
+            ) }
             } catch (e: Exception) {
-                updateState { it.withStatus("Could not remove Whisper model: ${e.message ?: "storage error"}") }
+                updateState { it.copy(statusMessage = "Could not remove Whisper model: ${e.message ?: "storage error"}") }
             }
         }
     }
 
     fun transcribeWav(rawName: String?, inputStreamProvider: () -> InputStream?) {
         if (whisperContext == 0L) {
-            updateState { it.withStatus("Choose a local whisper.cpp ggml .bin model first.") }
+            updateState { it.copy(statusMessage = "Choose a local whisper.cpp ggml .bin model first.") }
             return
         }
 
         val generationAtStart = _uiState.value.attachmentGeneration
-        updateState { it.withTranscribingWav() }
+        updateState { it.copy(
+            isWhisperTranscribing = true,
+            statusMessage = "Staging and checking the WAV file locally…",
+            errorMessage = null,
+        ) }
 
         workerExecutor.execute {
             var staged: File? = null
@@ -547,7 +624,7 @@ class MainViewModel internal constructor(
                 require(context != 0L) { "Select a Whisper model before transcribing audio." }
 
                 val textLimit = minOf(MainUiState.MAX_ATTACHMENT_CHARS, availableChars - sourceLabel.length)
-                updateState { it.withStatus("Transcribing locally. This may take a while on CPU…") }
+                updateState { it.copy(statusMessage = "Transcribing locally. This may take a while on CPU…") }
 
                 val transcript = whisperTranscriber.transcribe(context, samples, textLimit).trim()
                 require(transcript.isNotEmpty()) { "No transcript was produced. Check the audio and model language support." }
@@ -559,12 +636,20 @@ class MainViewModel internal constructor(
                 val newNames = _uiState.value.attachedNames + "$displayName (local transcript)"
 
                 updateState {
-                    it.withTranscriptReady(displayName, newContext, newNames)
+                    it.copy(
+                        isWhisperTranscribing = false,
+                        attachedContext = (newContext).take(MainUiState.MAX_ATTACHMENT_CHARS),
+                        attachedNames = newNames,
+                        transcriptReviewPending = true,
+                        attachmentPreviewExpanded = false,
+                        statusMessage = "Transcript ready. Expand and review it, then tap Use reviewed transcript.",
+                        errorMessage = null,
+                    )
                 }
             } catch (e: Exception) {
                 updateState {
                     it.copy(isWhisperTranscribing = false)
-                        .withStatus("Could not transcribe WAV: ${e.message ?: "unsupported or unreadable audio"}")
+                        .copy(statusMessage = "Could not transcribe WAV: ${e.message ?: "unsupported or unreadable audio"}")
                 }
             } finally {
                 staged?.delete()
@@ -573,44 +658,57 @@ class MainViewModel internal constructor(
     }
 
     fun clearAttachments() {
-        updateState { it.withAttachmentsCleared() }
+        updateState { it.copy(
+                attachedContext = "",
+                attachedNames = emptyList(),
+                attachmentPreviewExpanded = false,
+                transcriptReviewPending = false,
+                attachmentGeneration = it.attachmentGeneration + 1,
+                statusMessage = "Attachment removed.",
+            ) }
     }
 
     fun toggleAttachmentPreview() {
-        updateState { it.withAttachmentPreviewToggled() }
+        updateState { it.copy(attachmentPreviewExpanded = !it.attachmentPreviewExpanded) }
     }
 
     fun confirmTranscriptReview() {
         if (_uiState.value.transcriptReviewPending && !_uiState.value.isWhisperTranscribing) {
-            updateState { it.withTranscriptConfirmed() }
+            updateState { it.copy(
+                transcriptReviewPending = false,
+                statusMessage = "Transcript confirmed. Ask your question when ready.",
+            ) }
         }
     }
 
     fun suggestSteps() {
         val state = _uiState.value
         if (state.isWhisperTranscribing) {
-            updateState { it.withStatus("Wait for transcription to finish before asking.") }
+            updateState { it.copy(statusMessage = "Wait for transcription to finish before asking.") }
             return
         }
         if (state.transcriptReviewPending) {
-            updateState { it.withStatus("Expand and review the complete transcript, then tap Use reviewed transcript.") }
+            updateState { it.copy(statusMessage = "Expand and review the complete transcript, then tap Use reviewed transcript.") }
             return
         }
         val task = state.taskInput.trim()
         val attached = state.attachedContext.trim()
         if (task.isEmpty() && attached.isEmpty()) {
-            updateState { it.withStatus("Type a task, dictate it, or attach a text/PDF file first.") }
+            updateState { it.copy(statusMessage = "Type a task, dictate it, or attach a text/PDF file first.") }
             return
         }
         if (!llmRunner.isAvailable()) {
-            updateState { it.withStatus("Choose a compatible .litertlm model first.") }
+            updateState { it.copy(statusMessage = "Choose a compatible .litertlm model first.") }
             return
         }
 
         isGenerationCancelled.set(false)
         val calculation = if (task.isNotBlank()) LocalCalculatorTool.tryEvaluate(task) else null
         updateState {
-            it.withLastUserPrompt(task).withThinking().withActiveCalculation(calculation)
+            it.copy(
+                lastUserPrompt = task,
+                canRegenerate = (task).isNotBlank(),
+            ).copy(generationStatus = MainUiState.GenerationStatus.THINKING, isOutputVisible = true, answerIsComplete = false, generatedAnswer = "Working on it…", formattedAnswer = "Working on it…", plainTextAnswer = "Working on it…", statusMessage = "Answering on this device…", errorMessage = null, activeCalculation = calculation)
         }
 
         workerExecutor.execute {
@@ -667,10 +765,10 @@ class MainViewModel internal constructor(
                     if (isRetry) {
                         synchronized(accumulated) { accumulated.setLength(0) }
                         firstChunk.set(true)
-                        updateState { it.withStatus("Answer needs more detail. Refining on this device…") }
+                        updateState { it.copy(statusMessage = "Answer needs more detail. Refining on this device…") }
                     }
 
-                    val promptBuild = promptContext.composePrompt(
+                    val promptBuild = promptContext.answerPrompt(
                         task = task,
                         attachment = contextToInject,
                         intent = intent,
@@ -679,7 +777,7 @@ class MainViewModel internal constructor(
                         calculation = calculation,
                     )
                     if (promptBuild.truncatedCount > 0 && !isRetry) {
-                        updateState { it.withStatus("Older context trimmed to fit model limit.") }
+                        updateState { it.copy(statusMessage = "Older context trimmed to fit model limit.") }
                     }
                     val prompt = promptBuild.prompt
                     // The guard stops a model that locks onto a phrase and repeats it forever.
@@ -688,7 +786,14 @@ class MainViewModel internal constructor(
                         val formatted = MarkdownFormatter.formatForDisplay(currentText)
                         val plain = MarkdownFormatter.stripToPlainText(currentText)
                         updateState {
-                            it.withStreamChunk(currentText, formatted, plain, isFirst)
+                            it.copy(
+                                generationStatus = MainUiState.GenerationStatus.STREAMING,
+                                isOutputVisible = true,
+                                generatedAnswer = currentText,
+                                formattedAnswer = formatted,
+                                plainTextAnswer = plain,
+                                statusMessage = if (isFirst) "Response streaming locally…" else it.statusMessage,
+                            )
                         }
                     }
                     val raw = llmRunner.runInference(
@@ -722,19 +827,41 @@ class MainViewModel internal constructor(
                     val currentText = synchronized(accumulated) { accumulated.toString().trim() }
                     val formatted = MarkdownFormatter.formatForDisplay(currentText)
                     val plain = MarkdownFormatter.stripToPlainText(currentText)
-                    updateState { it.withGenerationStopped(currentText, formatted, plain).withDocumentCitations(retrievedCitations) }
+                    updateState { it.copy(
+                        generationStatus = MainUiState.GenerationStatus.COMPLETED,
+                        isOutputVisible = true,
+                        answerIsComplete = (currentText).isNotBlank(),
+                        generatedAnswer = currentText,
+                        formattedAnswer = formatted,
+                        plainTextAnswer = plain,
+                        statusMessage = "Generation stopped by user.",
+                        errorMessage = null,
+                        canRegenerate = it.lastUserPrompt.isNotBlank(),
+                    ).copy(documentCitations = retrievedCitations) }
                     return@execute
                 }
 
                 val finalFormatted = MarkdownFormatter.formatForDisplay(result)
                 val finalPlain = MarkdownFormatter.stripToPlainText(result)
                 updateState {
-                    it.withGenerationCompleted(result, finalFormatted, finalPlain)
-                        .withDocumentCitations(retrievedCitations)
+                    run {
+                        val complete = (result).isNotBlank()
+                        it.copy(
+                            generationStatus = MainUiState.GenerationStatus.COMPLETED,
+                            isOutputVisible = true,
+                            answerIsComplete = complete,
+                            generatedAnswer = if (complete) result else "No answer was returned. Try rephrasing the request.",
+                            formattedAnswer = if (complete) finalFormatted else "No answer was returned. Try rephrasing the request.",
+                            plainTextAnswer = if (complete) finalPlain else "No answer was returned. Try rephrasing the request.",
+                            statusMessage = if (complete) "Answer ready." else "No answer was returned. Try rephrasing the request.",
+                            errorMessage = null,
+                        )
+                    }
+                        .copy(documentCitations = retrievedCitations)
                         .let { done ->
                             val stopped = runawayFragment
                             if (stopped != null && result.isNotBlank()) {
-                                done.withStatus(RunawayGuard.stoppedNotice(stopped))
+                                done.copy(statusMessage = RunawayGuard.stoppedNotice(stopped))
                             } else {
                                 done
                             }
@@ -748,10 +875,31 @@ class MainViewModel internal constructor(
                     val currentText = synchronized(accumulated) { accumulated.toString().trim() }
                     val formatted = MarkdownFormatter.formatForDisplay(currentText)
                     val plain = MarkdownFormatter.stripToPlainText(currentText)
-                    updateState { it.withGenerationStopped(currentText, formatted, plain) }
+                    updateState {
+                        it.copy(
+                            generationStatus = MainUiState.GenerationStatus.COMPLETED,
+                            isOutputVisible = true,
+                            answerIsComplete = currentText.isNotBlank(),
+                            generatedAnswer = currentText,
+                            formattedAnswer = formatted,
+                            plainTextAnswer = plain,
+                            statusMessage = "Generation stopped by user.",
+                            errorMessage = null,
+                            canRegenerate = it.lastUserPrompt.isNotBlank(),
+                        )
+                    }
                 } else {
                     updateState {
-                        it.withGenerationError(e.message ?: "unknown error")
+                        it.copy(
+                            generationStatus = MainUiState.GenerationStatus.ERROR,
+                            isOutputVisible = false,
+                            answerIsComplete = false,
+                            generatedAnswer = "",
+                            formattedAnswer = "",
+                            plainTextAnswer = "",
+                            statusMessage = "Could not generate an answer: ${e.message ?: "unknown error"}",
+                            errorMessage = e.message ?: "unknown error",
+                        )
                     }
                 }
             }
@@ -807,11 +955,11 @@ class MainViewModel internal constructor(
             val active = if (currentId != null) sessionStore.getSession(currentId) else null
             activeSession = active
             updateState {
-                it.withSessions(
-                    summaries = summaries,
-                    activeId = active?.id,
-                    activeTitle = active?.title ?: "New Conversation",
-                    isPinned = active?.isPinned ?: false,
+                it.copy(
+                    sessionSummaries = summaries,
+                    currentSessionId = active?.id,
+                    currentSessionTitle = active?.title ?: "New Conversation",
+                    isSessionPinned = active?.isPinned ?: false,
                 )
             }
         } catch (_: Exception) {}
@@ -828,14 +976,20 @@ class MainViewModel internal constructor(
         } catch (_: Exception) {}
         activeSession = session
         updateState {
-            it.withOutputCleared()
-                .withTaskInput("")
-                .withSessions(
-                    summaries = sessionStore.listSessionSummaries(),
-                    activeId = session.id,
-                    activeTitle = session.title,
-                    isPinned = false,
-                )
+            it.copy(
+                isOutputVisible = false,
+                answerIsComplete = false,
+                generatedAnswer = "",
+                formattedAnswer = "",
+                plainTextAnswer = "",
+                generationStatus = MainUiState.GenerationStatus.IDLE,
+                documentCitations = emptyList(),
+                taskInput = "",
+                sessionSummaries = sessionStore.listSessionSummaries(),
+                currentSessionId = session.id,
+                currentSessionTitle = session.title,
+                isSessionPinned = false,
+            )
         }
     }
 
@@ -863,11 +1017,10 @@ class MainViewModel internal constructor(
                 generationStatus = MainUiState.GenerationStatus.IDLE,
                 lastUserPrompt = lastUserMsg?.content ?: "",
                 canRegenerate = !lastUserMsg?.content.isNullOrBlank(),
-            ).withSessions(
-                summaries = sessionStore.listSessionSummaries(),
-                activeId = session.id,
-                activeTitle = session.title,
-                isPinned = session.isPinned,
+                sessionSummaries = sessionStore.listSessionSummaries(),
+                currentSessionId = session.id,
+                currentSessionTitle = session.title,
+                isSessionPinned = session.isPinned,
             )
         }
     }
@@ -910,7 +1063,7 @@ class MainViewModel internal constructor(
      * Filters session summaries by search query.
      */
     fun searchSessions(query: String) {
-        updateState { it.withSessionSearch(query) }
+        updateState { it.copy(sessionSearchQuery = query) }
     }
 
     /**
@@ -930,7 +1083,7 @@ class MainViewModel internal constructor(
     fun refreshMemories() {
         try {
             val memories = userMemoryStore.listMemories()
-            updateState { it.withUserMemories(memories) }
+            updateState { it.copy(userMemories = memories) }
         } catch (_: Exception) {}
     }
 
@@ -965,7 +1118,7 @@ class MainViewModel internal constructor(
      * Enables or disables long-term memory injection and extraction.
      */
     fun setMemoryEnabled(enabled: Boolean) {
-        updateState { it.withMemoryEnabled(enabled) }
+        updateState { it.copy(isMemoryEnabled = enabled) }
     }
 
     /**
@@ -974,7 +1127,7 @@ class MainViewModel internal constructor(
     fun refreshNotes() {
         try {
             val notes = notesStore.listNotes()
-            updateState { it.withPersonalNotes(notes) }
+            updateState { it.copy(personalNotes = notes) }
         } catch (_: Exception) {}
     }
 
@@ -1015,7 +1168,7 @@ class MainViewModel internal constructor(
      */
     fun searchNotes(query: String): List<PersonalNotesStore.PersonalNote> {
         val results = notesStore.searchNotes(query)
-        updateState { it.withPersonalNotes(results) }
+        updateState { it.copy(personalNotes = results) }
         return results
     }
 
@@ -1028,7 +1181,7 @@ class MainViewModel internal constructor(
      * Clears active calculation result.
      */
     fun clearActiveCalculation() {
-        updateState { it.withActiveCalculation(null) }
+        updateState { it.copy(activeCalculation = null) }
     }
 
     /**
@@ -1040,17 +1193,20 @@ class MainViewModel internal constructor(
     ) {
         val context = whisperContext
         if (context == 0L) {
-            updateState { it.withStatus("Select a local Whisper model first.") }
+            updateState { it.copy(statusMessage = "Select a local Whisper model first.") }
             return
         }
         if (!llmRunner.isAvailable()) {
-            updateState { it.withStatus("Select a local LiteRT-LM model first.") }
+            updateState { it.copy(statusMessage = "Select a local LiteRT-LM model first.") }
             return
         }
 
         updateState {
-            it.withDuplexActive(true)
-                .withDuplexState(DuplexVoiceController.DuplexState.LISTENING, "Listening for speech…")
+            it.copy(
+                isDuplexActive = true,
+                duplexState = DuplexVoiceController.DuplexState.LISTENING,
+                duplexStatusMessage = "Listening for speech…",
+            )
         }
 
         duplexVoiceController.startSession(
@@ -1058,7 +1214,7 @@ class MainViewModel internal constructor(
             systemInstruction = MainUiState.SYSTEM_INSTRUCTION,
             listener = object : DuplexVoiceController.Listener {
                 override fun onStateChanged(state: DuplexVoiceController.DuplexState, statusMessage: String) {
-                    updateState { it.withDuplexState(state, statusMessage) }
+                    updateState { it.copy(duplexState = state, duplexStatusMessage = statusMessage) }
                     onStateChanged?.invoke(state, statusMessage)
                 }
 
@@ -1067,7 +1223,7 @@ class MainViewModel internal constructor(
                 }
 
                 override fun onUserTranscribed(text: String) {
-                    updateState { it.withTaskInput(text) }
+                    updateState { it.copy(taskInput = text) }
                 }
 
                 override fun onAssistantChunk(chunk: String) {}
@@ -1076,14 +1232,27 @@ class MainViewModel internal constructor(
                     saveTurnToSession(userText, "", assistantText)
                     val formatted = MarkdownFormatter.formatForDisplay(assistantText)
                     val plain = MarkdownFormatter.stripToPlainText(assistantText)
+                    val complete = assistantText.isNotBlank()
                     updateState {
-                        it.withGenerationCompleted(assistantText, formatted, plain)
+                        it.copy(
+                            generationStatus = MainUiState.GenerationStatus.COMPLETED,
+                            isOutputVisible = true,
+                            answerIsComplete = complete,
+                            generatedAnswer = if (complete) assistantText else "No answer was returned. Try rephrasing the request.",
+                            formattedAnswer = if (complete) formatted else "No answer was returned. Try rephrasing the request.",
+                            plainTextAnswer = if (complete) plain else "No answer was returned. Try rephrasing the request.",
+                            statusMessage = if (complete) "Answer ready." else "No answer was returned. Try rephrasing the request.",
+                            errorMessage = null,
+                        )
                     }
                 }
 
                 override fun onError(error: Throwable) {
                     updateState {
-                        it.withDuplexState(DuplexVoiceController.DuplexState.ERROR, error.message ?: "Voice error")
+                        it.copy(
+                            duplexState = DuplexVoiceController.DuplexState.ERROR,
+                            duplexStatusMessage = error.message ?: "Voice error",
+                        )
                     }
                 }
             }
@@ -1103,8 +1272,11 @@ class MainViewModel internal constructor(
     fun stopDuplexVoiceSession() {
         duplexVoiceController.stopSession()
         updateState {
-            it.withDuplexActive(false)
-                .withDuplexState(DuplexVoiceController.DuplexState.IDLE, "")
+            it.copy(
+                isDuplexActive = false,
+                duplexState = DuplexVoiceController.DuplexState.IDLE,
+                duplexStatusMessage = "",
+            )
         }
     }
 
@@ -1123,53 +1295,65 @@ class MainViewModel internal constructor(
             // previous currentSessionId (still null on the first turn) and null out activeSession,
             // dropping the history that was just saved.
             updateState {
-                it.withSessions(
-                    summaries = sessionStore.listSessionSummaries(),
-                    activeId = updated.id,
-                    activeTitle = updated.title,
-                    isPinned = updated.isPinned,
+                it.copy(
+                    sessionSummaries = sessionStore.listSessionSummaries(),
+                    currentSessionId = updated.id,
+                    currentSessionTitle = updated.title,
+                    isSessionPinned = updated.isPinned,
                 )
             }
         } catch (_: Exception) {}
     }
 
     fun clearOutput() {
-        updateState { it.withOutputCleared() }
+        updateState {
+            it.copy(
+                isOutputVisible = false,
+                answerIsComplete = false,
+                generatedAnswer = "",
+                formattedAnswer = "",
+                plainTextAnswer = "",
+                generationStatus = MainUiState.GenerationStatus.IDLE,
+                documentCitations = emptyList(),
+            )
+        }
     }
 
     fun prepareSaveAnswer(): String? {
         val state = _uiState.value
         if (!state.answerIsComplete) {
-            updateState { it.withStatus("Wait until a complete answer is available before saving it.") }
+            updateState { it.copy(statusMessage = "Wait until a complete answer is available before saving it.") }
             return null
         }
         val answerToSave = state.plainTextAnswer.ifBlank { state.generatedAnswer }.trim()
         if (answerToSave.isBlank()) {
-            updateState { it.withStatus("Generate an answer before saving it.") }
+            updateState { it.copy(statusMessage = "Generate an answer before saving it.") }
             return null
         }
         if (answerToSave.length > AnswerTextWriter.MAX_CHARS) {
-            updateState { it.withStatus("This answer is too large to save as a text result.") }
+            updateState { it.copy(statusMessage = "This answer is too large to save as a text result.") }
             return null
         }
-        updateState { it.withPendingAnswerToSave(answerToSave) }
+        updateState { it.copy(pendingAnswerToSave = answerToSave) }
         return answerToSave
     }
 
     fun saveAnswerToStream(outputStream: OutputStream, answer: String) {
-        updateState { it.withStatus("Saving the answer to your selected location…") }
+        updateState { it.copy(statusMessage = "Saving the answer to your selected location…") }
         workerExecutor.execute {
             try {
                 outputStream.use { stream ->
                     AnswerTextWriter.write(stream, answer)
                 }
                 updateState {
-                    it.withPendingAnswerToSave(null)
-                        .withStatus("Answer saved to the location you selected.")
+                    it.copy(
+                        pendingAnswerToSave = null,
+                        statusMessage = "Answer saved to the location you selected.",
+                    )
                 }
             } catch (e: Exception) {
                 updateState {
-                    it.withStatus("Could not save the answer: ${e.message ?: "storage error"}")
+                    it.copy(statusMessage = "Could not save the answer: ${e.message ?: "storage error"}")
                 }
             }
         }
@@ -1177,15 +1361,19 @@ class MainViewModel internal constructor(
 
     fun onSaveAnswerCanceled() {
         updateState {
-            it.withPendingAnswerToSave(null)
-                .withStatus("Save canceled. No file was written.")
+            it.copy(
+                pendingAnswerToSave = null,
+                statusMessage = "Save canceled. No file was written.",
+            )
         }
     }
 
     fun onSaveAnswerMissing() {
         updateState {
-            it.withPendingAnswerToSave(null)
-                .withStatus("The answer is no longer available. Generate it again before saving.")
+            it.copy(
+                pendingAnswerToSave = null,
+                statusMessage = "The answer is no longer available. Generate it again before saving.",
+            )
         }
     }
 

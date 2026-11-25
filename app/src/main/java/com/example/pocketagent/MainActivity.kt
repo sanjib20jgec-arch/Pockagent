@@ -2,7 +2,7 @@ package com.example.pocketagent
 
 import android.Manifest
 import android.app.Activity
-import androidx.fragment.app.FragmentActivity
+import android.app.ActivityManager
 import android.app.AlertDialog
 import androidx.fragment.app.FragmentActivity
 import android.content.ActivityNotFoundException
@@ -75,7 +75,8 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         /** Skip eager startup preload above 1.5 GB so multi-GB models (e.g. LFM3-Omni 3.5 GB) don't OOM idle launches. */
         private const val EAGER_WARMUP_MAX_BYTES = 1_500_000_000L
         /** Reset stateful KV cache before cumulative turns approach the 4096-token EngineConfig cap. */
-        private const val WARM_CONTEXT_RESET_THRESHOLD = 3400
+        private const val WARM_CONTEXT_RESET_THRESHOLD = 2800
+        private const val IDLE_ENGINE_UNLOAD_MS = 120_000L
         private val SYSTEM_INSTRUCTION: String get() = AnswerDirective.SYSTEM_INSTRUCTION
         private var BG = 0xFFF4F7F6.toInt()
         private var INK = 0xFF162D2A.toInt()
@@ -154,6 +155,14 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     // Sticky bottom composer, multi-turn chat thread, and collapsible chrome.
     private lateinit var chatScroll: ScrollView
     private lateinit var chatCanvas: LinearLayout
+
+    // Legacy output-card views (kept for compatibility with older UI paths)
+    private lateinit var outputCard: LinearLayout
+    private lateinit var answerText: TextView
+    private lateinit var stopGeneratingButton: android.widget.Button
+    private lateinit var citationsContainer: LinearLayout
+    private lateinit var systemActionContainer: LinearLayout
+    private lateinit var refineButton: android.widget.Button
     private lateinit var chatThreadContainer: LinearLayout
     private lateinit var jumpToBottomButton: Button
     private lateinit var heroCard: LinearLayout
@@ -192,6 +201,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     private val recordingPulseAnimator = PulseAnimator()
     private var generationStartElapsedMs: Long = 0L
     private var generationTimerRunnable: Runnable? = null
+    private var idleUnloadRunnable: Runnable? = null
     private var pendingAnswerToSave: String? = null
     private val sessionStore by lazy { SessionStore(SessionStore.defaultDir(filesDir)) }
     private val userMemoryStore by lazy { UserMemoryStore(UserMemoryStore.defaultDir(filesDir)) }
@@ -442,7 +452,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             context = this,
             text = "🔒 100% Offline · Zero Cloud",
             sizeSp = 11.5f,
-            color = WHITE,
+            color = Color.WHITE,
             bold = true,
         ).apply {
             background = roundedShape(0x29FFFFFF, dp(12).toFloat())
@@ -452,7 +462,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             }
         }
         heroCard.addView(trustBadge)
-        heroCard.addView(text("Your pocket assistant", 21f, WHITE, true))
+        heroCard.addView(text("Your pocket assistant", 21f, Color.WHITE, true))
         heroCard.addView(
             text(
                 "Private on-device AI. Ask anything, analyze PDFs, or speak hands-free with zero cloud.",
@@ -469,7 +479,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             setAllCaps(false)
             textSize = 13.5f
             typeface = Typeface.create("sans-serif", Typeface.BOLD)
-            setTextColor(WHITE)
+            setTextColor(Color.WHITE)
             gravity = Gravity.CENTER
             minHeight = dp(48)
             minimumHeight = dp(48)
@@ -1162,19 +1172,9 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 ModelFileStore.clearEngineCaches(cacheDir)
 
                 val labelForProgress = cleanName ?: "model"
+                mainHandler.post { updateStatus("Importing $labelForProgress into private storage…") }
                 val target = contentResolver.openInputStream(uri)?.use { input ->
-                    ModelFileStore(filesDir).importModel(
-                        input = input,
-                        expectedBytes = expectedBytes,
-                    ) { copied, total ->
-                        val progressMsg = if (total != null && total > 0L) {
-                            val pct = ((copied * 100L) / total).coerceIn(0L, 100L)
-                            "Importing $labelForProgress… ${formatStorageSize(copied)} / ${formatStorageSize(total)} ($pct%)"
-                        } else {
-                            "Importing $labelForProgress… ${formatStorageSize(copied)}"
-                        }
-                        mainHandler.post { updateStatus(progressMsg) }
-                    }
+                    ModelFileStore(filesDir).importModel(input)
                 } ?: error("Could not open the selected file.")
 
                 settingsPrefs.edit().apply {
@@ -1820,6 +1820,8 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
 
     /** Switches the primary composer action from Ask to Stop while a generation is running. */
     private fun enterGeneratingState() {
+        idleUnloadRunnable?.let { mainHandler.removeCallbacks(it) }
+        idleUnloadRunnable = null
         isGeneratingUi = true
         isStoppingUi = false
         suggestButton.isEnabled = true
@@ -1847,6 +1849,21 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         suggestButton.setTextColor(Color.WHITE)
         suggestButton.setOnClickListener { suggestSteps() }
         syncComposerState()
+        scheduleIdleEngineUnload()
+    }
+
+    private fun scheduleIdleEngineUnload() {
+        idleUnloadRunnable?.let { mainHandler.removeCallbacks(it) }
+        val runnable = Runnable {
+            if (!isGeneratingUi && engineManager.engine != null) {
+                engineManager.invalidateConversation("idle unload")
+                inferenceExecutor.execute { engineManager.close() }
+                updateStatus("Model unloaded after inactivity to free memory. It will reload on next request.")
+                refreshModelStatus()
+            }
+        }
+        idleUnloadRunnable = runnable
+        mainHandler.postDelayed(runnable, IDLE_ENGINE_UNLOAD_MS)
     }
 
     /**
@@ -3007,7 +3024,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             setPadding(dp(20), dp(20), dp(20), dp(20))
         }
 
-        val title = text("🎙️ Continuous Voice Mode", 18f, WHITE, true)
+        val title = text("🎙️ Continuous Voice Mode", 18f, Color.WHITE, true)
         dialogView.addView(title)
 
         val stateBadge = text("Initializing…", 13f, palette.heroSubtitleInk, true).apply {
@@ -3022,7 +3039,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 arrayOf(
                     roundedShape(0x33FFFFFF, dp(4).toFloat()),
                     android.graphics.drawable.ClipDrawable(
-                        roundedShape(WHITE, dp(4).toFloat()),
+                        roundedShape(Color.WHITE, dp(4).toFloat()),
                         Gravity.START,
                         android.graphics.drawable.ClipDrawable.HORIZONTAL,
                     ),
@@ -3058,7 +3075,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             setAllCaps(false)
             textSize = 13f
             typeface = Typeface.create("sans-serif", Typeface.BOLD)
-            setTextColor(WHITE)
+            setTextColor(Color.WHITE)
             gravity = Gravity.CENTER
             minHeight = dp(48)
             minimumHeight = dp(48)
@@ -3087,7 +3104,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             minimumHeight = dp(48)
             setPadding(dp(12), dp(8), dp(12), dp(8))
             background = rippleDrawable(
-                roundedShape(WHITE, dp(24).toFloat()),
+                roundedShape(Color.WHITE, dp(24).toFloat()),
                 palette.rippleOnMint,
             )
             backgroundTintList = null
@@ -3427,56 +3444,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         lockOverlay.visibility = if (biometricLockManager.isAppLocked) View.VISIBLE else View.GONE
     }
 
-    override fun onResume() {
-        super.onResume()
-        if (biometricLockManager.shouldLockOnResume()) {
-            biometricLockManager.lock()
-        }
-        updateLockOverlay()
-        if (biometricLockManager.isAppLocked) {
-            promptBiometricUnlock()
-        }
-    }
 
-    override fun onStop() {
-        if (!isChangingConfigurations) {
-            biometricLockManager.markBackgrounded()
-        }
-        super.onStop()
-    }
-
-    private fun buildLockOverlay(): LinearLayout {
-        return LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            setBackgroundColor(if (isDarkTheme) 0xF2121816.toInt() else 0xF2F4F7F6.toInt())
-            isClickable = true
-            isFocusable = true
-            visibility = View.GONE
-            setPadding(dp(24), dp(24), dp(24), dp(24))
-
-            val card = LinearLayout(context).apply {
-                orientation = LinearLayout.VERTICAL
-                background = shape(SURFACE, 20, BORDER)
-                setPadding(dp(24), dp(24), dp(24), dp(24))
-            }
-            card.addView(text("PocketAgent is locked", 22f, INK).apply {
-                typeface = Typeface.DEFAULT_BOLD
-            })
-            card.addView(text("Authenticate to access your local conversations, memories, and notes.", 14f, MUTED).apply {
-                setPadding(0, dp(10), 0, dp(18))
-            })
-            card.addView(pillButton("Unlock", accessibilityLabel = "Unlock PocketAgent") {
-                promptBiometricUnlock()
-            }, LinearLayout.LayoutParams(-1, -2))
-            addView(card, LinearLayout.LayoutParams(-1, -2))
-        }
-    }
-
-    private fun updateLockOverlay() {
-        if (!::lockOverlay.isInitialized) return
-        lockOverlay.visibility = if (biometricLockManager.isAppLocked) View.VISIBLE else View.GONE
-    }
 
     private fun promptBiometricUnlock() {
         if (!::lockOverlay.isInitialized) return
@@ -4027,11 +3995,36 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     private fun ripple(content: GradientDrawable, color: Int) =
         rippleDrawable(content, color)
 
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+            // Under memory pressure, drop warm conversation state; keep engine loaded if possible.
+            engineManager.invalidateConversation("trim memory level $level")
+        }
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_COMPLETE ||
+            level == android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL) {
+            if (!isGeneratingUi) {
+                inferenceExecutor.execute { engineManager.close() }
+                updateStatus("Model unloaded to free memory. It will reload on next request.")
+            }
+        }
+    }
+
+    override fun onLowMemory() {
+        super.onLowMemory()
+        engineManager.invalidateConversation("low memory")
+        if (!isGeneratingUi) {
+            inferenceExecutor.execute { engineManager.close() }
+        }
+    }
+
     override fun onDestroy() {
         thinkingPulseAnimator.stop()
         recordingPulseAnimator.stop()
         generationTimerRunnable?.let { mainHandler.removeCallbacks(it) }
         generationTimerRunnable = null
+        idleUnloadRunnable?.let { mainHandler.removeCallbacks(it) }
+        idleUnloadRunnable = null
         recognizer?.destroy()
         tts?.stop()
         tts?.shutdown()

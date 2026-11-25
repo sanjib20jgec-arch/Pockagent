@@ -1164,19 +1164,9 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 ModelFileStore.clearEngineCaches(cacheDir)
 
                 val labelForProgress = cleanName ?: "model"
+                mainHandler.post { updateStatus("Importing $labelForProgress into private storage…") }
                 val target = contentResolver.openInputStream(uri)?.use { input ->
-                    ModelFileStore(filesDir).importModel(
-                        input = input,
-                        expectedBytes = expectedBytes,
-                    ) { copied, total ->
-                        val progressMsg = if (total != null && total > 0L) {
-                            val pct = ((copied * 100L) / total).coerceIn(0L, 100L)
-                            "Importing $labelForProgress… ${formatStorageSize(copied)} / ${formatStorageSize(total)} ($pct%)"
-                        } else {
-                            "Importing $labelForProgress… ${formatStorageSize(copied)}"
-                        }
-                        mainHandler.post { updateStatus(progressMsg) }
-                    }
+                    ModelFileStore(filesDir).importModel(input)
                 } ?: error("Could not open the selected file.")
 
                 settingsPrefs.edit().apply {

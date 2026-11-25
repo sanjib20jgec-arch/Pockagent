@@ -155,6 +155,13 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     // Sticky bottom composer, multi-turn chat thread, and collapsible chrome.
     private lateinit var chatScroll: ScrollView
     private lateinit var chatCanvas: LinearLayout
+
+    // Legacy output-card views (kept for compatibility with older UI paths)
+    private lateinit var outputCard: LinearLayout
+    private lateinit var stopGeneratingButton: android.widget.Button
+    private lateinit var citationsContainer: LinearLayout
+    private lateinit var systemActionContainer: LinearLayout
+    private lateinit var refineButton: android.widget.Button
     private lateinit var chatThreadContainer: LinearLayout
     private lateinit var jumpToBottomButton: Button
     private lateinit var heroCard: LinearLayout

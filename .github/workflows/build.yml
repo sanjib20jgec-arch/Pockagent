@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: apk-${{ github.workflow }}-${{ github.ref }}
@@ -94,29 +94,6 @@ jobs:
           path: gradle-build.log
           if-no-files-found: ignore
           retention-days: 7
-
-      - name: Publish compile errors for sandbox debugging
-        if: failure()
-        shell: bash
-        run: |
-          {
-            echo "# CI compile errors"
-            echo
-            echo "## kotlin e: lines"
-            echo '```'
-            grep -n "e: " gradle-build.log | head -200 || true
-            echo '```'
-            echo
-            echo "## first failure context"
-            echo '```'
-            grep -B20 -A80 "Compilation error" gradle-build.log | head -120 || true
-            echo '```'
-          } > CI_ERRORS.md
-          git config user.name "ci-debug"
-          git config user.email "ci-debug@users.noreply.github.com"
-          git add CI_ERRORS.md
-          git commit -m "ci: publish compile errors [skip ci]" || true
-          git push origin HEAD:${GITHUB_REF_NAME} || true
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4

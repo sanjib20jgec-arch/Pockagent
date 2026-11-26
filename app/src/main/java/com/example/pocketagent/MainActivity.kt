@@ -2515,7 +2515,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                     language = language,
                     palette = palette,
                     onSaveArtifact = { savedCode, savedLang ->
-                        showSaveArtifactDialog(savedCode, savedLang)
+                        showSaveArtifactDialog(savedCode, normalizeArtifactLanguage(savedLang))
                     },
                 )
             },

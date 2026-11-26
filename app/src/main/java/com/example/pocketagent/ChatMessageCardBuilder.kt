@@ -1072,7 +1072,7 @@ object ChatMessageCardBuilder {
             contentDescription = accessibilityLabel
             setAllCaps(false)
             textSize = 11.5f
-            typeface = Typeface.create("sans-serif", Typeface.MEDIUM)
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
             setTextColor(textColor)
             gravity = Gravity.CENTER
             minHeight = minTouch

@@ -1685,57 +1685,59 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         lateinit var dialog: AlertDialog
         val activeProjName = activeProjectId?.let { projectStore.getProject(it)?.name } ?: "Default Workspace"
         val vaultCount = runCatching { documentVault.loadAll().size + artifactStore.loadAll().size }.getOrDefault(0)
-        val rows = listOf(
-            Triple(
-                if (isAgentModeEnabled) "● Agent Tool Loop: ON" else "Agent Tool Loop: OFF",
-                "Offline calc, notes & vault tool calls",
-                isAgentModeEnabled,
-            ) {
-                toggleAgentMode(showToast = true)
-            },
-            Triple(
-                if (isDeepThinkEnabled) "● Deep Think Mode: ON" else "Deep Think Mode: OFF",
-                "Two-pass self-critique for coding & logic",
-                isDeepThinkEnabled,
-            ) {
-                toggleDeepThinkMode()
-            },
-            Triple(
-                "Project: $activeProjName",
-                "Switch custom system persona & rules",
-                activeProjectId != null,
-            ) {
-                showProjectsDialog()
-            },
-            Triple(
-                if (vaultCount > 0) "Knowledge & Code Vaults ($vaultCount)" else "Knowledge & Code Vaults",
-                "Manage indexed PDFs & HTML artifacts",
-                vaultCount > 0,
-            ) {
-                showVaultChooserDialog()
-            },
+        data class ModeOption(
+            val title: String,
+            val subtitle: String,
+            val active: Boolean,
+            val action: () -> Unit,
         )
-        rows.forEachIndexed { idx, (title, subtitle, active, action) ->
+        val rows = listOf(
+            ModeOption(
+                title = if (isAgentModeEnabled) "● Agent Tool Loop: ON" else "Agent Tool Loop: OFF",
+                subtitle = "Offline calc, notes & vault tool calls",
+                active = isAgentModeEnabled,
+                action = { toggleAgentMode(showToast = true) },
+            ),
+            ModeOption(
+                title = if (isDeepThinkEnabled) "● Deep Think Mode: ON" else "Deep Think Mode: OFF",
+                subtitle = "Two-pass self-critique for coding & logic",
+                active = isDeepThinkEnabled,
+                action = { toggleDeepThinkMode() },
+            ),
+            ModeOption(
+                title = "Project: $activeProjName",
+                subtitle = "Switch custom system persona & rules",
+                active = activeProjectId != null,
+                action = { showProjectsDialog() },
+            ),
+            ModeOption(
+                title = if (vaultCount > 0) "Knowledge & Code Vaults ($vaultCount)" else "Knowledge & Code Vaults",
+                subtitle = "Manage indexed PDFs & HTML artifacts",
+                active = vaultCount > 0,
+                action = { showVaultChooserDialog() },
+            ),
+        )
+        rows.forEachIndexed { idx, opt ->
             val row = column().apply {
                 minimumHeight = dp(48)
                 setPadding(dp(14), dp(10), dp(14), dp(10))
                 background = rippleDrawable(
                     roundedShape(
-                        color = if (active) palette.mint else palette.surfaceElevated,
+                        color = if (opt.active) palette.mint else palette.surfaceElevated,
                         radiusPx = dp(14).toFloat(),
-                        strokeWidthPx = maxOf(1, dp(if (active) 2 else 1)),
-                        strokeColor = if (active) palette.teal else palette.border,
+                        strokeWidthPx = maxOf(1, dp(if (opt.active) 2 else 1)),
+                        strokeColor = if (opt.active) palette.teal else palette.border,
                     ),
-                    if (active) palette.rippleOnMint else palette.rippleOnSurface,
+                    if (opt.active) palette.rippleOnMint else palette.rippleOnSurface,
                 )
                 isClickable = true
                 isFocusable = true
-                addView(text(title, 14f, if (active) palette.teal else palette.ink, true))
-                addView(text(subtitle, 12f, palette.muted).apply { setPadding(0, dp(2), 0, 0) })
+                addView(text(opt.title, 14f, if (opt.active) palette.teal else palette.ink, true))
+                addView(text(opt.subtitle, 12f, palette.muted).apply { setPadding(0, dp(2), 0, 0) })
                 setOnClickListener {
                     performSubtleHaptic(this)
                     dialog.dismiss()
-                    action()
+                    opt.action()
                 }
             }
             root.addView(

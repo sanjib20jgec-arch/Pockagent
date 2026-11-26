@@ -90,4 +90,23 @@ class InferenceEngineManagerTest {
         assertEquals("test", manager.lastInvalidationReason)
         manager.close()
     }
+
+    @Test
+    fun `updateMaxContextTokens closes engine and rejects unsupported values`() {
+        val model = Files.createTempFile("model", ".litertlm").toFile().apply { writeText("x") }
+        val cache = Files.createTempDirectory("cache").toFile()
+        var closedCount = 0
+        val manager = InferenceEngineManager<AutoCloseable>(
+            engineFactory = { _, _, _ -> AutoCloseable { closedCount++ } },
+        )
+        manager.getOrInitializeEngine(model, cache)
+        manager.updateMaxContextTokens(8192)
+
+        assertEquals(8192, manager.maxContextTokens)
+        assertEquals(1, closedCount)
+        assertEquals(null, manager.engine)
+
+        manager.updateMaxContextTokens(999_999)
+        assertEquals(ContextBudgetManager.TokenBudget.DEFAULT_MAX_CONTEXT_TOKENS, manager.maxContextTokens)
+    }
 }

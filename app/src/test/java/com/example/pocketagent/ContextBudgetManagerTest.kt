@@ -248,4 +248,21 @@ class ContextBudgetManagerTest {
         assertTrue("Latest attachment should be trimmed to fit budget", retained.attachmentContent!!.length < hugeAttachment.length)
         assertTrue(result.estimatedTotalTokens <= 256)
     }
+
+    @Test
+    fun forContextWindowClampsResponseBudgetSafelyAcross2K4K8K() {
+        val compact = ContextBudgetManager.TokenBudget.forContextWindow(2048, 2048)
+        assertEquals(2048, compact.maxContextTokens)
+        assertTrue(compact.maxResponseTokens < 2048 - ContextBudgetManager.TokenBudget.DEFAULT_SYSTEM_TOKENS)
+        assertTrue(compact.historyBudget >= 256)
+
+        val standard = ContextBudgetManager.TokenBudget.forContextWindow(4096, 2048)
+        assertEquals(4096, standard.maxContextTokens)
+        assertEquals(2048, standard.maxResponseTokens)
+
+        val extended = ContextBudgetManager.TokenBudget.forContextWindow(8192, 2048)
+        assertEquals(8192, extended.maxContextTokens)
+        assertEquals(2048, extended.maxResponseTokens)
+        assertEquals(5734, ContextBudgetManager.TokenBudget.warmResetThreshold(8192))
+    }
 }

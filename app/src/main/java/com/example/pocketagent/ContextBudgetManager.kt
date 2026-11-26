@@ -40,6 +40,26 @@ class ContextBudgetManager(
             const val DEFAULT_MAX_CONTEXT_TOKENS = 4096
             const val DEFAULT_MAX_RESPONSE_TOKENS = 2048
             const val DEFAULT_SYSTEM_TOKENS = 384
+            val SUPPORTED_CONTEXT_WINDOWS = listOf(2048, 4096, 8192)
+
+            /** Builds a valid [TokenBudget] for [maxContextTokens], clamping response budget safely. */
+            fun forContextWindow(
+                maxContextTokens: Int,
+                requestedResponseTokens: Int = DEFAULT_MAX_RESPONSE_TOKENS,
+            ): TokenBudget {
+                val safeContext = maxContextTokens.coerceIn(1024, 16384)
+                val maxAllowedResponse = (safeContext - DEFAULT_SYSTEM_TOKENS - 256).coerceAtLeast(256)
+                val safeResponse = requestedResponseTokens.coerceIn(256, maxAllowedResponse)
+                return TokenBudget(
+                    maxContextTokens = safeContext,
+                    maxResponseTokens = safeResponse,
+                    reservedSystemTokens = DEFAULT_SYSTEM_TOKENS,
+                )
+            }
+
+            /** Returns the ~70% KV-cache reset threshold for [maxContextTokens]. */
+            fun warmResetThreshold(maxContextTokens: Int): Int =
+                ((maxContextTokens.coerceAtLeast(1024) * 70) / 100)
         }
     }
 

@@ -82,6 +82,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         private const val PREF_ACTIVE_PROJECT_ID = "pref_active_project_id"
         private const val PREF_TEMPERATURE_BITS = "pref_temperature_bits"
         private const val PREF_MAX_OUTPUT_TOKENS = "pref_max_output_tokens"
+        private const val PREF_MAX_CONTEXT_TOKENS = "pref_max_context_tokens"
         private const val PREF_AGENT_MODE = "pref_agent_mode"
         private const val PREF_VISION_ENABLED = "pref_vision_enabled"
         private const val MAX_ATTACHMENT_CHARS = MainUiState.MAX_ATTACHMENT_CHARS
@@ -199,6 +200,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     private var isVisionModeEnabled: Boolean = false
     private var currentTemperature: Float = InferenceEngineManager.DEFAULT_TEMPERATURE
     private var currentMaxOutputTokens: Int = MAX_RESPONSE_TOKENS
+    private var currentMaxContextTokens: Int = ContextBudgetManager.TokenBudget.DEFAULT_MAX_CONTEXT_TOKENS
     @Volatile private var attachedImagePath: String? = null
     private var attachedImageName: String? = null
     private var pendingHtmlToExport: String? = null
@@ -296,11 +298,23 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         }
         currentMaxOutputTokens = settingsPrefs.getInt(PREF_MAX_OUTPUT_TOKENS, MAX_RESPONSE_TOKENS)
             .takeIf { it in listOf(256, 512, 1024, 2048) } ?: MAX_RESPONSE_TOKENS
+        currentMaxContextTokens = settingsPrefs.getInt(
+            PREF_MAX_CONTEXT_TOKENS,
+            ContextBudgetManager.TokenBudget.DEFAULT_MAX_CONTEXT_TOKENS,
+        ).takeIf { it in ContextBudgetManager.TokenBudget.SUPPORTED_CONTEXT_WINDOWS }
+            ?: ContextBudgetManager.TokenBudget.DEFAULT_MAX_CONTEXT_TOKENS
         engineManager.activeTemperature = currentTemperature
         engineManager.visionEnabled = isVisionModeEnabled
+        engineManager.maxContextTokens = currentMaxContextTokens
         ensureLegacyModelRegistered()
         engineManager.onFallback = { reason ->
-            settingsPrefs.edit().putString(PREF_BACKEND_MODE, BackendPreference.CPU_ONLY.name).apply()
+            if (engineManager.preference == BackendPreference.CPU_ONLY) {
+                settingsPrefs.edit().putString(PREF_BACKEND_MODE, BackendPreference.CPU_ONLY.name).apply()
+            }
+            if (currentMaxContextTokens != engineManager.maxContextTokens) {
+                currentMaxContextTokens = engineManager.maxContextTokens
+                settingsPrefs.edit().putInt(PREF_MAX_CONTEXT_TOKENS, currentMaxContextTokens).apply()
+            }
             mainHandler.post {
                 refreshModelStatus()
                 updateStatus(reason)
@@ -1542,7 +1556,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     private fun updateWorkspaceSubtitle() {
         val proj = activeProjectId?.let { projectStore.getProject(it) }
         val ctxUsed = engineManager.cachedConversationTokens
-        val ctxMax = ContextBudgetManager.TokenBudget.DEFAULT_MAX_CONTEXT_TOKENS
+        val ctxMax = currentMaxContextTokens
         val docCount = runCatching { documentVault.loadAll().size }.getOrDefault(0)
         val artifactCount = runCatching { artifactStore.loadAll().size }.getOrDefault(0)
 
@@ -2364,7 +2378,14 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         calculation: LocalCalculatorTool.CalculationResult? = null,
         relevantNotes: List<PersonalNotesStore.PersonalNote> = emptyList(),
     ): AnswerPromptComposer.PromptBuildResult =
-        promptContext.answerPrompt(task, attachment, intent, isRetry, history, calculation, relevantNotes)
+        AnswerPromptComposer(
+            ContextBudgetManager(
+                ContextBudgetManager.TokenBudget.forContextWindow(
+                    maxContextTokens = currentMaxContextTokens,
+                    requestedResponseTokens = currentMaxOutputTokens,
+                )
+            )
+        ).answerPrompt(task, attachment, intent, isRetry, history, calculation, relevantNotes)
 
     /**
      * Runs one inference pass with the runaway guard applied.
@@ -3185,7 +3206,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 )
                 if (isWarm &&
                     engineManager.cachedConversationTokens + promptBuild.estimatedTotalTokens + currentMaxOutputTokens >
-                    WARM_CONTEXT_RESET_THRESHOLD
+                    ContextBudgetManager.TokenBudget.warmResetThreshold(currentMaxContextTokens)
                 ) {
                     engineManager.invalidateConversation("context budget reached")
                     isWarm = false
@@ -5208,7 +5229,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         lateinit var dialog: AlertDialog
 
         // Context Window Meter Card
-        val maxContext = ContextBudgetManager.TokenBudget.DEFAULT_MAX_CONTEXT_TOKENS
+        var maxContext = currentMaxContextTokens
         val usedContext = engineManager.cachedConversationTokens.coerceIn(0, maxContext)
         val ctxCard = cardContainer(this, palette, cornerDp = 14, elevated = true, paddingDp = 14)
         val ctxHeaderRow = LinearLayout(this).apply {
@@ -5221,7 +5242,11 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             max = maxContext
             progress = usedContext
             progressTintList = ColorStateList.valueOf(
-                if (usedContext >= WARM_CONTEXT_RESET_THRESHOLD) palette.stopCrimson else palette.teal
+                if (usedContext >= ContextBudgetManager.TokenBudget.warmResetThreshold(maxContext)) {
+                    palette.stopCrimson
+                } else {
+                    palette.teal
+                }
             )
         }
         val resetCtxBtn = secondaryOutlineButton(this, palette, "Reset", compact = true, textColor = palette.teal) {
@@ -5268,54 +5293,103 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         }
         settingsCard.addView(tempSeek, marginBottom(10))
 
-        settingsCard.addView(text("Max Output Tokens", 12.5f, palette.muted, true), marginBottom(6))
-        val tokenOptions = listOf(256, 512, 1024, 2048)
-        val tokenRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        val tokenButtons = mutableListOf<Button>()
-        fun refreshTokenButtons() {
-            tokenButtons.forEachIndexed { i, btn ->
-                val tokVal = tokenOptions[i]
-                val sel = tokVal == currentMaxOutputTokens
-                btn.setTextColor(if (sel) palette.teal else palette.ink)
-                btn.background = rippleDrawable(
-                    roundedShape(
-                        color = if (sel) palette.mint else palette.surface,
-                        radiusPx = dp(12).toFloat(),
-                        strokeWidthPx = maxOf(1, dp(if (sel) 2 else 1)),
-                        strokeColor = if (sel) palette.teal else palette.border,
-                    ),
-                    if (sel) palette.rippleOnMint else palette.rippleOnSurface,
-                )
+        fun <T> buildSelectableRow(
+            options: List<Pair<T, String>>,
+            selectedProvider: () -> T,
+            onSelect: (T) -> Unit,
+        ): LinearLayout {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
             }
-        }
-        for ((index, tok) in tokenOptions.withIndex()) {
-            val btn = Button(this).apply {
-                text = tok.toString()
-                setAllCaps(false)
-                textSize = 12f
-                typeface = Typeface.create("sans-serif", Typeface.BOLD)
-                minHeight = dp(48)
-                minimumHeight = dp(48)
-                backgroundTintList = null
-                stateListAnimator = null
-                setOnClickListener {
-                    currentMaxOutputTokens = tok
-                    settingsPrefs.edit().putInt(PREF_MAX_OUTPUT_TOKENS, tok).apply()
-                    refreshTokenButtons()
+            val buttons = mutableListOf<Button>()
+            fun refresh() {
+                val selected = selectedProvider()
+                buttons.forEachIndexed { i, btn ->
+                    val sel = options[i].first == selected
+                    btn.setTextColor(if (sel) palette.teal else palette.ink)
+                    btn.background = rippleDrawable(
+                        roundedShape(
+                            color = if (sel) palette.mint else palette.surface,
+                            radiusPx = dp(12).toFloat(),
+                            strokeWidthPx = maxOf(1, dp(if (sel) 2 else 1)),
+                            strokeColor = if (sel) palette.teal else palette.border,
+                        ),
+                        if (sel) palette.rippleOnMint else palette.rippleOnSurface,
+                    )
                 }
             }
-            tokenButtons += btn
-            tokenRow.addView(
-                btn,
-                LinearLayout.LayoutParams(0, -2, 1f).apply {
-                    if (index < tokenOptions.lastIndex) marginEnd = dp(6)
-                },
-            )
+            options.forEachIndexed { index, (value, label) ->
+                val btn = Button(this).apply {
+                    text = label
+                    setAllCaps(false)
+                    textSize = 12f
+                    typeface = Typeface.create("sans-serif", Typeface.BOLD)
+                    minHeight = dp(48)
+                    minimumHeight = dp(48)
+                    backgroundTintList = null
+                    stateListAnimator = null
+                    setOnClickListener {
+                        onSelect(value)
+                        refresh()
+                    }
+                }
+                buttons += btn
+                row.addView(
+                    btn,
+                    LinearLayout.LayoutParams(0, -2, 1f).apply {
+                        if (index < options.lastIndex) marginEnd = dp(6)
+                    },
+                )
+            }
+            refresh()
+            return row
         }
-        refreshTokenButtons()
+
+        settingsCard.addView(
+            text("Context Window (8K requires 8K model & 12GB+ RAM)", 12.5f, palette.muted, true),
+            marginBottom(6),
+        )
+        val contextOptions = listOf(
+            2048 to "2048 (Fast)",
+            4096 to "4096",
+            8192 to "8192 (8K)",
+        )
+        val contextRow = buildSelectableRow(
+            options = contextOptions,
+            selectedProvider = { currentMaxContextTokens },
+        ) { nextCtx ->
+            if (engineManager.isGenerationActive || isGeneratingUi) {
+                Toast.makeText(this, "Stop generation first.", Toast.LENGTH_SHORT).show()
+                return@buildSelectableRow
+            }
+            currentMaxContextTokens = nextCtx
+            maxContext = nextCtx
+            settingsPrefs.edit().putInt(PREF_MAX_CONTEXT_TOKENS, nextCtx).apply()
+            inferenceExecutor.execute { engineManager.updateMaxContextTokens(nextCtx) }
+            val clampedUsed = engineManager.cachedConversationTokens.coerceIn(0, nextCtx)
+            ctxProgress.max = nextCtx
+            ctxProgress.progress = clampedUsed
+            ctxTitleView.text = "Context Window: $clampedUsed / $nextCtx tok"
+            updateWorkspaceSubtitle()
+            Toast.makeText(
+                this,
+                if (nextCtx == 8192) "8K context enabled (auto-falls back to 4096 if model limits it)"
+                else "Context window set to $nextCtx tokens",
+                Toast.LENGTH_SHORT,
+            ).show()
+        }
+        settingsCard.addView(contextRow, marginBottom(10))
+
+        settingsCard.addView(text("Max Output Tokens", 12.5f, palette.muted, true), marginBottom(6))
+        val tokenOptions = listOf(256, 512, 1024, 2048).map { it to it.toString() }
+        val tokenRow = buildSelectableRow(
+            options = tokenOptions,
+            selectedProvider = { currentMaxOutputTokens },
+        ) { tok ->
+            currentMaxOutputTokens = tok
+            settingsPrefs.edit().putInt(PREF_MAX_OUTPUT_TOKENS, tok).apply()
+        }
         settingsCard.addView(tokenRow, marginBottom(10))
 
         val visionBtn = secondaryOutlineButton(

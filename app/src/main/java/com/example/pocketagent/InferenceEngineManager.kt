@@ -62,6 +62,8 @@ class InferenceEngineManager<T : AutoCloseable>(
 
     @Volatile var visionEnabled: Boolean = false
 
+    @Volatile var maxContextTokens: Int = ContextBudgetManager.TokenBudget.DEFAULT_MAX_CONTEXT_TOKENS
+
     @Volatile var lastFallbackReason: String? = null
         private set
 
@@ -76,6 +78,22 @@ class InferenceEngineManager<T : AutoCloseable>(
         if (kotlin.math.abs(activeTemperature - clamped) > 0.01f) {
             activeTemperature = clamped
             invalidateConversation("temperature changed")
+        }
+    }
+
+    /**
+     * Updates target context window ceiling (2048 / 4096 / 8192) and resets engine on change.
+     */
+    @Synchronized
+    fun updateMaxContextTokens(tokens: Int) {
+        val normalized = if (tokens in ContextBudgetManager.TokenBudget.SUPPORTED_CONTEXT_WINDOWS) {
+            tokens
+        } else {
+            ContextBudgetManager.TokenBudget.DEFAULT_MAX_CONTEXT_TOKENS
+        }
+        if (maxContextTokens != normalized) {
+            maxContextTokens = normalized
+            close()
         }
     }
 
@@ -162,19 +180,38 @@ class InferenceEngineManager<T : AutoCloseable>(
             return com.google.ai.edge.litertlm.Engine(config).also { it.initialize() }
         }
 
+        val targetContext = maxContextTokens
+        val defaultContext = ContextBudgetManager.TokenBudget.DEFAULT_MAX_CONTEXT_TOKENS
         val initialized = try {
-            createAndInit(ContextBudgetManager.TokenBudget.DEFAULT_MAX_CONTEXT_TOKENS, visionEnabled)
-        } catch (visionOrCapError: Throwable) {
-            if (visionEnabled) {
+            createAndInit(targetContext, visionEnabled)
+        } catch (primaryError: Throwable) {
+            if (targetContext > defaultContext) {
                 try {
-                    createAndInit(ContextBudgetManager.TokenBudget.DEFAULT_MAX_CONTEXT_TOKENS, false)
+                    val fallbackEngine = createAndInit(defaultContext, visionEnabled)
+                    maxContextTokens = defaultContext
+                    val note = "${targetContext / 1024}K context unsupported on this model/backend; switched safely to $defaultContext."
+                    lastFallbackReason = note
+                    onFallback?.invoke(note)
+                    fallbackEngine
+                } catch (fallbackCapError: Throwable) {
+                    if (visionEnabled) {
+                        createAndInit(defaultContext, false)
+                    } else if (!isGpu) {
+                        createAndInit(null, false)
+                    } else {
+                        throw fallbackCapError
+                    }
+                }
+            } else if (visionEnabled) {
+                try {
+                    createAndInit(targetContext, false)
                 } catch (explicitCapError: Throwable) {
                     if (!isGpu) createAndInit(null, false) else throw explicitCapError
                 }
             } else if (!isGpu) {
                 createAndInit(null, false)
             } else {
-                throw visionOrCapError
+                throw primaryError
             }
         }
         @Suppress("UNCHECKED_CAST")

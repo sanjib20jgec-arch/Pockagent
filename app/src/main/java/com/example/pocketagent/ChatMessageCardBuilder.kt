@@ -1071,8 +1071,8 @@ object ChatMessageCardBuilder {
             text = label
             contentDescription = accessibilityLabel
             setAllCaps(false)
-            textSize = 12f
-            typeface = Typeface.create("sans-serif", Typeface.BOLD)
+            textSize = 11.5f
+            typeface = Typeface.create("sans-serif", Typeface.MEDIUM)
             setTextColor(textColor)
             gravity = Gravity.CENTER
             minHeight = minTouch
@@ -1081,7 +1081,7 @@ object ChatMessageCardBuilder {
             minimumWidth = minTouch
             background = InsetDrawable(
                 rippleDrawable(
-                    roundedShape(palette.surfaceElevated, dp(context, 12).toFloat()),
+                    roundedShape(Color.TRANSPARENT, dp(context, 10).toFloat()),
                     palette.rippleOnSurface,
                 ),
                 0,
@@ -1089,7 +1089,7 @@ object ChatMessageCardBuilder {
                 0,
                 vInset,
             )
-            setPadding(dp(context, 12), dp(context, 10), dp(context, 12), dp(context, 10))
+            setPadding(dp(context, 10), dp(context, 8), dp(context, 10), dp(context, 8))
             backgroundTintList = null
             stateListAnimator = null
             isFocusable = true

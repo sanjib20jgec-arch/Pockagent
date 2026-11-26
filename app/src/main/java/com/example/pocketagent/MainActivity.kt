@@ -210,12 +210,9 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     private lateinit var slashPopupContainer: LinearLayout
     private lateinit var agentModeButton: Button
     private lateinit var attachImageButton: Button
-    private lateinit var quickProjectChip: Button
-    private lateinit var quickAgentChip: Button
-    private lateinit var quickDeepThinkChip: Button
+    private lateinit var quickModeSummaryChip: Button
     private lateinit var quickSlashChip: Button
     private lateinit var quickTuningChip: Button
-    private lateinit var quickVaultChip: Button
     private lateinit var contextContinuityBanner: LinearLayout
     private lateinit var contextContinuityText: TextView
     private val ttsSpeaker by lazy {
@@ -592,70 +589,49 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             setPadding(dp(14), dp(4), dp(14), dp(12))
         }
 
-        // Calm, spacious welcome card, shown only while the conversation is empty.
+        // Calm, editorial welcome card, shown only while the conversation is empty.
         heroCard = column().apply {
-            background = GradientDrawable(
-                GradientDrawable.Orientation.TL_BR,
-                intArrayOf(palette.heroGradientStart, palette.heroGradientEnd),
-            ).apply { cornerRadius = dp(20).toFloat() }
+            background = roundedShape(
+                color = palette.surfaceElevated,
+                radiusPx = dp(20).toFloat(),
+                strokeWidthPx = maxOf(1, dp(1)),
+                strokeColor = palette.border,
+            )
             setPadding(dp(20), dp(18), dp(20), dp(18))
         }
         val trustBadge = styledText(
             context = this,
-            text = "v1.3 · 100% Offline",
+            text = "v1.5 · 100% Offline",
             sizeSp = 11.5f,
-            color = WHITE,
+            color = palette.teal,
             bold = true,
         ).apply {
-            background = roundedShape(0x29FFFFFF, dp(12).toFloat())
+            background = roundedShape(palette.mint, dp(12).toFloat())
             setPadding(dp(10), dp(4), dp(10), dp(4))
             layoutParams = LinearLayout.LayoutParams(-2, -2).apply {
-                bottomMargin = dp(10)
+                bottomMargin = dp(12)
             }
         }
         heroCard.addView(trustBadge)
-        heroCard.addView(text("How can I help you today?", 21f, WHITE, true))
+        heroCard.addView(text("How can I help you today?", 22f, palette.ink, true))
         heroCard.addView(
             text(
-                "Private on-device AI · Projects, Agent Tools, Document & HTML Vaults.",
+                "Private on-device AI · Projects, Agent Tools, Deep Think & Local Vaults.",
                 13.5f,
-                palette.heroSubtitleInk,
+                palette.muted,
             ).apply {
                 setPadding(0, dp(6), 0, 0)
                 setLineSpacing(dp(3).toFloat(), 1f)
             }
         )
-        heroModelCtaButton = Button(this).apply {
-            text = "Choose .litertlm Model"
-            contentDescription = "Choose a LiteRT-LM model file to get started"
-            val folderIcon = tintedVectorDrawable(this@MainActivity, R.drawable.ic_folder, WHITE)?.apply {
-                setBounds(0, 0, dp(18), dp(18))
-            }
-            setCompoundDrawables(folderIcon, null, null, null)
-            compoundDrawablePadding = dp(8)
-            setAllCaps(false)
-            textSize = 13.5f
-            typeface = Typeface.create("sans-serif", Typeface.BOLD)
-            setTextColor(WHITE)
-            gravity = Gravity.CENTER
-            minHeight = dp(48)
-            minimumHeight = dp(48)
-            setPadding(dp(16), dp(10), dp(16), dp(10))
-            background = rippleDrawable(
-                roundedShape(
-                    color = 0x2EFFFFFF,
-                    radiusPx = dp(16).toFloat(),
-                    strokeWidthPx = maxOf(1, dp(1)),
-                    strokeColor = 0x55FFFFFF,
-                ),
-                palette.rippleOnAccent,
-            )
-            backgroundTintList = null
-            stateListAnimator = null
-            isFocusable = true
-            setOnClickListener { chooseModel() }
+        heroModelCtaButton = pillButton(
+            label = "Choose .litertlm Model",
+            accessibilityLabel = "Choose a LiteRT-LM model file to get started",
+        ) {
+            chooseModel()
+        }.apply {
             layoutParams = LinearLayout.LayoutParams(-2, -2).apply {
-                topMargin = dp(12)
+                topMargin = dp(14)
             }
         }
         heroCard.addView(heroModelCtaButton)
@@ -790,21 +766,11 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 action()
             }
         }
-        quickProjectChip = createQuickModeChip(
-            label = "Project: Default ▾",
-            a11y = "Switch active project workspace",
-            active = activeProjectId != null,
-        ) { showProjectsDialog() }
-        quickAgentChip = createQuickModeChip(
-            label = if (isAgentModeEnabled) "● Agent: ON" else "Agent: OFF",
-            a11y = "Toggle offline agent tool loop",
-            active = isAgentModeEnabled,
-        ) { toggleAgentMode(showToast = true) }
-        quickDeepThinkChip = createQuickModeChip(
-            label = if (isDeepThinkEnabled) "● Deep Think: ON" else "Deep Think: OFF",
-            a11y = "Toggle two-pass self-critique Deep Think mode",
-            active = isDeepThinkEnabled,
-        ) { toggleDeepThinkMode() }
+        quickModeSummaryChip = createQuickModeChip(
+            label = "Mode: Default ▾",
+            a11y = "Open quick mode sheet: Project, Agent Tools, Deep Think, and Vaults",
+            active = activeProjectId != null || isAgentModeEnabled || isDeepThinkEnabled,
+        ) { showModeQuickSheet() }
         quickSlashChip = createQuickModeChip(
             label = "/ Commands",
             a11y = "Open slash command picker",
@@ -822,12 +788,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 chooseModel()
             }
         }
-        quickVaultChip = createQuickModeChip(
-            label = "Vaults",
-            a11y = "Open Document Vault and Artifact Vault",
-            active = false,
-        ) { showVaultChooserDialog() }
-        val modeChips = listOf(quickProjectChip, quickAgentChip, quickDeepThinkChip, quickSlashChip, quickTuningChip, quickVaultChip)
+        val modeChips = listOf(quickModeSummaryChip, quickSlashChip, quickTuningChip)
         modeChips.forEachIndexed { idx, chip ->
             quickModeRow.addView(
                 chip,
@@ -1596,7 +1557,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         if (::agentModeButton.isInitialized) {
             agentModeButton.text = if (isAgentModeEnabled) "Agent Tools: ON" else "Agent Tools: OFF"
         }
-        if (::quickProjectChip.isInitialized) {
+        if (::quickModeSummaryChip.isInitialized) {
             val labels = ComposerChromeHelper.formatQuickModeLabels(
                 projectName = proj?.name,
                 isAgentEnabled = isAgentModeEnabled,
@@ -1607,21 +1568,21 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 docCount = docCount,
                 artifactCount = artifactCount,
             )
-            quickProjectChip.text = labels.projectChipLabel
-            ComposerChromeViews.styleQuickModePill(quickProjectChip, palette, proj != null)
-
-            quickAgentChip.text = labels.agentChipLabel
-            ComposerChromeViews.styleQuickModePill(quickAgentChip, palette, isAgentModeEnabled)
-
-            quickDeepThinkChip.text = labels.deepThinkChipLabel
-            ComposerChromeViews.styleQuickModePill(quickDeepThinkChip, palette, isDeepThinkEnabled)
+            val activeFlags = buildList {
+                if (proj != null) add(proj.name.take(12))
+                if (isAgentModeEnabled) add("Agent")
+                if (isDeepThinkEnabled) add("Deep Think")
+            }
+            quickModeSummaryChip.text = if (activeFlags.isEmpty()) {
+                "Mode: Standard ▾"
+            } else {
+                "● ${activeFlags.joinToString(" · ")} ▾"
+            }
+            ComposerChromeViews.styleQuickModePill(quickModeSummaryChip, palette, activeFlags.isNotEmpty())
 
             quickSlashChip.text = labels.slashChipLabel
             quickTuningChip.text = labels.tuningChipLabel
             ComposerChromeViews.styleQuickModePill(quickTuningChip, palette, isVisionModeEnabled)
-
-            quickVaultChip.text = labels.vaultChipLabel
-            ComposerChromeViews.styleQuickModePill(quickVaultChip, palette, docCount + artifactCount > 0)
         }
         if (::contextContinuityBanner.isInitialized) {
             if (ContextContinuityHelper.shouldSuggestContinue(ctxUsed, ctxMax)) {
@@ -1710,6 +1671,85 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             else "Deep Think OFF (fast 1-pass)",
             Toast.LENGTH_SHORT,
         ).show()
+    }
+
+    private fun showModeQuickSheet() {
+        dismissComposerOverlays(hideIme = true)
+        val root = styleDialogContainer(this, palette, paddingDp = 18)
+        root.addView(text("Assistant Mode & Capabilities", 17f, palette.ink, true))
+        root.addView(
+            text("Configure reasoning depth, tools, project persona, and vaults.", 12.5f, palette.muted).apply {
+                setPadding(0, dp(4), 0, dp(12))
+            }
+        )
+        lateinit var dialog: AlertDialog
+        val activeProjName = activeProjectId?.let { projectStore.getProject(it)?.name } ?: "Default Workspace"
+        val vaultCount = runCatching { documentVault.loadAll().size + artifactStore.loadAll().size }.getOrDefault(0)
+        val rows = listOf(
+            Triple(
+                if (isAgentModeEnabled) "● Agent Tool Loop: ON" else "Agent Tool Loop: OFF",
+                "Offline calc, notes & vault tool calls",
+                isAgentModeEnabled,
+            ) {
+                toggleAgentMode(showToast = true)
+            },
+            Triple(
+                if (isDeepThinkEnabled) "● Deep Think Mode: ON" else "Deep Think Mode: OFF",
+                "Two-pass self-critique for coding & logic",
+                isDeepThinkEnabled,
+            ) {
+                toggleDeepThinkMode()
+            },
+            Triple(
+                "Project: $activeProjName",
+                "Switch custom system persona & rules",
+                activeProjectId != null,
+            ) {
+                showProjectsDialog()
+            },
+            Triple(
+                if (vaultCount > 0) "Knowledge & Code Vaults ($vaultCount)" else "Knowledge & Code Vaults",
+                "Manage indexed PDFs & HTML artifacts",
+                vaultCount > 0,
+            ) {
+                showVaultChooserDialog()
+            },
+        )
+        rows.forEachIndexed { idx, (title, subtitle, active, action) ->
+            val row = column().apply {
+                minimumHeight = dp(48)
+                setPadding(dp(14), dp(10), dp(14), dp(10))
+                background = rippleDrawable(
+                    roundedShape(
+                        color = if (active) palette.mint else palette.surfaceElevated,
+                        radiusPx = dp(14).toFloat(),
+                        strokeWidthPx = maxOf(1, dp(if (active) 2 else 1)),
+                        strokeColor = if (active) palette.teal else palette.border,
+                    ),
+                    if (active) palette.rippleOnMint else palette.rippleOnSurface,
+                )
+                isClickable = true
+                isFocusable = true
+                addView(text(title, 14f, if (active) palette.teal else palette.ink, true))
+                addView(text(subtitle, 12f, palette.muted).apply { setPadding(0, dp(2), 0, 0) })
+                setOnClickListener {
+                    performSubtleHaptic(this)
+                    dialog.dismiss()
+                    action()
+                }
+            }
+            root.addView(
+                row,
+                LinearLayout.LayoutParams(-1, -2).apply {
+                    if (idx < rows.lastIndex) bottomMargin = dp(8)
+                },
+            )
+        }
+        dialog = AlertDialog.Builder(this)
+            .setView(root)
+            .setNegativeButton("Close", null)
+            .create()
+        showStyledAlertDialog(dialog, palette)
     }
 
     private fun openSlashCommandPicker() {

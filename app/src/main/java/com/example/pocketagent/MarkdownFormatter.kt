@@ -32,7 +32,7 @@ object MarkdownFormatter {
     private val CODE_FENCE_REGEX = Regex("""^[ \t]*```([a-zA-Z0-9_\-+.]*)[ \t]*$""")
     private val BOLD_ITALIC_REGEX = Regex("""\*\*\*(.*?)\*\*\*|___(.*?)___""")
     private val BOLD_REGEX = Regex("""\*\*(.*?)\*\*|__(.*?)__""")
-    private val ITALIC_REGEX = Regex("""\*(.*?)\*|_(.*?)_""")
+    private val ITALIC_REGEX = Regex("""\*(?!\*)([^*\n]+?)\*|_(?!_)([^_\n]+?)_""")
     private val INLINE_CODE_REGEX = Regex("""`([^`]+)`""")
     private val LINK_REGEX = Regex("""\[([^\]]+)\]\(([^)]+)\)""")
 

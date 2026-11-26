@@ -164,6 +164,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     @Volatile private var isUserReadingUpwards = false
     @Volatile private var isActivityInForeground = false
     @Volatile private var firstTokenElapsedMs: Long? = null
+    @Volatile private var passStartElapsedMs: Long = 0L
     @Volatile private var streamedCharsCount: Int = 0
     private var recognizer: SpeechRecognizer? = null
     private var isDictating = false
@@ -177,6 +178,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     private var attachmentPreviewExpanded = false
     private var answerIsComplete = false
     private var latestAssistantText: String = ""
+    private var lastRawPrompt: String = ""
     private var activeAssistantHandle: ActiveAssistantCardHandle? = null
     private val thinkingPulseAnimator = PulseAnimator()
     private val recordingPulseAnimator = PulseAnimator()
@@ -1633,6 +1635,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             callbacks = DrawerCallbacks(
                 onNewChat = { startNewConversation() },
                 onSelectSession = { sess -> loadSession(sess.id) },
+                onSessionLongPress = { _ -> showHistoryDialog() },
                 onOpenProjects = { showProjectsDialog() },
                 onOpenDocumentVault = { showDocumentVaultDialog() },
                 onOpenArtifactVault = { showArtifactVaultDialog() },
@@ -2468,6 +2471,8 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         systemInstruction: String,
         imagePath: String? = null,
     ): String {
+        passStartElapsedMs = SystemClock.elapsedRealtime()
+        firstTokenElapsedMs = null
         val accumulated = StringBuilder()
         val firstChunk = AtomicBoolean(true)
         val streamFinished = CountDownLatch(1)
@@ -2477,7 +2482,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             streamedCharsCount = partial.length
             val isFirst = firstChunk.compareAndSet(true, false)
             if (isFirst) {
-                firstTokenElapsedMs = (SystemClock.elapsedRealtime() - generationStartElapsedMs).coerceAtLeast(0L)
+                firstTokenElapsedMs = (SystemClock.elapsedRealtime() - passStartElapsedMs).coerceAtLeast(0L)
                 mainHandler.post {
                     refreshModelStatus()
                     currentGenerationStageLabel = "Streaming"
@@ -3008,6 +3013,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             else -> existingSession
         }
         lastPrompt = task
+        lastRawPrompt = rawTask
         isGeneratingCancelled.set(false)
         streamingRenderer.reset()
 
@@ -3143,7 +3149,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 val effectiveInstruction = memoryEval.first
                 traceChips += memoryEval.second
 
-                val evidenceSummary = buildList {
+                val evidenceParts = buildList {
                     calculation?.let { add("Calculator: ${it.expression} = ${it.displayOutput}") }
                     if (matchedNotes.isNotEmpty()) {
                         add("Notes: " + matchedNotes.joinToString(" | ") { "${it.title}: ${it.content.take(100)}" })
@@ -3154,12 +3160,13 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                     if (localCitations.isNotEmpty()) {
                         add("Attachments: " + localCitations.joinToString(" | ") { it.excerptSnippet.take(100) })
                     }
-                }.joinToString("\n\n").ifBlank { null }
+                }.toMutableList()
 
                 if (traceChips.isNotEmpty()) {
                     val snapshot = traceChips.toList()
+                    val summarySnapshot = evidenceParts.joinToString("\n\n").ifBlank { null }
                     mainHandler.post {
-                        if (!isDestroyed) handle.bindAgentTraceChips(snapshot, evidenceSummary)
+                        if (!isDestroyed) handle.bindAgentTraceChips(snapshot, summarySnapshot)
                     }
                 }
 
@@ -3228,12 +3235,14 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                         if (!hasTools || loopRes.toolResults.isEmpty()) break
                         for (toolRes in loopRes.toolResults) {
                             traceChips += "Tool: ${toolRes.toolName}" to toolRes.output.take(40)
+                            evidenceParts += "Tool ${toolRes.toolName}(${toolRes.input}): ${toolRes.output.take(220)}"
                         }
                         val traceSnapshot = traceChips.toList()
+                        val updatedEvidence = evidenceParts.joinToString("\n\n").ifBlank { null }
                         val toolNames = loopRes.toolResults.joinToString(", ") { it.toolName }
                         mainHandler.post {
                             if (!isDestroyed) {
-                                handle.bindAgentTraceChips(traceSnapshot)
+                                handle.bindAgentTraceChips(traceSnapshot, updatedEvidence)
                                 currentGenerationStageLabel = "Tool: $toolNames"
                                 updateStatus("Executed offline tool ($toolNames); continuing…")
                             }
@@ -3255,10 +3264,12 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                     (AnswerDirective.looksLikeDelegationRefusal(result, intent) ||
                         AnswerDirective.isUnsubstantive(result))
                 maybeShowRefineAffordance = needsRefineHint
-                val elapsedMs = SystemClock.elapsedRealtime() - generationStartElapsedMs
+                val nowElapsed = SystemClock.elapsedRealtime()
+                val elapsedMs = nowElapsed - generationStartElapsedMs
+                val passElapsedMs = nowElapsed - passStartElapsedMs
                 val ftMs = firstTokenElapsedMs
                 if (!isGeneratingCancelled.get() && ftMs != null && result.length >= 24) {
-                    val decodeMs = elapsedMs - ftMs
+                    val decodeMs = passElapsedMs - ftMs
                     if (decodeMs >= 400L) {
                         val estTokens = (result.length / 4.0f).coerceAtLeast(1f)
                         val tokPerSec = (estTokens * 1000.0f) / decodeMs
@@ -3352,8 +3363,9 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun regenerateAnswer() {
-        if (lastPrompt.isNotBlank() && !isGeneratingUi && !engineManager.isGenerationActive) {
-            taskInput.setText(lastPrompt)
+        val toRegenerate = lastRawPrompt.ifBlank { lastPrompt }
+        if (toRegenerate.isNotBlank() && !isGeneratingUi && !engineManager.isGenerationActive) {
+            taskInput.setText(toRegenerate)
             suggestSteps()
         }
     }
@@ -3376,6 +3388,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         latestAssistantText = ""
         answerIsComplete = false
         lastPrompt = ""
+        lastRawPrompt = ""
         if (::chatThreadContainer.isInitialized) {
             chatThreadContainer.removeAllViews()
         }
@@ -3383,6 +3396,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         ComposerInputGuard.resetInputHeight(taskInput)
         isUserReadingUpwards = false
         syncComposerState()
+        updateWorkspaceSubtitle()
         scrollChatToBottom(force = true)
         updateStatus("Started a new conversation.")
     }
@@ -3440,10 +3454,12 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         }
 
         lastPrompt = s.messages.lastOrNull { it.isUser }?.content.orEmpty()
+        lastRawPrompt = lastPrompt
         taskInput.setText("")
         ComposerInputGuard.resetInputHeight(taskInput)
         isUserReadingUpwards = false
         syncComposerState()
+        updateWorkspaceSubtitle()
         scrollChatToBottom(force = true)
         updateStatus("Loaded: ${s.title}")
     }
@@ -4056,125 +4072,6 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         showStyledAlertDialog(dialog, palette)
     }
 
-    /** Opens the workspace menu dialog grouping chats, notes, memory, models, and privacy. */
-    private fun showWorkspaceMenuDialog() {
-        dismissComposerOverlays(hideIme = true)
-        lateinit var dialog: AlertDialog
-        val activeProjName = activeProjectId?.let { projectStore.getProject(it)?.name } ?: "Default Workspace"
-        val docCount = documentVault.loadAll().size
-        val artifactCount = artifactStore.loadAll().size
-        val root = styleDialogContainer(this, palette, paddingDp = 18)
-        root.addView(text("Workspace · v1.2.0", 18f, palette.ink, true))
-        val agentBadge = if (isAgentModeEnabled) "ON" else "OFF"
-        root.addView(
-            text(
-                String.format(
-                    Locale.US,
-                    "%s · Agent %s · Temp %.1f · %d doc%s · %d artifact%s",
-                    activeProjName,
-                    agentBadge,
-                    currentTemperature,
-                    docCount,
-                    if (docCount == 1) "" else "s",
-                    artifactCount,
-                    if (artifactCount == 1) "" else "s",
-                ),
-                12f,
-                palette.teal,
-                true,
-            ).apply {
-                setPadding(0, dp(4), 0, dp(12))
-            }
-        )
-        val items = listOf(
-            Triple(R.drawable.ic_folder, "Projects & Workspaces" to "Active: $activeProjName") {
-                showProjectsDialog()
-            },
-            Triple(R.drawable.ic_history, "Saved Conversations" to "Browse, search, or resume past chats") {
-                showHistoryDialog()
-            },
-            Triple(R.drawable.ic_notes, "Personal Notes" to "Create and organize sovereign notes") {
-                showNotesManagerDialog()
-            },
-            Triple(R.drawable.ic_notes, "Document Vault" to "$docCount indexed local document${if (docCount == 1) "" else "s"}") {
-                showDocumentVaultDialog()
-            },
-            Triple(R.drawable.ic_folder, "Artifact Vault" to "$artifactCount saved code & HTML snippet${if (artifactCount == 1) "" else "s"}") {
-                showArtifactVaultDialog()
-            },
-            Triple(R.drawable.ic_memory, "Long-Term Memory" to "Inspect and curate remembered facts") {
-                showMemoryCenterDialog()
-            },
-            Triple(R.drawable.ic_folder, "Model & Tuning" to "Switch models, temperature, context, vision") {
-                val stored = activeModelFile()
-                if ((stored.exists() && stored.length() > 0L) || modelLibraryStore.loadAll().isNotEmpty()) {
-                    showModelManagerDialog()
-                } else {
-                    chooseModel()
-                }
-            },
-            Triple(R.drawable.ic_shield, "Privacy & Appearance" to "Privacy audit, theme, and security lock") {
-                showPrivacyCenterDialog()
-            },
-        )
-
-        val listCol = column()
-        for ((index, item) in items.withIndex()) {
-            val (iconRes, copy, action) = item
-            val (itemTitle, itemSubtitle) = copy
-            val row = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                minimumHeight = dp(48)
-                setPadding(dp(12), dp(10), dp(12), dp(10))
-                elevation = dp(1).toFloat()
-                background = rippleDrawable(
-                    roundedShape(
-                        color = palette.surfaceElevated,
-                        radiusPx = dp(14).toFloat(),
-                        strokeWidthPx = maxOf(1, dp(1)),
-                        strokeColor = palette.border,
-                    ),
-                    palette.rippleOnSurface,
-                )
-                isClickable = true
-                isFocusable = true
-                setOnClickListener {
-                    performSubtleHaptic(it)
-                    dialog.dismiss()
-                    action()
-                }
-            }
-            val iconView = ImageView(this).apply {
-                setImageDrawable(tintedVectorDrawable(this@MainActivity, iconRes, palette.teal))
-                scaleType = ImageView.ScaleType.CENTER_INSIDE
-                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            }
-            row.addView(iconView, LinearLayout.LayoutParams(dp(24), dp(24)).apply { marginEnd = dp(12) })
-            val textCol = column().apply {
-                addView(text(itemTitle, 14.5f, palette.ink, true))
-                addView(text(itemSubtitle, 12f, palette.muted).apply { setPadding(0, dp(2), 0, 0) })
-            }
-            row.addView(textCol, LinearLayout.LayoutParams(0, -2, 1f))
-            listCol.addView(
-                row,
-                LinearLayout.LayoutParams(-1, -2).apply {
-                    if (index < items.lastIndex) bottomMargin = dp(8)
-                },
-            )
-        }
-        val scroll = ScrollView(this).apply {
-            overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
-            addView(listCol)
-        }
-        root.addView(scroll, LinearLayout.LayoutParams(-1, -2))
-
-        dialog = AlertDialog.Builder(this)
-            .setView(root)
-            .setNegativeButton("Close", null)
-            .create()
-        showStyledAlertDialog(dialog, palette)
-    }
 
     private fun showSaveToNotesDialog(answerText: String) {
         val container = styleDialogContainer(this, palette, paddingDp = 16)
@@ -5938,6 +5835,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     }
 
     override fun onDestroy() {
+        slideDrawer.destroy()
         thinkingPulseAnimator.stop()
         recordingPulseAnimator.stop()
         generationTimerRunnable?.let { mainHandler.removeCallbacks(it) }

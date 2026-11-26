@@ -341,6 +341,7 @@ class MarkdownFormatterTest {
         assertTrue(preview.contains("Calculate 3 * 5 = 15."))
         assertFalse(preview.contains("###"))
         assertFalse(preview.contains("**"))
+        assertEquals("Compute 2**8 cleanly.", MarkdownFormatter.formatStreamingPreview("Compute 2**8 cleanly."))
     }
 
     @Test

@@ -441,16 +441,11 @@ object MarkdownFormatter {
         return sb.toString().trimEnd()
     }
 
+    private val UNCLOSED_BOLD_OPENER_REGEX = Regex("(^|\\s)(\\*\\*\\*|\\*\\*)(?=\\S)")
+
     private fun cleanStreamingInline(text: String): String {
-        var result = cleanInlineFormatting(text)
-        // Strip unclosed bold/bold-italic openers that haven't received their closing delimiter yet
-        if (result.contains("***")) {
-            result = result.replace("***", "")
-        }
-        if (result.contains("**")) {
-            result = result.replace("**", "")
-        }
-        return result
+        val cleaned = cleanInlineFormatting(text)
+        return UNCLOSED_BOLD_OPENER_REGEX.replace(cleaned, "$1")
     }
 
     /**

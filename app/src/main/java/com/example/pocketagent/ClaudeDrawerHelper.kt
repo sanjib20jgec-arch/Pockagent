@@ -287,6 +287,15 @@ class ClaudeSlideDrawer(
         }
     }
 
+    /** Cancels any active drawer animation and clears callback references during teardown. */
+    fun destroy() {
+        currentAnimator?.cancel()
+        currentAnimator = null
+        isDrawerOpen = false
+        currentCallbacks = null
+        overlayRoot.visibility = View.GONE
+    }
+
     private fun bindPanel(
         data: DrawerData,
         palette: UiPalette,

@@ -2,7 +2,7 @@
 
 PocketAgent is an **offline-first, on-device Android assistant**. It runs local `.litertlm` models through LiteRT-LM, keeps conversations/notes/memory on device, and is designed around a privacy-first "answer the request yourself" UX.
 
-> Status: **active development**. This repo contains the Android app source, JVM unit tests, and CI build workflow. Android SDK/Gradle runtime validation is performed in CI or a local Android dev environment.
+> Status: **CI-verified at [run 45911625131](https://github.com/sanjib20jgec-arch/Pockagent/actions/runs/45911625131) on `7bbfe70`** (branch `hardening/9of10`). `main` HEAD `090537c` is still the failing pre-hardening baseline; owner merge steps are in [docs/ci-handoff.md](docs/ci-handoff.md). Android SDK/Gradle runtime validation is performed in CI or a local Android dev environment.
 
 ## What it does today
 
@@ -24,13 +24,13 @@ PocketAgent is an **offline-first, on-device Android assistant**. It runs local 
 Requirements (local/CI Android environment):
 
 - Android SDK (API 35), JDK 17
-- Gradle 8.14.4 (project uses Gradle build files directly; no wrapper jar committed)
+- Gradle 8.14.4 via the committed wrapper (`./gradlew` / `gradlew.bat`) — no global Gradle install needed
 - Android NDK 27.2.12479018 + CMake 3.22.1 (whisper.cpp native build)
 
 Commands:
 
 ```bash
-gradle --no-daemon testDebugUnitTest assembleDebug
+./gradlew --no-daemon --stacktrace --console=plain testDebugUnitTest assembleDebug
 ```
 
 Debug APK output:
@@ -48,7 +48,7 @@ python3 scripts/package_source.py
 
 ## CI
 
-GitHub Actions workflow `.github/workflows/build.yml` runs on push/PR/manual dispatch: verifies source bundle, runs `testDebugUnitTest`, assembles debug APK, and uploads APK/log artifacts.
+GitHub Actions workflow `.github/workflows/build.yml` runs on push/PR/manual dispatch: verifies the source bundle (`python3 scripts/package_source.py --check`), runs `testDebugUnitTest`, assembles the debug APK, and uploads APK/failure-log artifacts. It has `contents: read` only and never commits to the source tree. See [docs/EVIDENCE.md](docs/EVIDENCE.md) for the current mark-by-mark evidence ledger and green run link.
 
 ## Privacy & security notes
 
@@ -60,9 +60,11 @@ GitHub Actions workflow `.github/workflows/build.yml` runs on push/PR/manual dis
 
 ## Development docs
 
+- [docs/EVIDENCE.md](docs/EVIDENCE.md) - mark-by-mark evidence ledger with verified commits.
 - [PROJECT_AUDIT.md](PROJECT_AUDIT.md) - current audit snapshot, verified gaps, and priorities.
 - [DEVELOPMENT_ROADMAP.md](DEVELOPMENT_ROADMAP.md) - phased execution roadmap.
+- [docs/ci-handoff.md](docs/ci-handoff.md) - owner-only branch-protection steps.
 
 ## License
 
-See repository license file(s) and third-party dependency licenses. Model files are user-supplied and subject to their own licenses.
+MIT — see [LICENSE](LICENSE). Third-party components are listed in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md). Model files are user-supplied and subject to their own licenses.

@@ -1,5 +1,6 @@
 package com.example.pocketagent
 
+import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -121,5 +122,33 @@ class UserMemoryStoreTest {
 
         val reloaded = UserMemoryStore(store.baseDir, maxMemories = 5).listMemories().single()
         assertEquals(trickyContent, reloaded.content)
+    }
+
+    @Test
+    fun `legacy memory json still loads and is retagged on save`() {
+        val legacy = """
+            [
+              {
+                "id": "mem-legacy",
+                "content": "Prefers short answers",
+                "category": "PREFERENCE",
+                "createdAt": 1700000000000,
+                "confidence": 0.8,
+                "sourceSessionId": null
+              }
+            ]
+        """.trimIndent()
+        File(store.baseDir, "user_memories.json").writeText(legacy)
+
+        val restored = store.listMemories().single()
+
+        assertEquals("mem-legacy", restored.id)
+        assertEquals("Prefers short answers", restored.content)
+        assertEquals(UserMemoryStore.MemoryCategory.PREFERENCE, restored.category)
+        assertEquals(0.8f, restored.confidence, 0.001f)
+        assertEquals(null, restored.sourceSessionId)
+        store.addFact("Another different fact", UserMemoryStore.MemoryCategory.GOAL)
+        assertTrue(File(store.baseDir, "user_memories.json").readText().contains("\"schema_version\":1"))
+        assertEquals(2, store.listMemories().size)
     }
 }

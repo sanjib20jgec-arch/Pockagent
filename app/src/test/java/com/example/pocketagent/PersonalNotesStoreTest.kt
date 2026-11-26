@@ -1,5 +1,6 @@
 package com.example.pocketagent
 
+import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -139,5 +140,34 @@ class PersonalNotesStoreTest {
         assertEquals(trickyTitle, reloaded.title)
         assertEquals(trickyBody, reloaded.content)
         assertEquals(trickyTags, reloaded.tags)
+    }
+
+    @Test
+    fun `legacy note json still loads and is retagged on save`() {
+        val legacy = """
+            [
+              {
+                "id": "note-legacy",
+                "title": "Legacy note",
+                "content": "Legacy body",
+                "tags": ["archive", "legacy"],
+                "createdAt": 1700000000000,
+                "updatedAt": 1700000000500,
+                "isPinned": true
+              }
+            ]
+        """.trimIndent()
+        File(store.baseDir, "personal_notes.json").writeText(legacy)
+
+        val restored = store.listNotes().single()
+
+        assertEquals("note-legacy", restored.id)
+        assertEquals("Legacy note", restored.title)
+        assertEquals("Legacy body", restored.content)
+        assertEquals(listOf("archive", "legacy"), restored.tags)
+        assertTrue(restored.isPinned)
+        store.createNote("Fresh note", "Fresh body")
+        assertTrue(File(store.baseDir, "personal_notes.json").readText().contains("\"schema_version\":1"))
+        assertEquals(2, store.listNotes().size)
     }
 }

@@ -337,4 +337,41 @@ class SessionStoreTest {
         assertTrue(txt.contains("[USER]"))
         assertTrue(txt.contains("[ASSISTANT]"))
     }
+
+    @Test
+    fun legacySessionJsonStillLoadsAndIsRetaggedOnSave() {
+        val storeDir = tempDir.newFolder("sessions_legacy")
+        val store = SessionStore(storeDir)
+        val legacy = """
+            {
+              "id": "sess-legacy",
+              "title": "Legacy session",
+              "createdAt": 1700000000000,
+              "updatedAt": 1700000000500,
+              "isPinned": true,
+              "messages": [
+                {
+                  "id": "msg-legacy",
+                  "role": "USER",
+                  "content": "legacy question",
+                  "timestamp": 1700000000100,
+                  "attachmentSummary": null,
+                  "attachmentContent": null,
+                  "attachmentReferences": [],
+                  "estimatedTokens": 3
+                }
+              ]
+            }
+        """.trimIndent()
+        File(storeDir, "sess-legacy.json").writeText(legacy)
+
+        val restored = store.getSession("sess-legacy")!!
+
+        assertEquals("Legacy session", restored.title)
+        assertEquals(1700000000500L, restored.updatedAt)
+        assertTrue(restored.isPinned)
+        assertEquals("legacy question", restored.messages.single().content)
+        store.saveSession(restored.copy(title = "Retagged session"))
+        assertTrue(File(storeDir, "sess-legacy.json").readText().contains("\"schema_version\":1"))
+    }
 }

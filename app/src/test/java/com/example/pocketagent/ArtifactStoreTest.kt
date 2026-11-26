@@ -46,11 +46,28 @@ class ArtifactStoreTest {
     }
 
     @Test fun `exportHtml produces valid HTML`() {
-        val a = ArtifactStore.Artifact(title = "Test", language = "html",
-            code = "<h1>Hi</h1>", createdAt = 1000L, updatedAt = 1000L)
-        val html = store().exportHtml(a)
-        assertTrue(html.contains("<!DOCTYPE html>"))
-        assertTrue(html.contains("&lt;h1&gt;"))
+        val htmlArtifact = ArtifactStore.Artifact(
+            title = "Test",
+            language = "html",
+            code = "<h1>Hi</h1>",
+            createdAt = 1000L,
+            updatedAt = 1000L,
+        )
+        val exportedPage = store().exportHtml(htmlArtifact)
+        assertTrue(exportedPage.contains("<!DOCTYPE html>"))
+        assertTrue(exportedPage.contains("<h1>Hi</h1>"))
+
+        val codeArtifact = ArtifactStore.Artifact(
+            title = "Code Snippet",
+            language = "kotlin",
+            code = "fun test(): List<String> = emptyList()",
+            createdAt = 1000L,
+            updatedAt = 1000L,
+        )
+        val exportedCode = store().exportHtml(codeArtifact)
+        assertTrue(exportedCode.contains("<!DOCTYPE html>"))
+        assertTrue(exportedCode.contains("Code Snippet"))
+        assertTrue(exportedCode.contains("&lt;String&gt;"))
     }
 
     @Test fun `code with special chars roundtrips`() {

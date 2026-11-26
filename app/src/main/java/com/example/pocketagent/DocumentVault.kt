@@ -84,8 +84,26 @@ class DocumentVault(val baseDir: File) {
         if (allChunks.isEmpty()) return emptyList()
 
         val index = OfflineKeywordIndex(allChunks)
-        val ranked = index.search(query, topK = topK, requirePositiveScore = true)
-        return ranked.map { chunk ->
+        val bm25Hits = index.search(query, topK = topK, requirePositiveScore = true)
+        val chosen = if (bm25Hits.isNotEmpty()) {
+            bm25Hits
+        } else {
+            val queryTokens = OfflineKeywordIndex.tokenize(query)
+                .filter { it.length >= 3 && it !in OfflineKeywordIndex.STOP_WORDS }
+            if (queryTokens.isEmpty()) {
+                emptyList()
+            } else {
+                allChunks.mapNotNull { chunk ->
+                    val haystack = "${chunk.source} ${chunk.content}".lowercase(java.util.Locale.ROOT)
+                    val score = queryTokens.count { token -> haystack.contains(token) }
+                    if (score > 0) chunk to score else null
+                }
+                    .sortedByDescending { it.second }
+                    .take(topK)
+                    .map { it.first }
+            }
+        }
+        return chosen.map { chunk ->
             val src = chunk.source.ifBlank { "Document" }
             "[$src] ${chunk.content}"
         }

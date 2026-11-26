@@ -296,14 +296,18 @@ class InferenceEngineManager<T : AutoCloseable>(
         reason: String,
         modelFile: File,
         cacheDir: File,
+        persistCpuOnly: Boolean = false,
     ): Boolean {
         if (activeBackend != ActiveBackend.GPU) return false
         close()
         val fallbackNote = "GPU execution failed ($reason); falling back to CPU."
-        preference = BackendPreference.CPU_ONLY
+        val previousPref = preference
         try {
             getOrInitializeEngine(modelFile, cacheDir, BackendPreference.CPU_ONLY)
         } finally {
+            if (!persistCpuOnly) {
+                preference = previousPref
+            }
             lastFallbackReason = fallbackNote
         }
         onFallback?.invoke(fallbackNote)

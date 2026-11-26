@@ -2568,6 +2568,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     ): String {
         passStartElapsedMs = SystemClock.elapsedRealtime()
         firstTokenElapsedMs = null
+        streamedCharsCount = 0
         val accumulated = StringBuilder()
         val firstChunk = AtomicBoolean(true)
         val streamFinished = CountDownLatch(1)
@@ -2612,13 +2613,16 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                     streamFinished.countDown()
                 }
             }
+            val effectiveMaxOutputTokens = currentMaxOutputTokens.coerceAtMost(
+                (currentMaxContextTokens - engineManager.cachedConversationTokens - 256).coerceAtLeast(256)
+            )
             if (!imagePath.isNullOrBlank() && engineManager.visionEnabled) {
                 try {
                     conversation.sendImageMessage(
                         imagePath = imagePath,
                         prompt = prompt,
                         callback = callback,
-                        maxOutputTokens = currentMaxOutputTokens,
+                        maxOutputTokens = effectiveMaxOutputTokens,
                     )
                 } catch (_: Throwable) {
                     mainHandler.post {
@@ -2627,14 +2631,14 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                     conversation.sendMessage(
                         prompt,
                         callback,
-                        maxOutputTokens = currentMaxOutputTokens,
+                        maxOutputTokens = effectiveMaxOutputTokens,
                     )
                 }
             } else {
                 conversation.sendMessage(
                     prompt,
                     callback,
-                    maxOutputTokens = currentMaxOutputTokens,
+                    maxOutputTokens = effectiveMaxOutputTokens,
                 )
             }
 
@@ -2651,6 +2655,18 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             }
             if (!isGeneratingCancelled.get() && !guard.isStopped) {
                 streamError.get()?.let { error ->
+                    val partialText = guard.text(accumulated)
+                    if (partialText.trim().length >= 80) {
+                        // GPU was working and produced real output before hitting a sequence/KV cap;
+                        // preserve what was streamed instead of wiping the screen and falling back to CPU.
+                        conversation.cancel()
+                        engineManager.invalidateConversation("mid-stream limit reached")
+                        mainHandler.post {
+                            updateStatus("Stopped at sequence/context limit — partial answer kept.")
+                        }
+                        runawayFragment = guard.runawayFragment
+                        return AnswerFinalizer.finalize(partialText).text
+                    }
                     conversation.cancel()
                     engineManager.invalidateConversation("streaming failed")
                     throw IllegalStateException("Streaming inference failed.", error)
@@ -3043,7 +3059,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                         currentGenerationStageLabel = "Retrying on CPU"
                         updateStatus("GPU runtime failed; switched to CPU and retrying…")
                         activeAssistantHandle?.setStatusBadge("Retrying on CPU…", palette.statusLoadedCpu)
-                        activeAssistantHandle?.bindStreamingText("Retrying on CPU…")
+                        activeAssistantHandle?.bindStreamingText("GPU could not run this pass; reloading on CPU (first token takes longer)…")
                     }
                     streamingRenderer.reset()
                     onBeforeCpuRetry?.invoke()

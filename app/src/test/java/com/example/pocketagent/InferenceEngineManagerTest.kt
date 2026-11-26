@@ -109,4 +109,22 @@ class InferenceEngineManagerTest {
         manager.updateMaxContextTokens(999_999)
         assertEquals(ContextBudgetManager.TokenBudget.DEFAULT_MAX_CONTEXT_TOKENS, manager.maxContextTokens)
     }
+
+    @Test
+    fun `fallbackToCpuAfterRuntimeFailure recovers on cpu without locking preference`() {
+        val model = Files.createTempFile("model", ".litertlm").toFile().apply { writeText("x") }
+        val cache = Files.createTempDirectory("cache").toFile()
+        val manager = InferenceEngineManager<FakeEngine>(
+            preference = BackendPreference.GPU_PREFERRED,
+            engineFactory = { isGpu, _, _ -> FakeEngine(if (isGpu) "gpu" else "cpu") },
+        )
+        manager.getOrInitializeEngine(model, cache)
+        assertEquals(ActiveBackend.GPU, manager.activeBackend)
+
+        val switched = manager.fallbackToCpuAfterRuntimeFailure("opencl limit", model, cache)
+        assertTrue(switched)
+        assertEquals(ActiveBackend.CPU, manager.activeBackend)
+        assertEquals(BackendPreference.GPU_PREFERRED, manager.preference)
+        manager.close()
+    }
 }

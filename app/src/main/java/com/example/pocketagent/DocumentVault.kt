@@ -84,10 +84,10 @@ class DocumentVault(val baseDir: File) {
         if (allChunks.isEmpty()) return emptyList()
 
         val index = OfflineKeywordIndex(allChunks)
-        val ranked = index.search(query, topK = topK, minScore = 0.01)
-        return ranked.map { scored ->
-            val src = scored.chunk.source.ifBlank { "Document" }
-            "[$src] ${scored.chunk.content}"
+        val ranked = index.search(query, topK = topK, requirePositiveScore = true)
+        return ranked.map { chunk ->
+            val src = chunk.source.ifBlank { "Document" }
+            "[$src] ${chunk.content}"
         }
     }
 

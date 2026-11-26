@@ -601,7 +601,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         }
         val trustBadge = styledText(
             context = this,
-            text = "v1.5 · 100% Offline",
+            text = "v1.6 · 100% Offline",
             sizeSp = 11.5f,
             color = palette.teal,
             bold = true,
@@ -1624,7 +1624,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 artifactCount = artCount,
                 activeModelLabel = modelLabel,
                 activeBackendLabel = backendLabel,
-                appVersionLabel = "v1.3 · Offline",
+                appVersionLabel = "v1.6 · Offline",
             ),
             palette = palette,
             callbacks = DrawerCallbacks(
@@ -1675,17 +1675,18 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
 
     private fun showModeQuickSheet() {
         dismissComposerOverlays(hideIme = true)
-        val root = styleDialogContainer(this, palette, paddingDp = 18)
+        val root = column().apply { setPadding(dp(18), dp(4), dp(18), dp(12)) }
         root.addView(text("Assistant Mode & Capabilities", 17f, palette.ink, true))
         root.addView(
             text("Configure reasoning depth, tools, project persona, and vaults.", 12.5f, palette.muted).apply {
                 setPadding(0, dp(4), 0, dp(12))
             }
         )
-        lateinit var dialog: AlertDialog
+        lateinit var sheet: AlertDialog
         val activeProjName = activeProjectId?.let { projectStore.getProject(it)?.name } ?: "Default Workspace"
         val vaultCount = runCatching { documentVault.loadAll().size + artifactStore.loadAll().size }.getOrDefault(0)
         data class ModeOption(
+            val iconRes: Int,
             val title: String,
             val subtitle: String,
             val active: Boolean,
@@ -1693,24 +1694,28 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         )
         val rows = listOf(
             ModeOption(
-                title = if (isAgentModeEnabled) "● Agent Tool Loop: ON" else "Agent Tool Loop: OFF",
+                iconRes = R.drawable.ic_memory,
+                title = if (isAgentModeEnabled) "Agent Tool Loop: ON" else "Agent Tool Loop: OFF",
                 subtitle = "Offline calc, notes & vault tool calls",
                 active = isAgentModeEnabled,
                 action = { toggleAgentMode(showToast = true) },
             ),
             ModeOption(
-                title = if (isDeepThinkEnabled) "● Deep Think Mode: ON" else "Deep Think Mode: OFF",
+                iconRes = R.drawable.ic_sparkle,
+                title = if (isDeepThinkEnabled) "Deep Think Mode: ON" else "Deep Think Mode: OFF",
                 subtitle = "Two-pass self-critique for coding & logic",
                 active = isDeepThinkEnabled,
                 action = { toggleDeepThinkMode() },
             ),
             ModeOption(
+                iconRes = R.drawable.ic_folder,
                 title = "Project: $activeProjName",
                 subtitle = "Switch custom system persona & rules",
                 active = activeProjectId != null,
                 action = { showProjectsDialog() },
             ),
             ModeOption(
+                iconRes = R.drawable.ic_notes,
                 title = if (vaultCount > 0) "Knowledge & Code Vaults ($vaultCount)" else "Knowledge & Code Vaults",
                 subtitle = "Manage indexed PDFs & HTML artifacts",
                 active = vaultCount > 0,
@@ -1718,7 +1723,9 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             ),
         )
         rows.forEachIndexed { idx, opt ->
-            val row = column().apply {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
                 minimumHeight = dp(48)
                 setPadding(dp(14), dp(10), dp(14), dp(10))
                 background = rippleDrawable(
@@ -1732,11 +1739,28 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 )
                 isClickable = true
                 isFocusable = true
-                addView(text(opt.title, 14f, if (opt.active) palette.teal else palette.ink, true))
-                addView(text(opt.subtitle, 12f, palette.muted).apply { setPadding(0, dp(2), 0, 0) })
+                val iconView = ImageView(this@MainActivity).apply {
+                    setImageDrawable(tintedVectorDrawable(this@MainActivity, opt.iconRes, if (opt.active) palette.teal else palette.muted))
+                    scaleType = ImageView.ScaleType.CENTER_INSIDE
+                    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                }
+                addView(iconView, LinearLayout.LayoutParams(dp(22), dp(22)).apply { marginEnd = dp(12) })
+                val col = column().apply {
+                    addView(text(opt.title, 14f, if (opt.active) palette.teal else palette.ink, true))
+                    addView(text(opt.subtitle, 12f, palette.muted).apply { setPadding(0, dp(2), 0, 0) })
+                }
+                addView(col, LinearLayout.LayoutParams(0, -2, 1f))
+                if (opt.active) {
+                    val checkView = ImageView(this@MainActivity).apply {
+                        setImageDrawable(tintedVectorDrawable(this@MainActivity, R.drawable.ic_check, palette.teal))
+                        scaleType = ImageView.ScaleType.CENTER_INSIDE
+                        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                    }
+                    addView(checkView, LinearLayout.LayoutParams(dp(18), dp(18)))
+                }
                 setOnClickListener {
                     performSubtleHaptic(this)
-                    dialog.dismiss()
+                    sheet.dismiss()
                     opt.action()
                 }
             }
@@ -1747,11 +1771,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 },
             )
         }
-        dialog = AlertDialog.Builder(this)
-            .setView(root)
-            .setNegativeButton("Close", null)
-            .create()
-        showStyledAlertDialog(dialog, palette)
+        sheet = showBottomSheetDialog(this, palette, root)
     }
 
     private fun openSlashCommandPicker() {
@@ -1774,14 +1794,14 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         dismissComposerOverlays(hideIme = true)
         val docsCount = runCatching { documentVault.loadAll().size }.getOrDefault(0)
         val artCount = runCatching { artifactStore.loadAll().size }.getOrDefault(0)
-        val root = styleDialogContainer(this, palette, paddingDp = 18)
+        val root = column().apply { setPadding(dp(18), dp(4), dp(18), dp(12)) }
         root.addView(text("Local Knowledge & Code Vaults", 17f, palette.ink, true))
         root.addView(
             text("Everything stays 100% private on this device.", 12.5f, palette.muted).apply {
                 setPadding(0, dp(4), 0, dp(12))
             }
         )
-        lateinit var dialog: AlertDialog
+        lateinit var sheet: AlertDialog
         val vaultOptions = listOf(
             Triple(R.drawable.ic_notes, "Document Knowledge Vault" to "$docsCount indexed local document${if (docsCount == 1) "" else "s"} for automatic RAG") {
                 showDocumentVaultDialog()
@@ -1810,7 +1830,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 isFocusable = true
                 setOnClickListener {
                     performSubtleHaptic(it)
-                    dialog.dismiss()
+                    sheet.dismiss()
                     action()
                 }
             }
@@ -1829,11 +1849,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 if (idx == 0) bottomMargin = dp(8)
             })
         }
-        dialog = AlertDialog.Builder(this)
-            .setView(root)
-            .setNegativeButton("Close", null)
-            .create()
-        showStyledAlertDialog(dialog, palette)
+        sheet = showBottomSheetDialog(this, palette, root)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -3607,223 +3623,19 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun showHistoryDialog() {
-        var allSessions = sessionStore.listSessions().sortedWith(
-            compareByDescending<ConversationSession> { it.isPinned }
-                .thenByDescending { it.updatedAt }
+        WorkspaceDialogs.showHistoryDialog(
+            activity = this,
+            palette = palette,
+            sessionStore = sessionStore,
+            getCurrentSession = { currentSession },
+            setCurrentSession = { currentSession = it },
+            onLoadSession = { loadSession(it) },
+            onStartNewConversation = { startNewConversation() },
         )
-        val dialogView = styleDialogContainer(this, palette, paddingDp = 16)
-
-        val searchBox = EditText(this).apply {
-            hint = "Search conversations…"
-            textSize = 14f
-            styleEditText(this, palette)
-        }
-        dialogView.addView(searchBox, marginBottom(12))
-
-        val listContainer = column()
-        val scroll = ScrollView(this).apply {
-            addView(listContainer)
-            layoutParams = LinearLayout.LayoutParams(-1, dp(340))
-        }
-        dialogView.addView(scroll)
-
-        lateinit var dialog: AlertDialog
-
-        fun populateList(query: String = "", reload: Boolean = false) {
-            if (reload) {
-                allSessions = sessionStore.listSessions().sortedWith(
-                    compareByDescending<ConversationSession> { it.isPinned }
-                        .thenByDescending { it.updatedAt }
-                )
-                dialog.setTitle("Conversations (${allSessions.size})")
-            }
-            listContainer.removeAllViews()
-            val filtered = if (query.isBlank()) {
-                allSessions
-            } else {
-                allSessions.filter { sess ->
-                    sess.title.contains(query, ignoreCase = true) ||
-                        sess.messages.any { it.content.contains(query, ignoreCase = true) }
-                }
-            }
-            if (filtered.isEmpty()) {
-                listContainer.addView(text("No conversations found.", 13f, palette.muted).apply {
-                    setPadding(0, dp(24), 0, dp(24))
-                    gravity = Gravity.CENTER
-                })
-                return
-            }
-
-            val dateFormatter = java.text.SimpleDateFormat("MMM dd, yyyy · HH:mm", java.util.Locale.getDefault())
-            for (s in filtered) {
-                val row = LinearLayout(this).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
-                    setPadding(dp(12), dp(10), dp(6), dp(10))
-                    background = rippleDrawable(
-                        roundedShape(
-                            color = palette.surfaceElevated,
-                            radiusPx = dp(14).toFloat(),
-                            strokeWidthPx = maxOf(1, dp(1)),
-                            strokeColor = palette.border,
-                        ),
-                        palette.rippleOnSurface,
-                    )
-                    isClickable = true
-                    isFocusable = true
-                    setOnClickListener {
-                        loadSession(s.id)
-                        dialog.dismiss()
-                    }
-                }
-                val info = column().apply {
-                    val titlePrefix = if (s.isPinned) "[Pinned] " else ""
-                    addView(text("$titlePrefix${s.title}", 14.5f, palette.ink, true))
-                    val previewSnippet = s.messages.lastOrNull()?.content
-                        ?.trim()
-                        ?.replace(Regex("\\s+"), " ")
-                        .orEmpty()
-                    if (previewSnippet.isNotEmpty()) {
-                        addView(text(previewSnippet, 12.5f, palette.muted).apply {
-                            maxLines = 2
-                            ellipsize = TextUtils.TruncateAt.END
-                            setPadding(0, dp(3), 0, dp(3))
-                        })
-                    }
-                    val dateStr = dateFormatter.format(java.util.Date(s.updatedAt))
-                    addView(text("$dateStr · ${s.messageCount} turns", 11f, palette.teal))
-                }
-                row.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
-
-                val menuBtn = iconTouchButton(
-                    context = this,
-                    palette = palette,
-                    iconText = "⋮",
-                    accessibilityLabel = "Options for ${s.title}",
-                    textColor = palette.muted,
-                    textSizeSp = 18f,
-                ) {
-                    showSessionOptionsMenu(s) {
-                        populateList(searchBox.text.toString(), reload = true)
-                    }
-                }
-                row.addView(menuBtn)
-                listContainer.addView(row, marginBottom(8))
-            }
-        }
-
-        searchBox.addTextChangedListener(object : android.text.TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                populateList(s?.toString() ?: "")
-            }
-            override fun afterTextChanged(s: android.text.Editable?) {}
-        })
-
-        dialog = AlertDialog.Builder(this)
-            .setTitle("Conversations (${allSessions.size})")
-            .setView(dialogView)
-            .setPositiveButton("+ New Chat") { _, _ ->
-                startNewConversation()
-            }
-            .setNegativeButton("Close", null)
-            .create()
-        populateList()
-        showStyledAlertDialog(dialog, palette)
-    }
-
-    private fun showSessionOptionsMenu(s: ConversationSession, onUpdated: () -> Unit) {
-        val dialogView = styleDialogContainer(this, palette, paddingDp = 16)
-        lateinit var menuDialog: AlertDialog
-
-        val pinLabel = if (s.isPinned) "Unpin conversation" else "Pin to top"
-        val actions = listOf(
-            pinLabel to false,
-            "Rename" to false,
-            "Export as Markdown" to false,
-            "Export as Text" to false,
-            "Delete conversation" to true,
-        )
-        for ((index, spec) in actions.withIndex()) {
-            val (label, isDanger) = spec
-            val btn = if (isDanger) {
-                dangerButton(this, palette, label, accessibilityLabel = label) {
-                    menuDialog.dismiss()
-                    sessionStore.deleteSession(s.id)
-                    if (currentSession?.id == s.id) {
-                        startNewConversation()
-                    }
-                    onUpdated()
-                }
-            } else {
-                secondaryOutlineButton(this, palette, label, accessibilityLabel = label) {
-                    menuDialog.dismiss()
-                    when (index) {
-                        0 -> {
-                            sessionStore.pinSession(s.id, !s.isPinned)
-                            onUpdated()
-                        }
-                        1 -> promptRenameSession(s, onUpdated)
-                        2 -> exportSessionToShare(s.id, asMarkdown = true)
-                        3 -> exportSessionToShare(s.id, asMarkdown = false)
-                    }
-                }
-            }
-            dialogView.addView(
-                btn,
-                LinearLayout.LayoutParams(-1, -2).apply {
-                    if (index < actions.lastIndex) bottomMargin = dp(8)
-                },
-            )
-        }
-
-        menuDialog = AlertDialog.Builder(this)
-            .setTitle(s.title)
-            .setView(dialogView)
-            .setNegativeButton("Cancel", null)
-            .create()
-        showStyledAlertDialog(menuDialog, palette)
-    }
-
-    private fun promptRenameSession(s: ConversationSession, onUpdated: () -> Unit) {
-        val container = styleDialogContainer(this, palette, paddingDp = 16)
-        val input = EditText(this).apply {
-            hint = "Conversation title…"
-            textSize = 14f
-            styleEditText(this, palette)
-            setText(s.title)
-            setSelection(text.length)
-        }
-        container.addView(input)
-
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("Rename Conversation")
-            .setView(container)
-            .setPositiveButton("Save") { _, _ ->
-                val newTitle = input.text.toString().trim()
-                if (newTitle.isNotBlank()) {
-                    sessionStore.renameSession(s.id, newTitle)
-                    if (currentSession?.id == s.id) {
-                        currentSession = currentSession?.withTitle(newTitle)
-                    }
-                    onUpdated()
-                }
-            }
-            .setNegativeButton("Cancel", null)
-            .create()
-        showStyledAlertDialog(dialog, palette)
     }
 
     private fun exportSessionToShare(id: String, asMarkdown: Boolean) {
-        val text = if (asMarkdown) sessionStore.exportSessionAsMarkdown(id) else sessionStore.exportSessionAsText(id)
-        if (text.isNullOrBlank()) return
-        val mime = if (asMarkdown) "text/markdown" else "text/plain"
-        val shareIntent = Intent(Intent.ACTION_SEND).apply {
-            type = mime
-            putExtra(Intent.EXTRA_TEXT, text)
-            putExtra(Intent.EXTRA_SUBJECT, "PocketAgent Conversation Export")
-        }
-        startActivity(Intent.createChooser(shareIntent, "Export Conversation"))
+        WorkspaceDialogs.exportSessionToShare(this, sessionStore, id, asMarkdown)
     }
 
     private fun exportCurrentAsMarkdown() {
@@ -3846,1142 +3658,129 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun showMemoryCenterDialog() {
-        val dialogView = styleDialogContainer(this, palette, paddingDp = 16)
-
-        val headerRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        val toggleButton = com.example.pocketagent.pillButton(
-            context = this,
+        WorkspaceDialogs.showMemoryCenterDialog(
+            activity = this,
             palette = palette,
-            label = if (isMemoryEnabled) "Memory: ON" else "Memory: OFF",
-            accessibilityLabel = "Toggle sovereign long-term memory",
-            compact = true,
-        ) {}.apply {
-            layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(8) }
-        }
-        headerRow.addView(toggleButton)
-
-        val addFactBtn = com.example.pocketagent.pillButton(
-            context = this,
-            palette = palette,
-            label = "+ Add Fact",
-            accessibilityLabel = "Manually record a user preference or fact",
-            compact = true,
-        ) {}.apply {
-            layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(8) }
-        }
-        headerRow.addView(addFactBtn)
-
-        val clearAllBtn = dangerButton(
-            context = this,
-            palette = palette,
-            label = "Clear All",
-            accessibilityLabel = "Clear all sovereign memories",
-            compact = true,
-        ) {}
-        headerRow.addView(clearAllBtn)
-
-        val headerScroll = HorizontalScrollView(this).apply {
-            isHorizontalScrollBarEnabled = false
-            overScrollMode = View.OVER_SCROLL_NEVER
-            addView(headerRow)
-        }
-        dialogView.addView(headerScroll, marginBottom(10))
-
-        val desc = text(
-            "100% on-device memory. PocketAgent remembers key facts and preferences across conversations without sending data anywhere.",
-            12f,
-            palette.muted,
+            userMemoryStore = userMemoryStore,
+            isMemoryEnabled = { isMemoryEnabled },
+            onToggleMemoryEnabled = { isMemoryEnabled = it },
         )
-        dialogView.addView(desc, marginBottom(12))
-
-        val listContainer = column()
-        val scroll = ScrollView(this).apply {
-            addView(listContainer)
-            layoutParams = LinearLayout.LayoutParams(-1, dp(310))
-        }
-        dialogView.addView(scroll)
-
-        fun refreshList() {
-            listContainer.removeAllViews()
-            val memories = userMemoryStore.listMemories()
-            if (memories.isEmpty()) {
-                listContainer.addView(
-                    text("No memories recorded yet.\nAs you chat, preferences and facts will be remembered here.", 13f, palette.muted).apply {
-                        setPadding(0, dp(30), 0, dp(30))
-                        gravity = Gravity.CENTER
-                    }
-                )
-                return
-            }
-
-            for (m in memories) {
-                val card = LinearLayout(this).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
-                    setPadding(dp(12), dp(10), dp(6), dp(10))
-                    background = roundedShape(
-                        color = palette.surfaceElevated,
-                        radiusPx = dp(14).toFloat(),
-                        strokeWidthPx = maxOf(1, dp(1)),
-                        strokeColor = palette.border,
-                    )
-                }
-
-                val info = column().apply {
-                    val catBadge = "[${m.displayLabel}]"
-                    addView(text(catBadge, 11f, palette.teal, true))
-                    addView(text(m.content, 13.5f, palette.ink).apply {
-                        setPadding(0, dp(2), 0, 0)
-                    })
-                }
-                card.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
-
-                val delBtn = iconTouchButton(
-                    context = this,
-                    palette = palette,
-                    iconText = "✕",
-                    accessibilityLabel = "Delete memory fact",
-                    textColor = palette.muted,
-                    textSizeSp = 16f,
-                ) {
-                    userMemoryStore.deleteMemory(m.id)
-                    refreshList()
-                }
-                card.addView(delBtn)
-
-                listContainer.addView(card, marginBottom(8))
-            }
-        }
-
-        toggleButton.setOnClickListener {
-            isMemoryEnabled = !isMemoryEnabled
-            toggleButton.text = if (isMemoryEnabled) "Memory: ON" else "Memory: OFF"
-            Toast.makeText(this, if (isMemoryEnabled) "Long-term memory enabled" else "Long-term memory paused", Toast.LENGTH_SHORT).show()
-        }
-
-        addFactBtn.setOnClickListener {
-            promptAddMemoryFact { refreshList() }
-        }
-
-        clearAllBtn.setOnClickListener {
-            val confirmDialog = AlertDialog.Builder(this)
-                .setTitle("Clear All Memories?")
-                .setMessage("Are you sure you want to permanently delete all stored memory facts?")
-                .setPositiveButton("Clear") { _, _ ->
-                    userMemoryStore.clearMemories()
-                    refreshList()
-                    Toast.makeText(this, "All memories cleared", Toast.LENGTH_SHORT).show()
-                }
-                .setNegativeButton("Cancel", null)
-                .create()
-            showStyledAlertDialog(confirmDialog, palette)
-        }
-
-        refreshList()
-
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("Sovereign Memory Vault")
-            .setView(dialogView)
-            .setPositiveButton("Close", null)
-            .create()
-        showStyledAlertDialog(dialog, palette)
-    }
-
-    private fun promptAddMemoryFact(onAdded: () -> Unit) {
-        val input = EditText(this).apply {
-            hint = "e.g., Prefers Kotlin, Speaks Bengali, Offline only…"
-            textSize = 14f
-            styleEditText(this, palette)
-        }
-        val categories = arrayOf("Preference", "Profile", "Constraint", "Goal", "Custom")
-        var selectedCategoryIndex = 0
-
-        val container = styleDialogContainer(this, palette, paddingDp = 16).apply {
-            addView(input, marginBottom(12))
-            addView(text("Category", 12.5f, palette.muted, true), marginBottom(6))
-        }
-
-        val radioGroup = RadioGroup(this).apply {
-            orientation = RadioGroup.VERTICAL
-        }
-        val radioButtons = categories.mapIndexed { idx, label ->
-            RadioButton(this).apply {
-                id = View.generateViewId()
-                text = label
-                textSize = 14f
-                typeface = Typeface.create("sans-serif", Typeface.NORMAL)
-                setTextColor(palette.ink)
-                buttonTintList = ColorStateList.valueOf(palette.teal)
-                minHeight = dp(40)
-                setPadding(dp(6), dp(4), dp(6), dp(4))
-                isChecked = idx == 0
-                setOnClickListener { selectedCategoryIndex = idx }
-            }.also { radioGroup.addView(it) }
-        }
-        if (radioButtons.isNotEmpty()) {
-            radioGroup.check(radioButtons[0].id)
-        }
-        container.addView(radioGroup)
-
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("Add Memory Fact")
-            .setView(container)
-            .setPositiveButton("Save") { _, _ ->
-                val fact = input.text.toString().trim()
-                if (fact.isNotBlank()) {
-                    val category = when (selectedCategoryIndex) {
-                        0 -> UserMemoryStore.MemoryCategory.PREFERENCE
-                        1 -> UserMemoryStore.MemoryCategory.PROFILE
-                        2 -> UserMemoryStore.MemoryCategory.CONSTRAINT
-                        3 -> UserMemoryStore.MemoryCategory.GOAL
-                        else -> UserMemoryStore.MemoryCategory.CUSTOM
-                    }
-                    userMemoryStore.addFact(fact, category)
-                    onAdded()
-                }
-            }
-            .setNegativeButton("Cancel", null)
-            .create()
-        showStyledAlertDialog(dialog, palette)
     }
 
     private fun showNotesManagerDialog() {
-        val dialogView = styleDialogContainer(this, palette, paddingDp = 16)
-
-        val searchBox = EditText(this).apply {
-            hint = "Search personal notes…"
-            textSize = 14f
-            styleEditText(this, palette)
-        }
-        dialogView.addView(searchBox, marginBottom(12))
-
-        val listContainer = column()
-        val scroll = ScrollView(this).apply {
-            addView(listContainer)
-            layoutParams = LinearLayout.LayoutParams(-1, dp(340))
-        }
-        dialogView.addView(scroll)
-
-        fun refreshList(query: String = "") {
-            listContainer.removeAllViews()
-            val notes = notesStore.searchNotes(query)
-            if (notes.isEmpty()) {
-                listContainer.addView(text("No notes found.", 13f, palette.muted).apply {
-                    setPadding(0, dp(30), 0, dp(30))
-                    gravity = Gravity.CENTER
-                })
-                return
-            }
-
-            val dateFormatter = java.text.SimpleDateFormat("MMM dd, yyyy", java.util.Locale.getDefault())
-            for (n in notes) {
-                val card = LinearLayout(this).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
-                    setPadding(dp(12), dp(10), dp(6), dp(10))
-                    background = rippleDrawable(
-                        roundedShape(
-                            color = palette.surfaceElevated,
-                            radiusPx = dp(14).toFloat(),
-                            strokeWidthPx = maxOf(1, dp(1)),
-                            strokeColor = palette.border,
-                        ),
-                        palette.rippleOnSurface,
-                    )
-                    isClickable = true
-                    isFocusable = true
-                }
-
-                val info = column().apply {
-                    val pinPrefix = if (n.isPinned) "[Pinned] " else ""
-                    addView(text("$pinPrefix${n.title}", 14.5f, palette.ink, true))
-                    if (n.content.isNotBlank()) {
-                        val preview = n.content.take(90).replace("\n", " ") + (if (n.content.length > 90) "…" else "")
-                        addView(text(preview, 12.5f, palette.muted).apply {
-                            setPadding(0, dp(2), 0, dp(2))
-                        })
-                    }
-                    val dateStr = dateFormatter.format(java.util.Date(n.updatedAt))
-                    addView(text(dateStr, 11f, palette.teal))
-                }
-                card.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
-
-                card.setOnClickListener {
-                    promptEditNote(n) { refreshList(searchBox.text.toString()) }
-                }
-
-                val pinBtn = iconTouchButton(
-                    context = this,
-                    palette = palette,
-                    iconText = if (n.isPinned) "★" else "☆",
-                    accessibilityLabel = if (n.isPinned) "Unpin note ${n.title}" else "Pin note ${n.title}",
-                    textColor = if (n.isPinned) palette.teal else palette.muted,
-                    textSizeSp = 15f,
-                ) {
-                    notesStore.pinNote(n.id, !n.isPinned)
-                    refreshList(searchBox.text.toString())
-                }
-                card.addView(pinBtn)
-
-                val delBtn = iconTouchButton(
-                    context = this,
-                    palette = palette,
-                    iconText = "✕",
-                    accessibilityLabel = "Delete note ${n.title}",
-                    textColor = palette.muted,
-                    textSizeSp = 16f,
-                ) {
-                    notesStore.deleteNote(n.id)
-                    refreshList(searchBox.text.toString())
-                }
-                card.addView(delBtn)
-
-                listContainer.addView(card, marginBottom(8))
-            }
-        }
-
-        searchBox.addTextChangedListener(object : android.text.TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                refreshList(s?.toString() ?: "")
-            }
-            override fun afterTextChanged(s: android.text.Editable?) {}
-        })
-
-        refreshList()
-
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("Personal Notes (${notesStore.listNotes().size})")
-            .setView(dialogView)
-            .setPositiveButton("+ New Note") { _, _ ->
-                promptEditNote(null) { refreshList(searchBox.text.toString()) }
-            }
-            .setNeutralButton("Export All") { _, _ ->
-                val md = notesStore.exportNotesAsMarkdown()
-                val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                    type = "text/markdown"
-                    putExtra(Intent.EXTRA_TEXT, md)
-                    putExtra(Intent.EXTRA_SUBJECT, "PocketAgent Notes Export")
-                }
-                startActivity(Intent.createChooser(shareIntent, "Export Notes"))
-            }
-            .setNegativeButton("Close", null)
-            .create()
-        showStyledAlertDialog(dialog, palette)
+        WorkspaceDialogs.showNotesManagerDialog(this, palette, notesStore)
     }
-
-    private fun promptEditNote(existingNote: PersonalNotesStore.PersonalNote?, onSaved: () -> Unit) {
-        val container = styleDialogContainer(this, palette, paddingDp = 16)
-
-        val titleInput = EditText(this).apply {
-            hint = "Note Title"
-            textSize = 14f
-            styleEditText(this, palette)
-            if (existingNote != null) setText(existingNote.title)
-        }
-        container.addView(titleInput, marginBottom(10))
-
-        val contentInput = EditText(this).apply {
-            hint = "Note Content…"
-            textSize = 13.5f
-            styleEditText(this, palette)
-            minLines = 4
-            gravity = Gravity.TOP or Gravity.START
-            if (existingNote != null) setText(existingNote.content)
-        }
-        container.addView(contentInput, marginBottom(4))
-
-        val dialog = AlertDialog.Builder(this)
-            .setTitle(if (existingNote == null) "Create Note" else "Edit Note")
-            .setView(container)
-            .setPositiveButton("Save") { _, _ ->
-                val title = titleInput.text.toString().trim()
-                val content = contentInput.text.toString().trim()
-                if (title.isNotBlank()) {
-                    if (existingNote == null) {
-                        notesStore.createNote(title = title, content = content)
-                    } else {
-                        notesStore.saveNote(existingNote.withUpdatedContent(title, content))
-                    }
-                    onSaved()
-                }
-            }
-            .setNegativeButton("Cancel", null)
-            .create()
-        showStyledAlertDialog(dialog, palette)
-    }
-
 
     private fun showSaveToNotesDialog(answerText: String) {
-        val container = styleDialogContainer(this, palette, paddingDp = 16)
-        val suggested = lastPrompt.trim()
-            .replace(Regex("\\s+"), " ")
-            .take(56)
-            .ifBlank { "PocketAgent Answer" }
-        val titleInput = EditText(this).apply {
-            hint = "Note Title"
-            textSize = 14f
-            styleEditText(this, palette)
-            setText(suggested)
-            setSelection(text.length)
+        WorkspaceDialogs.showSaveToNotesDialog(this, palette, notesStore, answerText, lastPrompt) {
+            updateStatus(it)
         }
-        container.addView(titleInput, marginBottom(6))
-        container.addView(
-            text("${answerText.length} chars will be saved locally.", 12f, palette.muted)
-        )
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("Save Answer to Notes")
-            .setView(container)
-            .setPositiveButton("Save") { _, _ ->
-                val title = titleInput.text.toString().trim().ifBlank { "PocketAgent Answer" }
-                notesStore.createNote(title = title, content = answerText, tags = listOf("saved-answer"))
-                updateStatus("Saved answer to Personal Notes ($title).")
-                Toast.makeText(this, "Saved to Notes", Toast.LENGTH_SHORT).show()
-            }
-            .setNegativeButton("Cancel", null)
-            .create()
-        showStyledAlertDialog(dialog, palette)
     }
 
-    private fun showSaveArtifactDialog(code: String, language: String?) {
-        val container = styleDialogContainer(this, palette, paddingDp = 16)
-        val langLabel = language?.trim()?.takeIf { it.isNotEmpty() } ?: "html"
-        val suggestedTitle = lastPrompt.trim().replace(Regex("\\s+"), " ").take(48)
-            .ifBlank { "${langLabel.uppercase(Locale.ROOT)} Artifact" }
-        val titleInput = EditText(this).apply {
-            hint = "Artifact Title"
-            textSize = 14f
-            styleEditText(this, palette)
-            setText(suggestedTitle)
-            setSelection(text.length)
-        }
-        container.addView(titleInput)
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("Save to Artifact Vault")
-            .setView(container)
-            .setPositiveButton("Save") { _, _ ->
-                val title = titleInput.text.toString().trim().ifBlank { "Artifact" }
-                artifactStore.save(
-                    ArtifactStore.Artifact(
-                        title = title,
-                        language = langLabel,
-                        code = code,
-                    )
-                )
-                updateWorkspaceSubtitle()
-                updateStatus("Artifact saved to vault ($title).")
-                Toast.makeText(this, "Saved to Artifact Vault", Toast.LENGTH_SHORT).show()
-            }
-            .setNegativeButton("Cancel", null)
-            .create()
-        showStyledAlertDialog(dialog, palette)
+    private fun showSaveArtifactDialog(code: String, language: String) {
+        WorkspaceDialogs.showSaveArtifactDialog(
+            activity = this,
+            palette = palette,
+            artifactStore = artifactStore,
+            code = code,
+            language = language,
+            lastPrompt = lastPrompt,
+            onWorkspaceUpdated = { updateWorkspaceSubtitle() },
+            onStatusUpdate = { updateStatus(it) },
+        )
     }
 
     private fun showProjectsDialog() {
-        dismissComposerOverlays(hideIme = true)
-        val root = styleDialogContainer(this, palette, paddingDp = 16)
-        root.addView(
-            text("Switch project workspace or customize its system prompt:", 12.5f, palette.muted),
-            marginBottom(10),
+        WorkspaceDialogs.showProjectsDialog(
+            activity = this,
+            palette = palette,
+            projectStore = projectStore,
+            getActiveProjectId = { activeProjectId },
+            onSelectProject = { nextId ->
+                activeProjectId = nextId
+                if (nextId == null) settingsPrefs.edit().remove(PREF_ACTIVE_PROJECT_ID).apply()
+                else settingsPrefs.edit().putString(PREF_ACTIVE_PROJECT_ID, nextId).apply()
+            },
+            onInvalidateConversation = { engineManager.invalidateConversation(it) },
+            onWorkspaceUpdated = { updateWorkspaceSubtitle() },
+            onStatusUpdate = { updateStatus(it) },
+            onBeforeShow = { dismissComposerOverlays(hideIme = true) },
         )
-        val listCol = column()
-        val scroll = ScrollView(this).apply {
-            addView(listCol)
-            layoutParams = LinearLayout.LayoutParams(-1, dp(320))
-        }
-        root.addView(scroll)
-
-        lateinit var dialog: AlertDialog
-
-        fun refreshProjectsList() {
-            listCol.removeAllViews()
-            val isDefaultSelected = activeProjectId == null
-            val defaultRow = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                minimumHeight = dp(48)
-                setPadding(dp(12), dp(10), dp(12), dp(10))
-                background = rippleDrawable(
-                    roundedShape(
-                        color = if (isDefaultSelected) palette.mint else palette.surfaceElevated,
-                        radiusPx = dp(14).toFloat(),
-                        strokeWidthPx = maxOf(1, dp(if (isDefaultSelected) 2 else 1)),
-                        strokeColor = if (isDefaultSelected) palette.teal else palette.border,
-                    ),
-                    palette.rippleOnSurface,
-                )
-                isClickable = true
-                isFocusable = true
-                setOnClickListener {
-                    if (activeProjectId != null) {
-                        activeProjectId = null
-                        settingsPrefs.edit().remove(PREF_ACTIVE_PROJECT_ID).apply()
-                        engineManager.invalidateConversation("project switched to default")
-                        updateWorkspaceSubtitle()
-                    }
-                    dialog.dismiss()
-                    updateStatus("Active workspace: Default")
-                }
-            }
-            val defaultText = column().apply {
-                addView(text(if (isDefaultSelected) "✓ Default Workspace" else "Default Workspace", 14f, if (isDefaultSelected) palette.teal else palette.ink, true))
-                addView(text("Standard general-purpose offline assistant", 12f, palette.muted))
-            }
-            defaultRow.addView(defaultText, LinearLayout.LayoutParams(0, -2, 1f))
-            listCol.addView(defaultRow, marginBottom(8))
-
-            val projects = projectStore.loadAll()
-            for (proj in projects) {
-                val selected = proj.id == activeProjectId
-                val row = LinearLayout(this).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
-                    minimumHeight = dp(48)
-                    setPadding(dp(12), dp(10), dp(6), dp(10))
-                    background = rippleDrawable(
-                        roundedShape(
-                            color = if (selected) palette.mint else palette.surfaceElevated,
-                            radiusPx = dp(14).toFloat(),
-                            strokeWidthPx = maxOf(1, dp(if (selected) 2 else 1)),
-                            strokeColor = if (selected) palette.teal else palette.border,
-                        ),
-                        palette.rippleOnSurface,
-                    )
-                    isClickable = true
-                    isFocusable = true
-                    setOnClickListener {
-                        activeProjectId = proj.id
-                        settingsPrefs.edit().putString(PREF_ACTIVE_PROJECT_ID, proj.id).apply()
-                        engineManager.invalidateConversation("project switched")
-                        updateWorkspaceSubtitle()
-                        dialog.dismiss()
-                        updateStatus("Switched to project: ${proj.name}")
-                    }
-                }
-                val info = column().apply {
-                    addView(text(if (selected) "✓ ${proj.name}" else proj.name, 14f, if (selected) palette.teal else palette.ink, true))
-                    val preview = proj.systemInstructions.ifBlank { "No custom instructions" }
-                    addView(text(preview, 12f, palette.muted).apply {
-                        maxLines = 2
-                        ellipsize = TextUtils.TruncateAt.END
-                    })
-                }
-                row.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
-                val editBtn = iconTouchButton(this, palette, "✎", "Edit project ${proj.name}", palette.teal, 15f) {
-                    promptProjectEditor(proj) { refreshProjectsList() }
-                }
-                row.addView(editBtn)
-                val delBtn = iconTouchButton(this, palette, "✕", "Delete project ${proj.name}", palette.muted, 16f) {
-                    projectStore.delete(proj.id)
-                    if (activeProjectId == proj.id) {
-                        activeProjectId = null
-                        settingsPrefs.edit().remove(PREF_ACTIVE_PROJECT_ID).apply()
-                        engineManager.invalidateConversation("active project deleted")
-                        updateWorkspaceSubtitle()
-                    }
-                    refreshProjectsList()
-                }
-                row.addView(delBtn)
-                listCol.addView(row, marginBottom(8))
-            }
-        }
-
-        dialog = AlertDialog.Builder(this)
-            .setTitle("Projects & Workspaces")
-            .setView(root)
-            .setPositiveButton("+ New Project") { _, _ ->
-                promptProjectEditor(null) {
-                    updateWorkspaceSubtitle()
-                    showProjectsDialog()
-                }
-            }
-            .setNegativeButton("Close", null)
-            .create()
-        refreshProjectsList()
-        showStyledAlertDialog(dialog, palette)
-    }
-
-    private fun promptProjectEditor(existing: ProjectStore.Project?, onSaved: () -> Unit) {
-        val container = styleDialogContainer(this, palette, paddingDp = 16)
-        val nameInput = EditText(this).apply {
-            hint = "Project Name (e.g. Android Coach)"
-            textSize = 14f
-            styleEditText(this, palette)
-            if (existing != null) setText(existing.name)
-        }
-        container.addView(nameInput, marginBottom(10))
-        val instrInput = EditText(this).apply {
-            hint = "Custom System Instructions (role, rules, output format)…"
-            textSize = 13.5f
-            styleEditText(this, palette)
-            minLines = 4
-            gravity = Gravity.TOP or Gravity.START
-            if (existing != null) setText(existing.systemInstructions)
-        }
-        container.addView(instrInput)
-
-        val dialog = AlertDialog.Builder(this)
-            .setTitle(if (existing == null) "Create Project" else "Edit Project")
-            .setView(container)
-            .setPositiveButton("Save") { _, _ ->
-                val name = nameInput.text.toString().trim()
-                val instr = instrInput.text.toString().trim()
-                if (name.isNotBlank()) {
-                    val toSave = if (existing == null) {
-                        ProjectStore.Project(name = name, systemInstructions = instr)
-                    } else {
-                        existing.copy(name = name, systemInstructions = instr, updatedAt = System.currentTimeMillis())
-                    }
-                    if (projectStore.save(toSave)) {
-                        activeProjectId = toSave.id
-                        settingsPrefs.edit().putString(PREF_ACTIVE_PROJECT_ID, toSave.id).apply()
-                        engineManager.invalidateConversation("project updated")
-                        updateWorkspaceSubtitle()
-                    }
-                    onSaved()
-                }
-            }
-            .setNegativeButton("Cancel", null)
-            .create()
-        showStyledAlertDialog(dialog, palette)
     }
 
     private fun showDocumentVaultDialog() {
-        val root = styleDialogContainer(this, palette, paddingDp = 16)
-        root.addView(
-            text("Attached PDFs & text files are indexed here offline and searched automatically across chats.", 12f, palette.muted),
-            marginBottom(10),
+        WorkspaceDialogs.showDocumentVaultDialog(
+            activity = this,
+            palette = palette,
+            documentVault = documentVault,
+            onChoosePdf = { choosePdf() },
+            onChooseTextFiles = { chooseTextFiles() },
+            onWorkspaceUpdated = { updateWorkspaceSubtitle() },
         )
-        val listCol = column()
-        val scroll = ScrollView(this).apply {
-            addView(listCol)
-            layoutParams = LinearLayout.LayoutParams(-1, dp(320))
-        }
-        root.addView(scroll)
-
-        fun refreshVault() {
-            listCol.removeAllViews()
-            val docs = documentVault.loadAll()
-            if (docs.isEmpty()) {
-                listCol.addView(
-                    text("No documents indexed yet.\nUse + PDF or + Text in the composer to index files.", 13f, palette.muted).apply {
-                        gravity = Gravity.CENTER
-                        setPadding(0, dp(28), 0, dp(28))
-                    }
-                )
-                return
-            }
-            for (doc in docs) {
-                val card = LinearLayout(this).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
-                    setPadding(dp(12), dp(10), dp(6), dp(10))
-                    background = roundedShape(
-                        color = palette.surfaceElevated,
-                        radiusPx = dp(14).toFloat(),
-                        strokeWidthPx = maxOf(1, dp(1)),
-                        strokeColor = palette.border,
-                    )
-                }
-                val info = column().apply {
-                    addView(text(doc.name, 14f, palette.ink, true))
-                    addView(text("${doc.chunkCount} searchable chunks · ${doc.extractedText.length} chars", 11.5f, palette.teal))
-                }
-                card.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
-                val delBtn = iconTouchButton(this, palette, "✕", "Remove ${doc.name}", palette.muted, 16f) {
-                    documentVault.removeDocument(doc.id)
-                    refreshVault()
-                    updateWorkspaceSubtitle()
-                }
-                card.addView(delBtn)
-                listCol.addView(card, marginBottom(8))
-            }
-        }
-        refreshVault()
-
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("Document Knowledge Vault")
-            .setView(root)
-            .setPositiveButton("+ Add PDF") { _, _ -> choosePdf() }
-            .setNeutralButton("+ Add Text") { _, _ -> chooseTextFiles() }
-            .setNegativeButton("Close", null)
-            .create()
-        showStyledAlertDialog(dialog, palette)
     }
 
     private fun showArtifactVaultDialog() {
-        val root = styleDialogContainer(this, palette, paddingDp = 16)
-        root.addView(
-            text("Saved HTML games, visualizations, and code blocks stored offline.", 12f, palette.muted),
-            marginBottom(10),
+        WorkspaceDialogs.showArtifactVaultDialog(
+            activity = this,
+            palette = palette,
+            artifactStore = artifactStore,
+            onExportHtml = { titleSlug, html ->
+                pendingHtmlToExport = html
+                val createIntent = Intent(Intent.ACTION_CREATE_DOCUMENT)
+                    .addCategory(Intent.CATEGORY_OPENABLE)
+                    .setType("text/html")
+                    .putExtra(Intent.EXTRA_TITLE, "$titleSlug.html")
+                try {
+                    startActivityForResult(createIntent, CREATE_ARTIFACT_HTML)
+                } catch (_: ActivityNotFoundException) {
+                    pendingHtmlToExport = null
+                    shareAnswerText(html)
+                }
+            },
+            onWorkspaceUpdated = { updateWorkspaceSubtitle() },
         )
-        val listCol = column()
-        val scroll = ScrollView(this).apply {
-            addView(listCol)
-            layoutParams = LinearLayout.LayoutParams(-1, dp(330))
-        }
-        root.addView(scroll)
-
-        fun refreshArtifacts() {
-            listCol.removeAllViews()
-            val artifacts = artifactStore.loadAll()
-            if (artifacts.isEmpty()) {
-                listCol.addView(
-                    text("No saved artifacts yet.\nOpen any ▶ Preview and tap Save to store it here.", 13f, palette.muted).apply {
-                        gravity = Gravity.CENTER
-                        setPadding(0, dp(28), 0, dp(28))
-                    }
-                )
-                return
-            }
-            for (art in artifacts) {
-                val card = cardContainer(this, palette, cornerDp = 14, elevated = true, paddingDp = 12)
-                card.addView(text(art.title, 14f, palette.ink, true))
-                card.addView(
-                    text("${art.language.uppercase(Locale.ROOT).ifBlank { "TEXT" }} · ${art.code.length} chars", 11.5f, palette.muted).apply {
-                        setPadding(0, dp(2), 0, dp(8))
-                    }
-                )
-                val btnRow = LinearLayout(this).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
-                }
-                if (HtmlArtifactSandbox.isPreviewableCode(art.language, art.code)) {
-                    btnRow.addView(
-                        com.example.pocketagent.pillButton(this, palette, "Preview", compact = true) {
-                            HtmlArtifactSandbox.showPreviewDialog(this, art.code, art.language, palette)
-                        }.apply {
-                            layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(6) }
-                        }
-                    )
-                }
-                btnRow.addView(
-                    secondaryOutlineButton(this, palette, "Export .html", compact = true, textColor = palette.teal) {
-                        val html = artifactStore.exportHtml(art)
-                        pendingHtmlToExport = html
-                        val safeSlug = art.title.replace(Regex("[^a-zA-Z0-9_-]"), "_").take(32).ifBlank { "artifact" }
-                        val createIntent = Intent(Intent.ACTION_CREATE_DOCUMENT)
-                            .addCategory(Intent.CATEGORY_OPENABLE)
-                            .setType("text/html")
-                            .putExtra(Intent.EXTRA_TITLE, "$safeSlug.html")
-                        try {
-                            startActivityForResult(createIntent, CREATE_ARTIFACT_HTML)
-                        } catch (_: ActivityNotFoundException) {
-                            pendingHtmlToExport = null
-                            shareAnswerText(html)
-                        }
-                    }.apply {
-                        layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(6) }
-                    }
-                )
-                btnRow.addView(
-                    dangerButton(this, palette, "Delete", compact = true) {
-                        artifactStore.delete(art.id)
-                        refreshArtifacts()
-                        updateWorkspaceSubtitle()
-                    }
-                )
-                card.addView(btnRow)
-                listCol.addView(card, marginBottom(8))
-            }
-        }
-        refreshArtifacts()
-
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("Artifact Vault")
-            .setView(root)
-            .setNegativeButton("Close", null)
-            .create()
-        showStyledAlertDialog(dialog, palette)
     }
 
     private fun showDuplexVoiceDialog() {
-        if (engineManager.isGenerationActive || isGeneratingUi) {
-            Toast.makeText(this, "Stop active text generation before starting voice mode.", Toast.LENGTH_SHORT).show()
-            return
-        }
-        if (whisperContext == 0L) {
-            Toast.makeText(this, "Select a local Whisper model first.", Toast.LENGTH_SHORT).show()
-            return
-        }
-        val model = activeModelFile()
-        if (!model.exists() || model.length() == 0L) {
-            Toast.makeText(this, "Select a local LiteRT-LM model first.", Toast.LENGTH_SHORT).show()
-            return
-        }
-        if (!InAppAudioRecorder.hasMicrophonePermission(this)) {
-            requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_RECORD_MIC)
-            return
-        }
-
-        val dialogView = column().apply {
-            background = GradientDrawable(
-                GradientDrawable.Orientation.TL_BR,
-                intArrayOf(palette.heroGradientStart, palette.heroGradientEnd),
-            ).apply { cornerRadius = dp(20).toFloat() }
-            setPadding(dp(20), dp(20), dp(20), dp(20))
-        }
-
-        val title = text("Continuous Voice Mode", 18f, WHITE, true)
-        dialogView.addView(title)
-
-        val stateBadge = text("Initializing…", 13f, palette.heroSubtitleInk, true).apply {
-            setPadding(0, dp(6), 0, dp(8))
-        }
-        dialogView.addView(stateBadge)
-
-        val waveformView = VoiceWaveformView(this)
-        dialogView.addView(waveformView, LinearLayout.LayoutParams(-1, dp(52)).apply { bottomMargin = dp(12) })
-
-        val transcriptView = TextView(this).apply {
-            textSize = 14f
-            setTextColor(WHITE)
-            setLineSpacing(dp(3).toFloat(), 1f)
-            text = "Say something to start speaking…"
-            setPadding(dp(12), dp(12), dp(12), dp(12))
-            background = shape(0x33000000, 12)
-        }
-        val scroll = ScrollView(this).apply {
-            addView(transcriptView)
-            layoutParams = LinearLayout.LayoutParams(-1, dp(220))
-        }
-        dialogView.addView(scroll, marginBottom(16))
-
-        val btnRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-        }
-        val interruptBtn = Button(this).apply {
-            text = "Interrupt / Next"
-            contentDescription = "Interrupt and listen again"
-            setAllCaps(false)
-            textSize = 13f
-            typeface = Typeface.create("sans-serif", Typeface.BOLD)
-            setTextColor(WHITE)
-            gravity = Gravity.CENTER
-            minHeight = dp(48)
-            minimumHeight = dp(48)
-            setPadding(dp(12), dp(8), dp(12), dp(8))
-            background = rippleDrawable(
-                roundedShape(0x2EFFFFFF, dp(24).toFloat(), maxOf(1, dp(1)), 0x55FFFFFF),
-                palette.rippleOnAccent,
-            )
-            backgroundTintList = null
-            stateListAnimator = null
-            setOnClickListener {
-                performSubtleHaptic(it)
-                duplexController.interrupt()
-            }
-        }
-        btnRow.addView(interruptBtn, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(10) })
-
-        lateinit var dialog: AlertDialog
-
-        val endBtn = Button(this).apply {
-            text = "End Session"
-            contentDescription = "End voice duplex mode"
-            setAllCaps(false)
-            textSize = 13f
-            typeface = Typeface.create("sans-serif", Typeface.BOLD)
-            setTextColor(palette.heroGradientStart)
-            gravity = Gravity.CENTER
-            minHeight = dp(48)
-            minimumHeight = dp(48)
-            setPadding(dp(12), dp(8), dp(12), dp(8))
-            background = rippleDrawable(
-                roundedShape(WHITE, dp(24).toFloat()),
-                palette.rippleOnMint,
-            )
-            backgroundTintList = null
-            stateListAnimator = null
-            setOnClickListener {
-                performSubtleHaptic(it, isConfirm = true)
-                duplexController.stopSession()
-                dialog.dismiss()
-            }
-        }
-        btnRow.addView(endBtn, LinearLayout.LayoutParams(0, -2, 1f))
-        dialogView.addView(btnRow)
-
-        val messageCountBeforeVoice = currentSession?.messages?.size ?: 0
-        dialog = AlertDialog.Builder(this)
-            .setView(dialogView)
-            .setCancelable(false)
-            .create()
-        dialog.setOnDismissListener {
-            waveformView.release()
-            if (duplexController.isActive) duplexController.stopSession()
-            val updatedSess = currentSession
-            if (updatedSess != null && updatedSess.messages.size > messageCountBeforeVoice) {
-                loadSession(updatedSess.id)
-            }
-        }
-        dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
-        dialog.show()
-
-        var duplexUserText = ""
-        val duplexAssistantStream = StringBuilder()
-
-        duplexController.startSession(
+        VoiceAndPrivacyDialogs.showDuplexVoiceDialog(
+            activity = this,
+            palette = palette,
+            duplexController = duplexController,
             whisperContext = whisperContext,
             systemInstruction = SYSTEM_INSTRUCTION,
-            listener = object : DuplexVoiceController.Listener {
-                override fun onStateChanged(state: DuplexVoiceController.DuplexState, statusMessage: String) {
-                    val label = when (state) {
-                        DuplexVoiceController.DuplexState.LISTENING -> "Listening for speech…"
-                        DuplexVoiceController.DuplexState.TRANSCRIBING -> "Transcribing audio locally…"
-                        DuplexVoiceController.DuplexState.GENERATING -> "Thinking on-device…"
-                        DuplexVoiceController.DuplexState.SPEAKING -> "Speaking response…"
-                        DuplexVoiceController.DuplexState.ERROR -> "Error: $statusMessage"
-                        DuplexVoiceController.DuplexState.IDLE -> "Idle"
-                    }
-                    stateBadge.text = label
-                    waveformView.setVoiceState(state)
-                }
-
-                override fun onAmplitude(rms: Float) {
-                    waveformView.setAmplitude(rms)
-                }
-
-                override fun onUserTranscribed(text: String) {
-                    duplexUserText = text
-                    duplexAssistantStream.clear()
-                    transcriptView.text = "You: $text\n\nAssistant: Thinking…"
-                    scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
-                }
-
-                override fun onAssistantChunk(chunk: String) {
-                    duplexAssistantStream.append(chunk)
-                    transcriptView.text = "You: $duplexUserText\n\nAssistant: $duplexAssistantStream"
-                    scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
-                }
-
-                override fun onTurnComplete(userText: String, assistantText: String) {
-                    duplexUserText = userText
-                    duplexAssistantStream.clear()
-                    transcriptView.text = "You: $userText\n\nAssistant: $assistantText"
-                    scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
-
-                    try {
-                        val sess = currentSession ?: ConversationSession.createWithInitialPrompt(userText)
-                        val uMsg = ChatMessage.user(userText)
-                        val aMsg = ChatMessage.assistant(assistantText)
-                        val updated = sess.withMessage(uMsg).withMessage(aMsg)
-                        sessionStore.saveSession(updated)
-                        currentSession = updated
-                    } catch (_: Exception) {}
-                }
-
-                override fun onError(error: Throwable) {
-                    stateBadge.text = "Error: ${error.message}"
-                    waveformView.setVoiceState(DuplexVoiceController.DuplexState.ERROR)
-                    waveformView.setAmplitude(0f)
-                }
-            }
+            isGenerationActive = { isGeneratingUi || engineManager.isGenerationActive },
+            hasActiveModel = { activeModelFile().exists() },
+            onRequestMicPermission = { requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_RECORD_MIC) },
+            getCurrentSession = { currentSession },
+            onSaveTurn = { userText, assistantText ->
+                try {
+                    val base = currentSession ?: ConversationSession.createWithInitialPrompt(userText)
+                    val updated = base.withMessage(ChatMessage.user(userText)).withMessage(ChatMessage.assistant(assistantText))
+                    sessionStore.saveSession(updated)
+                    currentSession = updated
+                } catch (_: Exception) {}
+            },
+            onLoadSession = { loadSession(it) },
         )
     }
 
     private fun showPrivacyCenterDialog() {
-        val permAudit = PrivacyAuditCenter.auditPermissions(this)
-        val storageAudit = PrivacyAuditCenter.auditStorage(filesDir, cacheDir)
-
-        val dialogView = styleDialogContainer(this, palette, paddingDp = 16)
-        val bodyCol = column()
-        val bodyScroll = ScrollView(this).apply {
-            addView(bodyCol)
-        }
-        dialogView.addView(bodyScroll, LinearLayout.LayoutParams(-1, -2))
-
-        var privacyDialog: AlertDialog? = null
-
-        // 1. Appearance (Theme: System / Light / Dark)
-        val currentThemeMode = ThemeMode.fromString(
-            settingsPrefs.getString(UiThemeResolver.PREF_THEME_MODE, null)
-        )
-        val appearanceCard = cardContainer(this, palette, cornerDp = 14, elevated = true, paddingDp = 14)
-        appearanceCard.addView(text("Appearance", 14f, palette.ink, true))
-        appearanceCard.addView(
-            text("Choose Light, Dark, or match your device theme", 11.5f, palette.muted).apply {
-                setPadding(0, dp(2), 0, dp(10))
-            }
-        )
-        val themeSegmentRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        val themeModes = listOf(ThemeMode.SYSTEM, ThemeMode.LIGHT, ThemeMode.DARK)
-        for ((index, mode) in themeModes.withIndex()) {
-            val isSelected = (mode == currentThemeMode)
-            val segBtn = Button(this).apply {
-                text = mode.displayLabel
-                contentDescription = "Set appearance theme to ${mode.displayLabel}"
-                setAllCaps(false)
-                textSize = 12.5f
-                typeface = Typeface.create("sans-serif", Typeface.BOLD)
-                setTextColor(if (isSelected) palette.teal else palette.ink)
-                gravity = Gravity.CENTER
-                minHeight = dp(48)
-                minimumHeight = dp(48)
-                setPadding(dp(8), dp(8), dp(8), dp(8))
-                background = rippleDrawable(
-                    roundedShape(
-                        color = if (isSelected) palette.mint else palette.surface,
-                        radiusPx = dp(14).toFloat(),
-                        strokeWidthPx = maxOf(1, dp(if (isSelected) 2 else 1)),
-                        strokeColor = if (isSelected) palette.teal else palette.border,
-                    ),
-                    if (isSelected) palette.rippleOnMint else palette.rippleOnSurface,
-                )
-                backgroundTintList = null
-                stateListAnimator = null
-                setOnClickListener {
-                    if (engineManager.isGenerationActive || isGeneratingUi) {
-                        Toast.makeText(this@MainActivity, "Stop active generation before switching theme.", Toast.LENGTH_SHORT).show()
-                        return@setOnClickListener
-                    }
-                    settingsPrefs.edit().putString(UiThemeResolver.PREF_THEME_MODE, mode.name).apply()
-                    privacyDialog?.dismiss()
-                    recreate()
-                }
-            }
-            themeSegmentRow.addView(
-                segBtn,
-                LinearLayout.LayoutParams(0, -2, 1f).apply {
-                    if (index < themeModes.lastIndex) marginEnd = dp(6)
-                },
-            )
-        }
-        appearanceCard.addView(themeSegmentRow)
-        bodyCol.addView(appearanceCard, marginBottom(12))
-
-        // 2. Zero-Cloud Telemetry Guarantee Badge
-        val auditCard = column().apply {
-            background = roundedShape(
-                color = palette.successBg,
-                radiusPx = dp(14).toFloat(),
-                strokeWidthPx = maxOf(1, dp(1)),
-                strokeColor = palette.successBorder,
-            )
-            setPadding(dp(14), dp(12), dp(14), dp(12))
-        }
-        auditCard.addView(text("100% Zero-Cloud Guarantee", 14f, palette.successInk, true))
-        auditCard.addView(
-            text(
-                if (permAudit.isZeroCloudCompliant)
-                    "Verified: Hardware-level zero cloud telemetry. PocketAgent does not request or hold 'android.permission.INTERNET'. All audio, documents, and inference run 100% locally on this device."
-                else
-                    "Warning: Non-standard permissions detected.",
-                12f,
-                palette.successInk,
-            ).apply { setPadding(0, dp(4), 0, 0) }
-        )
-        bodyCol.addView(auditCard, marginBottom(12))
-
-        // 3. Storage Audit Card
-        val storageCard = cardContainer(this, palette, cornerDp = 14, elevated = true, paddingDp = 14)
-        storageCard.addView(text("Local Storage Breakdown", 14f, palette.ink, true), marginBottom(8))
-
-        fun addStorageRow(label: String, value: String) {
-            val row = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(0, dp(3), 0, dp(3))
-            }
-            row.addView(text(label, 12f, palette.muted), LinearLayout.LayoutParams(0, -2, 1f))
-            row.addView(text(value, 12f, palette.ink, true))
-            storageCard.addView(row)
-        }
-
-        addStorageRow("AI Models (.litertlm & whisper):", storageAudit.modelDisplay)
-        addStorageRow("Saved Conversations:", storageAudit.sessionsDisplay)
-        addStorageRow("Long-Term Memories:", storageAudit.memoriesDisplay)
-        addStorageRow("Personal Notes:", storageAudit.notesDisplay)
-        addStorageRow("Temporary Cache:", storageAudit.cacheDisplay)
-        addStorageRow("Total Storage Used:", storageAudit.totalDisplay)
-        bodyCol.addView(storageCard, marginBottom(12))
-
-        // 4. Biometric App Lock Row
-        val lockCard = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            background = roundedShape(
-                color = palette.surfaceElevated,
-                radiusPx = dp(14).toFloat(),
-                strokeWidthPx = maxOf(1, dp(1)),
-                strokeColor = palette.border,
-            )
-            setPadding(dp(14), dp(12), dp(14), dp(12))
-        }
-        val lockInfo = column().apply {
-            addView(text("Biometric App Lock", 14f, palette.ink, true))
-            addView(text("Require device credential or biometric on resume", 11.5f, palette.muted))
-        }
-        lockCard.addView(lockInfo, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(8) })
-
-        val lockToggleBtn = com.example.pocketagent.pillButton(
-            context = this,
+        VoiceAndPrivacyDialogs.showPrivacyCenterDialog(
+            activity = this,
             palette = palette,
-            label = if (biometricLockManager.isLockEnabled) "Enabled" else "Disabled",
-            accessibilityLabel = "Toggle biometric app lock",
-            compact = true,
-        ) {}
-        lockToggleBtn.setOnClickListener {
-            val enabling = !biometricLockManager.isLockEnabled
-            if (enabling) {
-                if (!biometricLockManager.canUseBiometrics(this)) {
-                    Toast.makeText(this, "Set a device screen lock or biometric first.", Toast.LENGTH_LONG).show()
-                    return@setOnClickListener
-                }
-                biometricLockManager.setLockEnabled(true)
-                lockToggleBtn.text = "Enabled"
-                privacyDialog?.dismiss()
-                updateLockOverlay()
-                promptBiometricUnlock()
-                Toast.makeText(this, "App lock enabled. Authenticate to continue.", Toast.LENGTH_SHORT).show()
-            } else {
-                biometricLockManager.setLockEnabled(false)
-                lockToggleBtn.text = "Disabled"
-                updateLockOverlay()
-                Toast.makeText(this, "App lock disabled", Toast.LENGTH_SHORT).show()
-            }
-        }
-        lockCard.addView(lockToggleBtn)
-        bodyCol.addView(lockCard, marginBottom(12))
-
-        // 5. Panic Wipe Button
-        val panicBtn = dangerButton(
-            context = this,
-            palette = palette,
-            label = "Panic Wipe All User Data",
-            accessibilityLabel = "Emergency delete all personal data",
-        ) {
-            val wipeDialog = AlertDialog.Builder(this)
-                .setTitle("Panic Data Wipe")
-                .setMessage("This will permanently delete all conversation history, memories, and personal notes on this device. (AI models will be kept).\n\nProceed?")
-                .setPositiveButton("Erase Everything") { _, _ ->
-                    activeProjectId = null
-                    settingsPrefs.edit().remove(PREF_ACTIVE_PROJECT_ID).apply()
-                    PrivacyAuditCenter.wipeAllUserData(filesDir, cacheDir, purgeModels = false)
-                    startNewConversation()
-                    updateWorkspaceSubtitle()
-                    Toast.makeText(this, "All personal data has been erased.", Toast.LENGTH_LONG).show()
-                }
-                .setNegativeButton("Cancel", null)
-                .create()
-            showStyledAlertDialog(wipeDialog, palette)
-        }
-        bodyCol.addView(panicBtn, LinearLayout.LayoutParams(-1, -2))
-
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("Privacy & Appearance")
-            .setView(dialogView)
-            .setPositiveButton("Close", null)
-            .create()
-        privacyDialog = dialog
-        showStyledAlertDialog(dialog, palette)
+            settingsPrefs = settingsPrefs,
+            biometricLockManager = biometricLockManager,
+            isGenerationActive = { isGeneratingUi || engineManager.isGenerationActive },
+            onThemeChanged = { recreate() },
+            onLockStateChanged = { updateLockOverlay() },
+            onPromptBiometricUnlock = { promptBiometricUnlock() },
+            onPanicWipeComplete = {
+                activeProjectId = null
+                settingsPrefs.edit().remove(PREF_ACTIVE_PROJECT_ID).apply()
+                startNewConversation()
+                updateWorkspaceSubtitle()
+            },
+        )
     }
 
     override fun onResume() {
@@ -5287,552 +4086,34 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
 
     private fun showModelManagerDialog() {
         dismissComposerOverlays(hideIme = true)
-        ensureLegacyModelRegistered()
-        val model = activeModelFile()
-        val allModels = modelLibraryStore.loadAll()
-        if ((!model.exists() || model.length() == 0L) && allModels.isEmpty()) {
-            chooseModel()
-            return
-        }
-        val activeEntry = modelLibraryStore.getActive()
-        val modelName = activeEntry?.displayName
-            ?: settingsPrefs.getString(PREF_MODEL_DISPLAY_NAME, null)
-            ?: model.name
-        val sizeStr = if (model.exists()) formatStorageSize(model.length()) else "0 B"
-        val isCpuOnly = engineManager.preference == BackendPreference.CPU_ONLY
-        val runtimeState = when (engineManager.activeBackend) {
-            ActiveBackend.GPU -> "Loaded in RAM (GPU)"
-            ActiveBackend.CPU -> "Loaded in RAM (CPU)"
-            null -> "Stored on disk (standby · 0 RAM)"
-        }
-
-        val dialogView = styleDialogContainer(this, palette, paddingDp = 16)
-        val bodyCol = column()
-        val bodyScroll = ScrollView(this).apply { addView(bodyCol) }
-        dialogView.addView(bodyScroll, LinearLayout.LayoutParams(-1, -2))
-
-        val infoCard = cardContainer(this, palette, cornerDp = 14, elevated = true, paddingDp = 14)
-        infoCard.addView(text(modelName, 15f, palette.ink, true))
-        infoCard.addView(text("Size: $sizeStr  ·  $runtimeState", 12.5f, palette.muted).apply {
-            setPadding(0, dp(4), 0, dp(6))
-        })
-        if (activeEntry != null && activeEntry.tokensPerSecond > 0f) {
-            infoCard.addView(
-                text("Measured Speed: ${activeEntry.tokensPerSecondLabel}", 12f, palette.teal, true).apply {
-                    setPadding(0, 0, 0, dp(6))
-                }
-            )
-        }
-        val diag = ContextContinuityHelper.formatBackendDiagnostic(
-            activeBackend = engineManager.activeBackend,
-            preference = engineManager.preference,
-            lastFallbackReason = engineManager.lastFallbackReason,
-            visionEnabled = isVisionModeEnabled,
-        )
-        infoCard.addView(
-            text(
-                "${diag.headline}\n${diag.tip}",
-                11.5f,
-                if (diag.isCpuFallback) palette.warningInk else palette.muted,
-            ).apply {
-                setPadding(0, 0, 0, dp(6))
-            }
-        )
-        infoCard.addView(
-            text(
-                "Vision towers remain off by default to save RAM unless Omni Vision Mode is enabled below.",
-                11.5f,
-                palette.muted,
-            )
-        )
-        bodyCol.addView(infoCard, marginBottom(12))
-
-        lateinit var dialog: AlertDialog
-
-        // Context Window Meter Card
-        var maxContext = currentMaxContextTokens
-        val usedContext = engineManager.cachedConversationTokens.coerceIn(0, maxContext)
-        val ctxCard = cardContainer(this, palette, cornerDp = 14, elevated = true, paddingDp = 14)
-        val ctxHeaderRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        val ctxTitleView = text("Context Window: $usedContext / $maxContext tok", 13f, palette.ink, true)
-        ctxHeaderRow.addView(ctxTitleView, LinearLayout.LayoutParams(0, -2, 1f))
-        val ctxProgress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
-            max = maxContext
-            progress = usedContext
-            progressTintList = ColorStateList.valueOf(
-                if (usedContext >= ContextBudgetManager.TokenBudget.warmResetThreshold(maxContext)) {
-                    palette.stopCrimson
-                } else {
-                    palette.teal
-                }
-            )
-        }
-        val resetCtxBtn = secondaryOutlineButton(this, palette, "Reset", compact = true, textColor = palette.teal) {
-            engineManager.invalidateConversation("manual context reset")
-            ctxTitleView.text = "Context Window: 0 / $maxContext tok"
-            ctxProgress.progress = 0
-            updateWorkspaceSubtitle()
-            Toast.makeText(this, "Conversation KV cache reset", Toast.LENGTH_SHORT).show()
-        }
-        ctxHeaderRow.addView(resetCtxBtn)
-        ctxCard.addView(ctxHeaderRow, marginBottom(8))
-        ctxCard.addView(ctxProgress, LinearLayout.LayoutParams(-1, dp(8)))
-        bodyCol.addView(ctxCard, marginBottom(12))
-
-        // Generation Settings Card (Temperature, Max Tokens, Vision Mode)
-        val settingsCard = cardContainer(this, palette, cornerDp = 14, elevated = true, paddingDp = 14)
-        settingsCard.addView(text("Generation & Capabilities", 14f, palette.ink, true), marginBottom(8))
-
-        val tempLabel = text(
-            String.format(Locale.US, "Temperature: %.1f (lower = precise, higher = creative)", currentTemperature),
-            12.5f,
-            palette.muted,
-        )
-        settingsCard.addView(tempLabel, marginBottom(4))
-        val tempSeek = SeekBar(this).apply {
-            max = 14 // maps 0..14 -> 0.1..1.5
-            progress = (((currentTemperature - 0.1f) * 10f).toInt()).coerceIn(0, 14)
-            progressTintList = ColorStateList.valueOf(palette.teal)
-            thumbTintList = ColorStateList.valueOf(palette.teal)
-            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                    val temp = (progress + 1) / 10f
-                    tempLabel.text = String.format(Locale.US, "Temperature: %.1f (lower = precise, higher = creative)", temp)
-                    if (fromUser) {
-                        currentTemperature = temp
-                        settingsPrefs.edit().putInt(PREF_TEMPERATURE_BITS, java.lang.Float.floatToIntBits(temp)).apply()
-                        engineManager.updateTemperature(temp)
-                        updateWorkspaceSubtitle()
-                    }
-                }
-                override fun onStartTrackingTouch(seekBar: SeekBar?) {}
-                override fun onStopTrackingTouch(seekBar: SeekBar?) {}
-            })
-        }
-        settingsCard.addView(tempSeek, marginBottom(10))
-
-        fun <T> buildSelectableRow(
-            options: List<Pair<T, String>>,
-            selectedProvider: () -> T,
-            onSelect: (T) -> Unit,
-        ): LinearLayout {
-            val row = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-            }
-            val buttons = mutableListOf<Button>()
-            fun refresh() {
-                val selected = selectedProvider()
-                buttons.forEachIndexed { i, btn ->
-                    val sel = options[i].first == selected
-                    btn.setTextColor(if (sel) palette.teal else palette.ink)
-                    btn.background = rippleDrawable(
-                        roundedShape(
-                            color = if (sel) palette.mint else palette.surface,
-                            radiusPx = dp(12).toFloat(),
-                            strokeWidthPx = maxOf(1, dp(if (sel) 2 else 1)),
-                            strokeColor = if (sel) palette.teal else palette.border,
-                        ),
-                        if (sel) palette.rippleOnMint else palette.rippleOnSurface,
-                    )
-                }
-            }
-            options.forEachIndexed { index, (value, label) ->
-                val btn = Button(this).apply {
-                    text = label
-                    setAllCaps(false)
-                    textSize = 12f
-                    typeface = Typeface.create("sans-serif", Typeface.BOLD)
-                    minHeight = dp(48)
-                    minimumHeight = dp(48)
-                    backgroundTintList = null
-                    stateListAnimator = null
-                    setOnClickListener {
-                        onSelect(value)
-                        refresh()
-                    }
-                }
-                buttons += btn
-                row.addView(
-                    btn,
-                    LinearLayout.LayoutParams(0, -2, 1f).apply {
-                        if (index < options.lastIndex) marginEnd = dp(6)
-                    },
-                )
-            }
-            refresh()
-            return row
-        }
-
-        settingsCard.addView(
-            text("Context Window (8K requires 8K model & 12GB+ RAM)", 12.5f, palette.muted, true),
-            marginBottom(6),
-        )
-        val contextOptions = listOf(
-            2048 to "2048 (Fast)",
-            4096 to "4096",
-            8192 to "8192 (8K)",
-        )
-        val contextRow = buildSelectableRow(
-            options = contextOptions,
-            selectedProvider = { currentMaxContextTokens },
-        ) { nextCtx ->
-            if (engineManager.isGenerationActive || isGeneratingUi) {
-                Toast.makeText(this, "Stop generation first.", Toast.LENGTH_SHORT).show()
-                return@buildSelectableRow
-            }
-            currentMaxContextTokens = nextCtx
-            maxContext = nextCtx
-            settingsPrefs.edit().putInt(PREF_MAX_CONTEXT_TOKENS, nextCtx).apply()
-            inferenceExecutor.execute { engineManager.updateMaxContextTokens(nextCtx) }
-            val clampedUsed = engineManager.cachedConversationTokens.coerceIn(0, nextCtx)
-            ctxProgress.max = nextCtx
-            ctxProgress.progress = clampedUsed
-            ctxTitleView.text = "Context Window: $clampedUsed / $nextCtx tok"
-            updateWorkspaceSubtitle()
-            Toast.makeText(
-                this,
-                if (nextCtx == 8192) "8K context enabled (auto-falls back to 4096 if model limits it)"
-                else "Context window set to $nextCtx tokens",
-                Toast.LENGTH_SHORT,
-            ).show()
-        }
-        settingsCard.addView(contextRow, marginBottom(10))
-
-        settingsCard.addView(text("Max Output Tokens", 12.5f, palette.muted, true), marginBottom(6))
-        val tokenOptions = listOf(256, 512, 1024, 2048).map { it to it.toString() }
-        val tokenRow = buildSelectableRow(
-            options = tokenOptions,
-            selectedProvider = { currentMaxOutputTokens },
-        ) { tok ->
-            currentMaxOutputTokens = tok
-            settingsPrefs.edit().putInt(PREF_MAX_OUTPUT_TOKENS, tok).apply()
-        }
-        settingsCard.addView(tokenRow, marginBottom(10))
-
-        val visionBtn = secondaryOutlineButton(
-            context = this,
+        ModelManagerDialog.show(
+            activity = this,
             palette = palette,
-            label = if (isVisionModeEnabled) "Omni Vision Mode: ON (+ Image)" else "Omni Vision Mode: OFF",
-            accessibilityLabel = "Toggle Omni Vision image input support",
-            textColor = if (isVisionModeEnabled) palette.teal else palette.ink,
-        ) {}
-        visionBtn.setOnClickListener {
-            if (engineManager.isGenerationActive || isGeneratingUi) {
-                Toast.makeText(this, "Stop generation first.", Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
-            }
-            isVisionModeEnabled = !isVisionModeEnabled
-            settingsPrefs.edit().putBoolean(PREF_VISION_ENABLED, isVisionModeEnabled).apply()
-            inferenceExecutor.execute { engineManager.setVisionMode(isVisionModeEnabled) }
-            visionBtn.text = if (isVisionModeEnabled) "Omni Vision Mode: ON (+ Image)" else "Omni Vision Mode: OFF"
-            syncComposerState()
-            updateWorkspaceSubtitle()
-            Toast.makeText(
-                this,
-                if (isVisionModeEnabled) "Vision enabled (Omni models) — + Image available in + tray"
-                else "Vision disabled (text-only saves RAM)",
-                Toast.LENGTH_LONG,
-            ).show()
-        }
-        settingsCard.addView(visionBtn, LinearLayout.LayoutParams(-1, -2))
-        bodyCol.addView(settingsCard, marginBottom(12))
-
-        // Saved Model Library Switcher
-        if (allModels.isNotEmpty()) {
-            bodyCol.addView(text("Model Library (${allModels.size})", 12.5f, palette.muted, true), marginBottom(6))
-            for (entry in allModels) {
-                val isAct = entry.isActive
-                val mCard = LinearLayout(this).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
-                    setPadding(dp(12), dp(10), dp(8), dp(10))
-                    background = roundedShape(
-                        color = if (isAct) palette.mint else palette.surfaceElevated,
-                        radiusPx = dp(14).toFloat(),
-                        strokeWidthPx = maxOf(1, dp(if (isAct) 2 else 1)),
-                        strokeColor = if (isAct) palette.teal else palette.border,
-                    )
-                }
-                val mInfo = column().apply {
-                    addView(text(if (isAct) "✓ ${entry.displayName}" else entry.displayName, 13.5f, if (isAct) palette.teal else palette.ink, true))
-                    addView(text("${entry.sizeLabel}  ·  ${entry.tokensPerSecondLabel}", 11.5f, palette.muted))
-                }
-                mCard.addView(mInfo, LinearLayout.LayoutParams(0, -2, 1f))
-                if (isAct) {
-                    val benchBtn = secondaryOutlineButton(this, palette, "Benchmark", compact = true, textColor = palette.teal) {
-                        if (engineManager.isGenerationActive || isGeneratingUi) {
-                            Toast.makeText(this, "Stop active generation first.", Toast.LENGTH_SHORT).show()
-                            return@secondaryOutlineButton
-                        }
-                        dialog.dismiss()
-                        updateStatus("Benchmarking ${entry.displayName} locally…")
-                        inferenceExecutor.execute {
-                            try {
-                                val benchFile = File(entry.filePath)
-                                ensureEngineInitialized(benchFile)
-                                val conv = engineManager.getOrCreateConversation(
-                                    "benchmark|${benchFile.absolutePath}",
-                                    "Respond concisely.",
-                                )
-                                val startMs = SystemClock.elapsedRealtime()
-                                val latch = CountDownLatch(1)
-                                val sb = StringBuilder()
-                                val benchErr = AtomicReference<Throwable?>(null)
-                                var firstMs: Long? = null
-                                conv.sendMessage(
-                                    "Count cleanly from 1 to 20 separated by commas.",
-                                    object : MessageCallback {
-                                        override fun onMessage(message: Message) {
-                                            if (firstMs == null) firstMs = SystemClock.elapsedRealtime()
-                                            sb.append(message.toString())
-                                        }
-                                        override fun onDone() { latch.countDown() }
-                                        override fun onError(throwable: Throwable) {
-                                            benchErr.set(throwable)
-                                            latch.countDown()
-                                        }
-                                    },
-                                    maxOutputTokens = 64,
-                                )
-                                latch.await(60, TimeUnit.SECONDS)
-                                val endMs = SystemClock.elapsedRealtime()
-                                val err = benchErr.get()
-                                if (err != null) throw err
-                                val decodeMs = (endMs - (firstMs ?: startMs)).coerceAtLeast(250L)
-                                val tokens = (sb.length / 4.0f).coerceAtLeast(1f)
-                                val tokPerSec = (tokens * 1000.0f) / decodeMs
-                                modelLibraryStore.updateBenchmark(entry.id, tokPerSec)
-                                engineManager.invalidateConversation("post-benchmark")
-                                mainHandler.post {
-                                    updateStatus(
-                                        String.format(
-                                            Locale.US,
-                                            "Benchmark complete: ${entry.displayName} · %.1f tok/s",
-                                            tokPerSec,
-                                        )
-                                    )
-                                    Toast.makeText(
-                                        this,
-                                        String.format(Locale.US, "%.1f tok/s", tokPerSec),
-                                        Toast.LENGTH_SHORT,
-                                    ).show()
-                                }
-                            } catch (e: Exception) {
-                                mainHandler.post {
-                                    updateStatus("Benchmark failed: ${e.message ?: "unknown error"}")
-                                }
-                            }
-                        }
-                    }
-                    mCard.addView(benchBtn)
-                } else {
-                    val useBtn = com.example.pocketagent.pillButton(this, palette, "Use", compact = true) {
-                        if (engineManager.isGenerationActive || isGeneratingUi) {
-                            Toast.makeText(this, "Stop generation before switching models.", Toast.LENGTH_SHORT).show()
-                            return@pillButton
-                        }
-                        modelLibraryStore.setActive(entry.id)
-                        settingsPrefs.edit().putString(PREF_MODEL_DISPLAY_NAME, entry.displayName).apply()
-                        dialog.dismiss()
-                        inferenceExecutor.execute {
-                            engineManager.close()
-                            mainHandler.post {
-                                refreshModelStatus()
-                                updateStatus("Switched active model to ${entry.displayName}.")
-                            }
-                        }
-                    }
-                    mCard.addView(useBtn, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(4) })
-                    val delEntryBtn = iconTouchButton(this, palette, "✕", "Delete ${entry.displayName}", palette.muted, 15f) {
-                        dialog.dismiss()
-                        val targetFile = File(entry.filePath)
-                        if (targetFile.parentFile?.parentFile == ModelLibraryStore.defaultDir(filesDir)) {
-                            targetFile.parentFile?.deleteRecursively()
-                        } else if (targetFile.name != ModelFileStore.MODEL_FILE_NAME) {
-                            targetFile.delete()
-                        }
-                        modelLibraryStore.remove(entry.id)
-                        refreshModelStatus()
-                        showModelManagerDialog()
-                    }
-                    mCard.addView(delEntryBtn)
-                }
-                bodyCol.addView(mCard, marginBottom(8))
-            }
-        }
-
-        bodyCol.addView(text("Inference Backend", 12.5f, palette.muted, true), marginBottom(6))
-
-        fun switchBackendPreference(next: BackendPreference) {
-            if (engineManager.preference == next) return
-            if (engineManager.isGenerationActive || isGeneratingUi) {
-                Toast.makeText(this, "Stop generation before changing backend.", Toast.LENGTH_SHORT).show()
-                return
-            }
-            settingsPrefs.edit()
-                .putString(PREF_BACKEND_MODE, next.name)
-                .putBoolean(PREF_GPU_LOADING_GUARD, false)
-                .apply()
-            dialog.dismiss()
-            updateStatus("Switching backend to ${if (next == BackendPreference.CPU_ONLY) "CPU Only" else "GPU (auto fallback)"}…")
-            inferenceExecutor.execute {
-                engineManager.switchBackend(next)
-                mainHandler.post {
-                    refreshModelStatus()
-                    updateStatus("Backend set to ${if (next == BackendPreference.CPU_ONLY) "CPU Only" else "GPU (auto fallback)"}. Ready for your next question.")
-                }
-            }
-        }
-
-        fun buildBackendCard(
-            title: String,
-            subtitle: String,
-            selected: Boolean,
-            onSelect: () -> Unit,
-        ): LinearLayout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            minimumHeight = dp(48)
-            setPadding(dp(14), dp(10), dp(14), dp(10))
-            background = rippleDrawable(
-                roundedShape(
-                    color = if (selected) palette.mint else palette.surface,
-                    radiusPx = dp(14).toFloat(),
-                    strokeWidthPx = maxOf(1, dp(if (selected) 2 else 1)),
-                    strokeColor = if (selected) palette.teal else palette.border,
-                ),
-                if (selected) palette.rippleOnMint else palette.rippleOnSurface,
-            )
-            isClickable = true
-            isFocusable = true
-            contentDescription = "$title. $subtitle"
-            addView(
-                text(
-                    if (selected) "✓ $title" else title,
-                    13.5f,
-                    if (selected) palette.teal else palette.ink,
-                    true,
-                )
-            )
-            addView(text(subtitle, 11.5f, palette.muted).apply {
-                setPadding(0, dp(2), 0, 0)
-            })
-            setOnClickListener { onSelect() }
-        }
-
-        val backendRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        backendRow.addView(
-            buildBackendCard(
-                title = "GPU + Auto Fallback",
-                subtitle = "Fastest when supported",
-                selected = !isCpuOnly,
-            ) { switchBackendPreference(BackendPreference.GPU_PREFERRED) },
-            LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(8) },
+            settingsPrefs = settingsPrefs,
+            engineManager = engineManager,
+            modelLibraryStore = modelLibraryStore,
+            inferenceExecutor = inferenceExecutor,
+            mainHandler = mainHandler,
+            cacheDir = cacheDir,
+            getTemperature = { currentTemperature },
+            setTemperature = { currentTemperature = it },
+            getMaxContextTokens = { currentMaxContextTokens },
+            setMaxContextTokens = { currentMaxContextTokens = it },
+            getMaxOutputTokens = { currentMaxOutputTokens },
+            setMaxOutputTokens = { currentMaxOutputTokens = it },
+            getVisionModeEnabled = { isVisionModeEnabled },
+            setVisionModeEnabled = { isVisionModeEnabled = it },
+            isGenerating = { engineManager.isGenerationActive || isGeneratingUi },
+            activeModelFile = { activeModelFile() },
+            formatStorageSize = { formatStorageSize(it) },
+            onEnsureLegacyModelRegistered = { ensureLegacyModelRegistered() },
+            onEnsureEngineInitialized = { ensureEngineInitialized(it) },
+            onChooseModel = { chooseModel() },
+            onRefreshStatus = { refreshModelStatus() },
+            onUpdateSubtitle = { updateWorkspaceSubtitle() },
+            onSyncComposer = { syncComposerState() },
+            onUpdateStatus = { updateStatus(it) },
         )
-        backendRow.addView(
-            buildBackendCard(
-                title = "CPU Only",
-                subtitle = "Maximum compatibility",
-                selected = isCpuOnly,
-            ) { switchBackendPreference(BackendPreference.CPU_ONLY) },
-            LinearLayout.LayoutParams(0, -2, 1f),
-        )
-        bodyCol.addView(backendRow, marginBottom(12))
-
-        bodyCol.addView(
-            secondaryOutlineButton(
-                context = this,
-                palette = palette,
-                label = "Unload Model from RAM (Keep File)",
-                accessibilityLabel = "Release model memory from RAM",
-            ) {
-                if (engineManager.isGenerationActive || isGeneratingUi) {
-                    Toast.makeText(this, "Stop generation before unloading model.", Toast.LENGTH_SHORT).show()
-                    return@secondaryOutlineButton
-                }
-                dialog.dismiss()
-                inferenceExecutor.execute {
-                    engineManager.close()
-                    mainHandler.post {
-                        refreshModelStatus()
-                        updateStatus("Model unloaded from RAM ($sizeStr file kept on disk). Will reload on next prompt.")
-                    }
-                }
-            },
-            marginBottom(8),
-        )
-
-        bodyCol.addView(
-            pillButton("+ Import Another .litertlm Model", accessibilityLabel = "Pick a LiteRT-LM model file to add to library") {
-                dialog.dismiss()
-                chooseModel()
-            },
-            marginBottom(8),
-        )
-
-        bodyCol.addView(
-            dangerButton(
-                context = this,
-                palette = palette,
-                label = "Remove Stored Model ($sizeStr)",
-                accessibilityLabel = "Delete stored model file to free space",
-            ) {
-                if (engineManager.isGenerationActive || isGeneratingUi) {
-                    Toast.makeText(this, "Stop generation before removing model.", Toast.LENGTH_SHORT).show()
-                    return@dangerButton
-                }
-                dialog.dismiss()
-                val confirmDialog = AlertDialog.Builder(this)
-                    .setTitle("Remove Local Model?")
-                    .setMessage("Delete $modelName ($sizeStr) from app private storage to free disk space?")
-                    .setPositiveButton("Remove") { _, _ ->
-                        inferenceExecutor.execute {
-                            engineManager.close()
-                            val activeFile = activeModelFile()
-                            if (activeFile.parentFile?.parentFile == ModelLibraryStore.defaultDir(filesDir)) {
-                                activeFile.parentFile?.deleteRecursively()
-                            } else {
-                                ModelFileStore(filesDir).removeStoredModel()
-                            }
-                            activeEntry?.let { modelLibraryStore.remove(it.id) }
-                            val fallbackNext = modelLibraryStore.loadAll().firstOrNull()
-                            if (fallbackNext != null) {
-                                modelLibraryStore.setActive(fallbackNext.id)
-                            }
-                            ModelFileStore.clearEngineCaches(cacheDir)
-                            settingsPrefs.edit()
-                                .apply {
-                                    if (fallbackNext != null) putString(PREF_MODEL_DISPLAY_NAME, fallbackNext.displayName)
-                                    else remove(PREF_MODEL_DISPLAY_NAME)
-                                }
-                                .putBoolean(PREF_GPU_LOADING_GUARD, false)
-                                .apply()
-                            mainHandler.post {
-                                refreshModelStatus()
-                                syncComposerState()
-                                updateStatus("Stored model removed. Freed $sizeStr.")
-                            }
-                        }
-                    }
-                    .setNegativeButton("Cancel", null)
-                    .create()
-                showStyledAlertDialog(confirmDialog, palette)
-            },
-            LinearLayout.LayoutParams(-1, -2),
-        )
-
-        dialog = AlertDialog.Builder(this)
-            .setTitle("Local Model & Engine")
-            .setView(dialogView)
-            .setNegativeButton("Close", null)
-            .create()
-        showStyledAlertDialog(dialog, palette)
     }
 
     private fun cleanupStagedInputFiles() {

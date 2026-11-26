@@ -391,13 +391,16 @@ class ClaudeSlideDrawer(
             layoutParams = LinearLayout.LayoutParams(0, 0, 1f)
         }
 
-        val closeBtn = iconTouchButton(
+        val closeBtn = vectorIconButton(
             context = context,
             palette = palette,
-            iconText = "✕",
+            drawableRes = R.drawable.ic_close,
             accessibilityLabel = "Close navigation drawer",
-            textColor = palette.muted,
-            textSizeSp = 16f,
+            tintColor = palette.muted,
+            bgColor = Color.TRANSPARENT,
+            borderColor = null,
+            sizeDp = 48,
+            iconSizeDp = 20,
         ) {
             performSubtleHaptic(panelView)
             close()

@@ -1,5 +1,7 @@
 package com.example.pocketagent
 
+import android.animation.ObjectAnimator
+import android.animation.ValueAnimator
 import android.app.AlertDialog
 import android.content.Context
 import android.graphics.Color
@@ -166,9 +168,11 @@ class ActiveAssistantCardHandle(
     private val palette: UiPalette,
     private val callbacks: AssistantTurnCallbacks,
     initialLatest: Boolean = false,
+    val thinkingDotsRow: LinearLayout? = null,
 ) {
     private var fullMarkdown: String = ""
     private var isCollapsed: Boolean = false
+    private val thinkingAnimators = mutableListOf<ObjectAnimator>()
     var latestActionsEnabled: Boolean = initialLatest
 
     init {
@@ -178,6 +182,52 @@ class ActiveAssistantCardHandle(
             TransitionManager.beginDelayedTransition(rootCard)
             isCollapsed = !isCollapsed
             renderCurrentMarkdownState()
+        }
+        thinkingDotsRow?.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(v: View) {
+                if (v.visibility == View.VISIBLE) {
+                    startThinkingPulse()
+                }
+            }
+
+            override fun onViewDetachedFromWindow(v: View) {
+                stopThinkingPulse()
+            }
+        })
+        if (thinkingDotsRow?.visibility == View.VISIBLE) {
+            startThinkingPulse()
+        }
+    }
+
+    private fun startThinkingPulse() {
+        val row = thinkingDotsRow ?: return
+        if (thinkingAnimators.isNotEmpty()) return
+        for (i in 0 until row.childCount) {
+            val dot = row.getChildAt(i)
+            val anim = ObjectAnimator.ofFloat(dot, View.ALPHA, 0.25f, 1.0f).apply {
+                duration = 550L
+                startDelay = i * 160L
+                repeatCount = ValueAnimator.INFINITE
+                repeatMode = ValueAnimator.REVERSE
+                start()
+            }
+            thinkingAnimators += anim
+        }
+    }
+
+    private fun stopThinkingPulse() {
+        thinkingAnimators.forEach { it.cancel() }
+        thinkingAnimators.clear()
+    }
+
+    private fun updateThinkingVisibility(hasContent: Boolean) {
+        val row = thinkingDotsRow ?: return
+        if (hasContent) {
+            stopThinkingPulse()
+            row.visibility = View.GONE
+        } else {
+            row.visibility = View.VISIBLE
+            startThinkingPulse()
         }
     }
 
@@ -194,6 +244,7 @@ class ActiveAssistantCardHandle(
         actionsContainer.visibility = View.GONE
         followUpContainer.visibility = View.GONE
         followUpRow.removeAllViews()
+        updateThinkingVisibility(hasContent = plainText.isNotEmpty())
 
         if (!plainText.contains("```") && !plainText.contains("<think>")) {
             liveStreamContainer.visibility = View.GONE
@@ -276,6 +327,7 @@ class ActiveAssistantCardHandle(
         streamingTextView.visibility = View.GONE
         liveStreamContainer.visibility = View.GONE
         liveStreamContainer.removeAllViews()
+        updateThinkingVisibility(hasContent = markdown.isNotBlank())
         richMarkdownContainer.visibility = if (markdown.isNotBlank()) View.VISIBLE else View.GONE
 
         renderCurrentMarkdownState()
@@ -425,14 +477,25 @@ class ActiveAssistantCardHandle(
                 addView(evidenceText)
             }
 
+            fun chevronDrawable(expandedState: Boolean) = tintedVectorDrawable(
+                context = context,
+                drawableRes = if (expandedState) R.drawable.ic_chevron_down else R.drawable.ic_chevron_right,
+                tintColor = palette.teal,
+            )?.apply {
+                val iconSize = dp(context, 16)
+                setBounds(0, 0, iconSize, iconSize)
+            }
+
             val toggleView = Button(context).apply {
-                text = "Sources & Tools ▸"
+                text = "Sources & Tools"
                 contentDescription = "Toggle sources and tools evidence"
                 setAllCaps(false)
                 textSize = 12f
                 typeface = Typeface.create("sans-serif", Typeface.BOLD)
                 setTextColor(palette.teal)
                 gravity = Gravity.START or Gravity.CENTER_VERTICAL
+                compoundDrawablePadding = dp(context, 4)
+                setCompoundDrawablesRelative(null, null, chevronDrawable(false), null)
                 minHeight = minTouch
                 minimumHeight = minTouch
                 background = InsetDrawable(
@@ -464,7 +527,7 @@ class ActiveAssistantCardHandle(
                     performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                     expanded = !expanded
                     TransitionManager.beginDelayedTransition(rootCard)
-                    text = if (expanded) "Sources & Tools ▾" else "Sources & Tools ▸"
+                    setCompoundDrawablesRelative(null, null, chevronDrawable(expanded), null)
                     evidencePanel.visibility = if (expanded) View.VISIBLE else View.GONE
                 }
             }
@@ -485,7 +548,7 @@ class ActiveAssistantCardHandle(
         }
         // Save to Notes is always available
         val saveToNotesAction: () -> Unit = { callbacks.onSaveToNotes(fullMarkdown) }
-        items += Triple("\uD83D\uDCDD Save to Notes", "Save this answer to personal notes", saveToNotesAction)
+        items += Triple("Save to Notes", "Save this answer to personal notes", saveToNotesAction)
 
         val container = styleDialogContainer(context, palette, paddingDp = 16)
         val titleView = styledText(
@@ -841,26 +904,21 @@ object ChatMessageCardBuilder {
             metaRow.addView(tsView)
         }
         if (message.content.isNotBlank()) {
-            val editLabel = TextView(context).apply {
-                text = "✎ Edit"
-                contentDescription = "Edit previous prompt"
-                textSize = 11.5f
-                setTextColor(palette.teal)
-                typeface = Typeface.create("sans-serif", Typeface.BOLD)
-                minWidth = dp(context, 48)
-                minimumWidth = dp(context, 48)
-                minHeight = dp(context, 48)
-                minimumHeight = dp(context, 48)
-                gravity = Gravity.END or Gravity.CENTER_VERTICAL
-                setPadding(dp(context, 8), dp(context, 4), dp(context, 2), dp(context, 4))
-                isClickable = true
-                isFocusable = true
-                setOnClickListener {
-                    performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                    callbacks.onEditPrompt(message.content)
-                }
+            val editButton = vectorIconButton(
+                context = context,
+                palette = palette,
+                drawableRes = R.drawable.ic_edit,
+                accessibilityLabel = "Edit previous prompt",
+                tintColor = palette.teal,
+                bgColor = Color.TRANSPARENT,
+                borderColor = null,
+                sizeDp = 48,
+                iconSizeDp = 20,
+            ) {
+                performSubtleHaptic(metaRow)
+                callbacks.onEditPrompt(message.content)
             }
-            metaRow.addView(editLabel)
+            metaRow.addView(editButton)
         }
         if (metaRow.childCount > 0) {
             bubble.addView(metaRow)
@@ -968,6 +1026,32 @@ object ChatMessageCardBuilder {
         }
         rootCard.addView(toolTraceContainer)
 
+        val thinkingDotsRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            contentDescription = "Thinking"
+            visibility = if (message == null || message.content.isBlank()) View.VISIBLE else View.GONE
+            setPadding(0, dp(context, 4), 0, dp(context, 4))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply {
+                topMargin = dp(context, 10)
+            }
+            val pulseDotSize = dp(context, 6)
+            for (i in 0 until 3) {
+                val dot = View(context).apply {
+                    background = roundedShape(palette.teal, (pulseDotSize / 2f))
+                    alpha = 0.35f
+                    layoutParams = LinearLayout.LayoutParams(pulseDotSize, pulseDotSize).apply {
+                        if (i < 2) marginEnd = dp(context, 6)
+                    }
+                }
+                addView(dot)
+            }
+        }
+        rootCard.addView(thinkingDotsRow)
+
         val streamingTextView = TextView(context).apply {
             textSize = 15f
             setTextColor(palette.ink)
@@ -1060,67 +1144,36 @@ object ChatMessageCardBuilder {
         val latestOnlyViews = mutableListOf<View>()
         var handleRef: ActiveAssistantCardHandle? = null
 
-        fun buildCompactActionButton(
-            label: String,
-            accessibilityLabel: String,
-            textColor: Int = palette.muted,
-            onClick: () -> Unit,
-        ): Button = Button(context).apply {
-            val minTouch = dp(context, 48)
-            val vInset = dp(context, 6)
-            text = label
-            contentDescription = accessibilityLabel
-            setAllCaps(false)
-            textSize = 11.5f
-            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-            setTextColor(textColor)
-            gravity = Gravity.CENTER
-            minHeight = minTouch
-            minimumHeight = minTouch
-            minWidth = minTouch
-            minimumWidth = minTouch
-            background = InsetDrawable(
-                rippleDrawable(
-                    roundedShape(Color.TRANSPARENT, dp(context, 10).toFloat()),
-                    palette.rippleOnSurface,
-                ),
-                0,
-                vInset,
-                0,
-                vInset,
-            )
-            setPadding(dp(context, 10), dp(context, 8), dp(context, 10), dp(context, 8))
-            backgroundTintList = null
-            stateListAnimator = null
-            isFocusable = true
-            setOnClickListener {
-                performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                onClick()
-            }
-        }
-
         val openMoreMenu: () -> Unit = { handleRef?.showMoreActionsDialog() }
-        val compactSpecs = listOf(
-            Triple("Copy", "Copy answer", callbacks.onCopyAnswer) to false,
-            Triple("Speak", "Read answer aloud", callbacks.onSpeakAnswer) to false,
-            Triple("Regenerate", "Regenerate answer", callbacks.onRegenerate) to true,
-            Triple("More ▾", "More answer actions", openMoreMenu) to false,
+        val actionSpecs = listOf(
+            Triple(R.drawable.ic_copy, "Copy answer", callbacks.onCopyAnswer) to false,
+            Triple(R.drawable.ic_voice, "Read answer aloud", callbacks.onSpeakAnswer) to false,
+            Triple(R.drawable.ic_retry, "Regenerate answer", callbacks.onRegenerate) to true,
+            Triple(R.drawable.ic_more, "More answer actions", openMoreMenu) to false,
         )
-        for ((index, pair) in compactSpecs.withIndex()) {
+        for ((index, pair) in actionSpecs.withIndex()) {
             val (spec, latestOnly) = pair
-            val (label, a11y, action) = spec
-            val btn = buildCompactActionButton(
-                label = label,
+            val (drawableRes, a11y, action) = spec
+            val btn = vectorIconButton(
+                context = context,
+                palette = palette,
+                drawableRes = drawableRes,
                 accessibilityLabel = a11y,
-                textColor = if (label == "More ▾") palette.teal else palette.muted,
-                onClick = action,
-            ).apply {
+                tintColor = palette.muted,
+                bgColor = Color.TRANSPARENT,
+                borderColor = null,
+                sizeDp = 48,
+                iconSizeDp = 20,
+            ) {
+                performSubtleHaptic(actionsStrip)
+                action()
+            }.apply {
                 if (latestOnly && !isLatest) visibility = View.GONE
                 layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    dp(context, 48),
+                    dp(context, 48),
                 ).apply {
-                    if (index < compactSpecs.lastIndex) {
+                    if (index < actionSpecs.lastIndex) {
                         marginEnd = dp(context, 4)
                     }
                 }
@@ -1181,6 +1234,7 @@ object ChatMessageCardBuilder {
             palette = palette,
             callbacks = callbacks,
             initialLatest = isLatest,
+            thinkingDotsRow = thinkingDotsRow,
         )
         handleRef = handle
 

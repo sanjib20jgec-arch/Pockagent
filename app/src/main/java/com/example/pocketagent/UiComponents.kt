@@ -7,6 +7,7 @@ import android.content.DialogInterface
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
@@ -14,7 +15,10 @@ import android.os.Build
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.View
+import android.view.ViewGroup
+import android.view.WindowInsets
 import android.view.WindowInsetsController
+import android.view.animation.DecelerateInterpolator
 import android.widget.Button
 import android.widget.EditText
 import android.widget.ImageButton
@@ -358,6 +362,90 @@ fun showStyledAlertDialog(dialog: AlertDialog, palette: UiPalette) {
         setAllCaps(false)
         typeface = Typeface.create("sans-serif", Typeface.BOLD)
     }
+}
+
+/**
+ * Wraps [content] in a bottom-anchored [AlertDialog] styled with `22dp` rounded top corners,
+ * a centered `36dp × 4dp` drag handle pill, slide-up entrance motion, and safe `navigationBar`
+ * bottom inset padding.
+ */
+fun showBottomSheetDialog(
+    context: Context,
+    palette: UiPalette,
+    content: LinearLayout,
+): AlertDialog {
+    val topRadiusPx = dp(context, 22).toFloat()
+    val hPad = dp(context, 20)
+    val topPad = dp(context, 12)
+    val baseBottomPad = dp(context, 20)
+
+    val sheetBackground = GradientDrawable().apply {
+        setColor(palette.surface)
+        cornerRadii = floatArrayOf(
+            topRadiusPx, topRadiusPx,
+            topRadiusPx, topRadiusPx,
+            0f, 0f,
+            0f, 0f,
+        )
+        setStroke(maxOf(1, dp(context, 1)), palette.border)
+    }
+
+    val dragHandle = View(context).apply {
+        background = roundedShape(palette.border, dp(context, 2).toFloat())
+        layoutParams = LinearLayout.LayoutParams(dp(context, 36), dp(context, 4)).apply {
+            gravity = Gravity.CENTER_HORIZONTAL
+            bottomMargin = dp(context, 14)
+        }
+    }
+
+    (content.parent as? ViewGroup)?.removeView(content)
+    val sheetContainer = LinearLayout(context).apply {
+        orientation = LinearLayout.VERTICAL
+        background = sheetBackground
+        setPadding(hPad, topPad, hPad, baseBottomPad)
+        setOnApplyWindowInsetsListener { view, insets ->
+            val navBottom = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                insets.getInsets(WindowInsets.Type.navigationBars()).bottom
+            } else {
+                @Suppress("DEPRECATION")
+                insets.systemWindowInsetBottom
+            }
+            view.setPadding(hPad, topPad, hPad, baseBottomPad + navBottom)
+            insets
+        }
+        addView(dragHandle)
+        addView(
+            content,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ),
+        )
+    }
+
+    val dialog = AlertDialog.Builder(context)
+        .setView(sheetContainer)
+        .create()
+
+    dialog.show()
+    dialog.window?.apply {
+        setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+        setGravity(Gravity.BOTTOM)
+        setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        setDimAmount(0.45f)
+    }
+
+    sheetContainer.requestApplyInsets()
+    sheetContainer.translationY = dp(context, 48).toFloat()
+    sheetContainer.alpha = 0f
+    sheetContainer.animate()
+        .translationY(0f)
+        .alpha(1f)
+        .setDuration(220L)
+        .setInterpolator(DecelerateInterpolator())
+        .start()
+
+    return dialog
 }
 
 /**

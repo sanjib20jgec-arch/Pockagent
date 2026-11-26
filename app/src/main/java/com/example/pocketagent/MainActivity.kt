@@ -1511,6 +1511,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             return
         }
         slashPopupContainer.removeAllViews()
+        val listHost = column()
         for ((index, cmd) in matches.withIndex()) {
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -1545,11 +1546,17 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 },
                 LinearLayout.LayoutParams(0, -2, 1f),
             )
-            slashPopupContainer.addView(row)
+            listHost.addView(row)
             if (index < matches.lastIndex) {
-                slashPopupContainer.addView(dividerView(this, palette))
+                listHost.addView(dividerView(this, palette))
             }
         }
+        val scroll = ScrollView(this).apply {
+            overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+            addView(listHost)
+        }
+        val maxHeightPx = if (matches.size > 4) dp(220) else LinearLayout.LayoutParams.WRAP_CONTENT
+        slashPopupContainer.addView(scroll, LinearLayout.LayoutParams(-1, maxHeightPx))
         slashPopupContainer.visibility = View.VISIBLE
     }
 

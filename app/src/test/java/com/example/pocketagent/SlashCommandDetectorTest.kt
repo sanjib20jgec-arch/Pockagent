@@ -57,4 +57,19 @@ class SlashCommandDetectorTest {
             assertTrue(cmd.systemPromptPrefix.isNotBlank())
         }
     }
+
+    @Test fun `superpowers playbooks are registered and detected case-insensitively`() {
+        val expected = listOf("/brainstorm", "/plan", "/debug", "/review", "/verify")
+        expected.forEach { trigger ->
+            val detected = SlashCommandDetector.detectCommand("$trigger my task")
+            assertNotNull("Expected $trigger to be detected", detected)
+            assertEquals(trigger, detected!!.trigger)
+
+            val upperDetected = SlashCommandDetector.detectCommand("${trigger.uppercase()} my task")
+            assertNotNull("Expected uppercase $trigger to be detected", upperDetected)
+            assertEquals("my task", SlashCommandDetector.stripCommand("${trigger.uppercase()} my task", upperDetected!!))
+        }
+        assertTrue(SlashCommandDetector.getSuggestions("/de").any { it.trigger == "/debug" })
+        assertTrue(SlashCommandDetector.getSuggestions("/ver").any { it.trigger == "/verify" })
+    }
 }

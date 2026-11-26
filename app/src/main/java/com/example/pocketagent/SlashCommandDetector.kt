@@ -52,14 +52,45 @@ object SlashCommandDetector {
             description = "List pros and cons",
             systemPromptPrefix = "List the pros and cons in a clear two-column format with \u2705 for pros and \u274C for cons.",
         ),
+        SlashCommand(
+            trigger = "/brainstorm",
+            displayName = "Brainstorm",
+            description = "Clarify intent & edge cases before solving",
+            systemPromptPrefix = "Superpowers Brainstorming Playbook: Do NOT jump to a final solution yet. First: (1) restate the goal in 1 sentence, (2) list key assumptions or edge cases, (3) ask 2-3 focused clarifying questions with recommended defaults.",
+        ),
+        SlashCommand(
+            trigger = "/plan",
+            displayName = "Plan",
+            description = "Break work into atomic verifiable steps",
+            systemPromptPrefix = "Superpowers Planning Playbook: Produce a structured implementation plan with small, atomic steps ordered by dependency. For each step include Goal, Exact Scope, and Verification Check.",
+        ),
+        SlashCommand(
+            trigger = "/debug",
+            displayName = "Debug",
+            description = "4-phase root-cause analysis (no guessing)",
+            systemPromptPrefix = "Superpowers Systematic Debugging Playbook: Follow 4 strict phases before proposing a fix: 1) Symptoms & Reproduction, 2) Isolation, 3) Root Cause Hypothesis (explain why), 4) Minimal Fix & Verification check. Never guess blindly.",
+        ),
+        SlashCommand(
+            trigger = "/review",
+            displayName = "Code Review",
+            description = "Audit code for bugs, security & edge cases",
+            systemPromptPrefix = "Superpowers Code Review Playbook: Audit the provided code or design strictly for: 1) Correctness & Edge Cases, 2) Security/Privacy risks, 3) Duplication or Maintainability. Cite specific symbols and rate severity (High/Med/Low).",
+        ),
+        SlashCommand(
+            trigger = "/verify",
+            displayName = "Verify",
+            description = "Pre-completion checklist & assumption audit",
+            systemPromptPrefix = "Superpowers Verification Playbook: Audit the output or claim against original requirements: list what is verified, what remains untested or inferred, and any remaining gaps or risks. Never claim pass without evidence.",
+        ),
     )
 
     fun detectCommand(text: String): SlashCommand? {
         val trimmed = text.trimStart()
         if (!trimmed.startsWith("/")) return null
+        val lower = trimmed.lowercase()
         return ALL_COMMANDS.firstOrNull { cmd ->
-            trimmed.startsWith(cmd.trigger) &&
-            (trimmed.length == cmd.trigger.length || trimmed[cmd.trigger.length] == ' ')
+            lower.startsWith(cmd.trigger) &&
+            (lower.length == cmd.trigger.length || lower[cmd.trigger.length] == ' ')
         }
     }
 
@@ -74,8 +105,8 @@ object SlashCommandDetector {
 
     fun stripCommand(text: String, command: SlashCommand): String {
         val trimmed = text.trimStart()
-        return if (trimmed.startsWith(command.trigger)) {
-            trimmed.removePrefix(command.trigger).trimStart()
+        return if (trimmed.lowercase().startsWith(command.trigger)) {
+            trimmed.drop(command.trigger.length).trimStart()
         } else trimmed
     }
 

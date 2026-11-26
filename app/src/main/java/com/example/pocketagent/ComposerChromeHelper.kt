@@ -31,6 +31,15 @@ data class ModelBadgeState(
     val tone: ModelStatusTone,
 )
 
+/** Formatted labels for the always-visible quick-mode bar above the composer. */
+data class QuickModeBarLabels(
+    val projectChipLabel: String,
+    val agentChipLabel: String,
+    val slashChipLabel: String,
+    val tuningChipLabel: String,
+    val vaultChipLabel: String,
+)
+
 /**
  * Pure-Kotlin formatting and badge-state helpers for composer and top-bar chrome.
  * Separated from Android View classes so all formatting rules execute on JVM 17 without mocks.
@@ -38,6 +47,38 @@ data class ModelBadgeState(
 object ComposerChromeHelper {
     private const val MODEL_EXTENSION = ".litertlm"
     private const val MAX_MODEL_SHORT_LEN = 14
+    private const val MAX_PROJECT_SHORT_LEN = 14
+
+    /** Builds concise, deterministic pill labels for the always-visible composer quick-mode bar. */
+    fun formatQuickModeLabels(
+        projectName: String?,
+        isAgentEnabled: Boolean,
+        temperature: Float,
+        contextUsedTokens: Int,
+        contextMaxTokens: Int,
+        docCount: Int,
+        artifactCount: Int,
+    ): QuickModeBarLabels {
+        val cleanProject = projectName?.trim()?.takeIf { it.isNotEmpty() } ?: "Default"
+        val shortProject = truncateWithEllipsis(cleanProject, MAX_PROJECT_SHORT_LEN)
+        val agentLabel = if (isAgentEnabled) "● Agent: ON" else "Agent: OFF"
+        val safeTemp = temperature.takeIf { !it.isNaN() }?.coerceIn(0.1f, 1.5f) ?: 0.8f
+        val ctxPct = if (contextUsedTokens <= 0 || contextMaxTokens <= 0) {
+            0
+        } else {
+            ((contextUsedTokens.toLong() * 100L) / contextMaxTokens.toLong()).toInt().coerceIn(1, 100)
+        }
+        val tuningLabel = String.format(Locale.US, "Temp %.1f · %d%% ctx", safeTemp, ctxPct)
+        val totalVaultItems = docCount.coerceAtLeast(0) + artifactCount.coerceAtLeast(0)
+        val vaultLabel = if (totalVaultItems > 0) "Vaults ($totalVaultItems)" else "Vaults"
+        return QuickModeBarLabels(
+            projectChipLabel = "Project: $shortProject ▾",
+            agentChipLabel = agentLabel,
+            slashChipLabel = "/ Commands",
+            tuningChipLabel = tuningLabel,
+            vaultChipLabel = vaultLabel,
+        )
+    }
 
     /** Builds a concise top-bar [ModelBadgeState] for the current model and backend state. */
     fun formatModelBadge(
@@ -510,6 +551,50 @@ object ComposerChromeViews {
         visibility = View.GONE
         isFocusable = true
         setOnClickListener { onClick() }
+    }
+
+    /**
+     * Styles a 48dp-minimum-touch-target quick-mode pill with a sleek visually inset rounded chip.
+     * Always re-applies padding after assigning [InsetDrawable] to avoid Android padding clobbering.
+     */
+    fun styleQuickModePill(
+        button: Button,
+        palette: UiPalette,
+        active: Boolean,
+    ) {
+        val context = button.context
+        val minTouch = dp(context, 48)
+        val vInset = dp(context, 6)
+        val hPad = dp(context, 12)
+        val vPad = dp(context, 8)
+        val bgColor = if (active) palette.mint else palette.surfaceElevated
+        val borderColor = if (active) palette.teal else palette.border
+        val rippleColor = if (active) palette.rippleOnMint else palette.rippleOnSurface
+        val textColor = if (active) palette.teal else palette.ink
+        val shape = rippleDrawable(
+            roundedShape(
+                color = bgColor,
+                radiusPx = dp(context, 18).toFloat(),
+                strokeWidthPx = maxOf(1, dp(context, if (active) 2 else 1)),
+                strokeColor = borderColor,
+            ),
+            rippleColor,
+        )
+        button.apply {
+            setAllCaps(false)
+            textSize = 12f
+            typeface = Typeface.create("sans-serif", Typeface.BOLD)
+            setTextColor(textColor)
+            gravity = Gravity.CENTER
+            minHeight = minTouch
+            minimumHeight = minTouch
+            minWidth = minTouch
+            minimumWidth = minTouch
+            backgroundTintList = null
+            stateListAnimator = null
+            background = InsetDrawable(shape, 0, vInset, 0, vInset)
+            setPadding(hPad, vPad, hPad, vPad)
+        }
     }
 }
 

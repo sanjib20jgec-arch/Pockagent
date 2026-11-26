@@ -200,6 +200,11 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     private lateinit var slashPopupContainer: LinearLayout
     private lateinit var agentModeButton: Button
     private lateinit var attachImageButton: Button
+    private lateinit var quickProjectChip: Button
+    private lateinit var quickAgentChip: Button
+    private lateinit var quickSlashChip: Button
+    private lateinit var quickTuningChip: Button
+    private lateinit var quickVaultChip: Button
     private val ttsSpeaker by lazy {
         AndroidTtsSpeaker(
             ttsProvider = { tts },
@@ -551,7 +556,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         }
         val trustBadge = styledText(
             context = this,
-            text = "100% Offline · Zero Cloud",
+            text = "v1.2 · 100% Offline · Agents · Vaults",
             sizeSp = 11.5f,
             color = WHITE,
             bold = true,
@@ -563,17 +568,62 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             }
         }
         heroCard.addView(trustBadge)
-        heroCard.addView(text("Your pocket assistant", 21f, WHITE, true))
+        heroCard.addView(text("Your sovereign AI workspace", 21f, WHITE, true))
         heroCard.addView(
             text(
-                "Private on-device AI. Ask anything, analyze PDFs, or speak hands-free with zero cloud.",
+                "On-device AI with custom Projects, Agent Tool Loops, Slash Commands, Document & HTML Vaults.",
                 13.5f,
                 palette.heroSubtitleInk,
             ).apply {
-                setPadding(0, dp(6), 0, 0)
+                setPadding(0, dp(6), 0, dp(12))
                 setLineSpacing(dp(3).toFloat(), 1f)
             }
         )
+        val featureTiles = listOf(
+            Triple("Projects", "Custom prompts") { showProjectsDialog() },
+            Triple("Agent Tools", "Calc, notes & search") { toggleAgentMode(showToast = true) },
+            Triple("/ Commands", "6 instant prompts") { openSlashCommandPicker() },
+            Triple("Knowledge Vaults", "PDFs & HTML previews") { showVaultChooserDialog() },
+        )
+        val tileGrid = column()
+        for (rowTiles in featureTiles.chunked(2)) {
+            val rowLayout = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            rowTiles.forEachIndexed { colIndex, (title, subtitle, action) ->
+                val tile = column().apply {
+                    minimumHeight = dp(48)
+                    setPadding(dp(10), dp(8), dp(10), dp(8))
+                    background = rippleDrawable(
+                        roundedShape(
+                            color = 0x24FFFFFF,
+                            radiusPx = dp(12).toFloat(),
+                            strokeWidthPx = maxOf(1, dp(1)),
+                            strokeColor = 0x44FFFFFF,
+                        ),
+                        palette.rippleOnAccent,
+                    )
+                    isClickable = true
+                    isFocusable = true
+                    contentDescription = "$title: $subtitle"
+                    addView(text(title, 12.5f, WHITE, true))
+                    addView(text(subtitle, 11f, palette.heroSubtitleInk).apply { setPadding(0, dp(1), 0, 0) })
+                    setOnClickListener {
+                        performSubtleHaptic(this)
+                        action()
+                    }
+                }
+                rowLayout.addView(
+                    tile,
+                    LinearLayout.LayoutParams(0, -2, 1f).apply {
+                        if (colIndex == 0) marginEnd = dp(8)
+                    },
+                )
+            }
+            tileGrid.addView(rowLayout, marginBottom(8))
+        }
+        heroCard.addView(tileGrid)
         heroModelCtaButton = Button(this).apply {
             text = "Choose .litertlm Model"
             contentDescription = "Choose a LiteRT-LM model file to get started"
@@ -616,7 +666,13 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             overScrollMode = View.OVER_SCROLL_NEVER
         }
         val quickRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        listOf("Summarize a PDF", "Explain a concept", "Draft a message", "Plan my day").forEach { label ->
+        listOf(
+            "/summarize Summarize key points",
+            "Calculate (1480 * 1.18) - 250",
+            "/code Build an HTML Pomodoro timer",
+            "/translate Translate to Bengali: Privacy matters",
+            "/eli5 Explain how offline LLMs work",
+        ).forEach { label ->
             lateinit var chip: Button
             chip = secondaryOutlineButton(
                 context = this,
@@ -699,6 +755,73 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 }
             }
         }
+        val quickModeScroll = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            overScrollMode = View.OVER_SCROLL_NEVER
+        }
+        val quickModeRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        fun createQuickModeChip(
+            label: String,
+            a11y: String,
+            active: Boolean,
+            action: () -> Unit,
+        ): Button = Button(this).apply {
+            text = label
+            contentDescription = a11y
+            isFocusable = true
+            ComposerChromeViews.styleQuickModePill(this, palette, active)
+            setOnClickListener {
+                performSubtleHaptic(this)
+                action()
+            }
+        }
+        quickProjectChip = createQuickModeChip(
+            label = "Project: Default ▾",
+            a11y = "Switch active project workspace",
+            active = activeProjectId != null,
+        ) { showProjectsDialog() }
+        quickAgentChip = createQuickModeChip(
+            label = if (isAgentModeEnabled) "● Agent: ON" else "Agent: OFF",
+            a11y = "Toggle offline agent tool loop",
+            active = isAgentModeEnabled,
+        ) { toggleAgentMode(showToast = true) }
+        quickSlashChip = createQuickModeChip(
+            label = "/ Commands",
+            a11y = "Open slash command picker",
+            active = false,
+        ) { openSlashCommandPicker() }
+        quickTuningChip = createQuickModeChip(
+            label = "Temp 0.8 · 0% ctx",
+            a11y = "Open model switcher, temperature, and context window settings",
+            active = false,
+        ) {
+            val stored = activeModelFile()
+            if ((stored.exists() && stored.length() > 0L) || modelLibraryStore.loadAll().isNotEmpty()) {
+                showModelManagerDialog()
+            } else {
+                chooseModel()
+            }
+        }
+        quickVaultChip = createQuickModeChip(
+            label = "Vaults",
+            a11y = "Open Document Vault and Artifact Vault",
+            active = false,
+        ) { showVaultChooserDialog() }
+        val modeChips = listOf(quickProjectChip, quickAgentChip, quickSlashChip, quickTuningChip, quickVaultChip)
+        modeChips.forEachIndexed { idx, chip ->
+            quickModeRow.addView(
+                chip,
+                LinearLayout.LayoutParams(-2, -2).apply {
+                    if (idx < modeChips.lastIndex) marginEnd = dp(6)
+                },
+            )
+        }
+        quickModeScroll.addView(quickModeRow)
+        composerDock.addView(quickModeScroll, marginBottom(4))
+
         composerCard = column().apply {
             background = shape(palette.surface, 20, palette.border)
             elevation = dp(6).toFloat()
@@ -749,16 +872,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             accessibilityLabel = "Toggle offline multi-step agent tool loop",
             compact = true,
         ) {
-            isAgentModeEnabled = !isAgentModeEnabled
-            settingsPrefs.edit().putBoolean(PREF_AGENT_MODE, isAgentModeEnabled).apply()
-            agentModeButton.text = if (isAgentModeEnabled) "Agent Tools: ON" else "Agent Tools: OFF"
-            updateWorkspaceSubtitle()
-            Toast.makeText(
-                this,
-                if (isAgentModeEnabled) "Agent Tool Loop enabled (calc, notes, vault)"
-                else "Agent Tool Loop disabled",
-                Toast.LENGTH_SHORT,
-            ).show()
+            toggleAgentMode(showToast = true)
         }
         agentToolsRow.addView(agentModeButton, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(5) })
 
@@ -1351,24 +1465,150 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun updateWorkspaceSubtitle() {
-        if (!::workspaceSubtitleView.isInitialized) return
         val proj = activeProjectId?.let { projectStore.getProject(it) }
         val ctxUsed = engineManager.cachedConversationTokens
-        val parts = buildList {
-            proj?.let { add(it.name) }
-            if (isAgentModeEnabled) add("Agent")
-            if (ctxUsed > 0) {
-                val pct = ((ctxUsed * 100) / ContextBudgetManager.TokenBudget.DEFAULT_MAX_CONTEXT_TOKENS).coerceIn(1, 100)
-                add("Ctx $pct%")
+        val ctxMax = ContextBudgetManager.TokenBudget.DEFAULT_MAX_CONTEXT_TOKENS
+        val docCount = runCatching { documentVault.loadAll().size }.getOrDefault(0)
+        val artifactCount = runCatching { artifactStore.loadAll().size }.getOrDefault(0)
+
+        if (::workspaceSubtitleView.isInitialized) {
+            val parts = buildList {
+                proj?.let { add(it.name) }
+                if (isAgentModeEnabled) add("Agent")
+                if (ctxUsed > 0) {
+                    val pct = ((ctxUsed * 100) / ctxMax).coerceIn(1, 100)
+                    add("Ctx $pct%")
+                }
+            }
+            if (parts.isEmpty()) {
+                workspaceSubtitleView.visibility = View.GONE
+                workspaceSubtitleView.text = ""
+            } else {
+                workspaceSubtitleView.text = parts.joinToString(" · ")
+                workspaceSubtitleView.visibility = View.VISIBLE
             }
         }
-        if (parts.isEmpty()) {
-            workspaceSubtitleView.visibility = View.GONE
-            workspaceSubtitleView.text = ""
-        } else {
-            workspaceSubtitleView.text = parts.joinToString(" · ")
-            workspaceSubtitleView.visibility = View.VISIBLE
+        if (::agentModeButton.isInitialized) {
+            agentModeButton.text = if (isAgentModeEnabled) "Agent Tools: ON" else "Agent Tools: OFF"
         }
+        if (::quickProjectChip.isInitialized) {
+            val labels = ComposerChromeHelper.formatQuickModeLabels(
+                projectName = proj?.name,
+                isAgentEnabled = isAgentModeEnabled,
+                temperature = currentTemperature,
+                contextUsedTokens = ctxUsed,
+                contextMaxTokens = ctxMax,
+                docCount = docCount,
+                artifactCount = artifactCount,
+            )
+            quickProjectChip.text = labels.projectChipLabel
+            ComposerChromeViews.styleQuickModePill(quickProjectChip, palette, proj != null)
+
+            quickAgentChip.text = labels.agentChipLabel
+            ComposerChromeViews.styleQuickModePill(quickAgentChip, palette, isAgentModeEnabled)
+
+            quickSlashChip.text = labels.slashChipLabel
+            quickTuningChip.text = labels.tuningChipLabel
+            ComposerChromeViews.styleQuickModePill(quickTuningChip, palette, isVisionModeEnabled)
+
+            quickVaultChip.text = labels.vaultChipLabel
+            ComposerChromeViews.styleQuickModePill(quickVaultChip, palette, docCount + artifactCount > 0)
+        }
+    }
+
+    private fun toggleAgentMode(showToast: Boolean) {
+        isAgentModeEnabled = !isAgentModeEnabled
+        settingsPrefs.edit().putBoolean(PREF_AGENT_MODE, isAgentModeEnabled).apply()
+        updateWorkspaceSubtitle()
+        if (showToast) {
+            Toast.makeText(
+                this,
+                if (isAgentModeEnabled) "Agent Tool Loop ON (calc, notes, doc search)"
+                else "Agent Tool Loop OFF",
+                Toast.LENGTH_SHORT,
+            ).show()
+        }
+    }
+
+    private fun openSlashCommandPicker() {
+        if (!::slashPopupContainer.isInitialized) return
+        if (slashPopupContainer.visibility == View.VISIBLE) {
+            slashPopupContainer.visibility = View.GONE
+            return
+        }
+        val current = taskInput.text.toString()
+        if (!current.trimStart().startsWith("/")) {
+            val updated = if (current.isBlank()) "/" else "/$current"
+            taskInput.setText(updated)
+            taskInput.setSelection(1)
+        }
+        taskInput.requestFocus()
+        updateSlashSuggestions(taskInput.text.toString())
+    }
+
+    private fun showVaultChooserDialog() {
+        val docsCount = runCatching { documentVault.loadAll().size }.getOrDefault(0)
+        val artCount = runCatching { artifactStore.loadAll().size }.getOrDefault(0)
+        val root = styleDialogContainer(this, palette, paddingDp = 18)
+        root.addView(text("Local Knowledge & Code Vaults", 17f, palette.ink, true))
+        root.addView(
+            text("Everything stays 100% private on this device.", 12.5f, palette.muted).apply {
+                setPadding(0, dp(4), 0, dp(12))
+            }
+        )
+        lateinit var dialog: AlertDialog
+        val vaultOptions = listOf(
+            Triple(R.drawable.ic_notes, "Document Knowledge Vault" to "$docsCount indexed local document${if (docsCount == 1) "" else "s"} for automatic RAG") {
+                showDocumentVaultDialog()
+            },
+            Triple(R.drawable.ic_folder, "HTML & Code Artifact Vault" to "$artCount saved code/HTML snippet${if (artCount == 1) "" else "s"} ready to preview") {
+                showArtifactVaultDialog()
+            },
+        )
+        vaultOptions.forEachIndexed { idx, (iconRes, copy, action) ->
+            val (title, subtitle) = copy
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                minimumHeight = dp(48)
+                setPadding(dp(12), dp(12), dp(12), dp(12))
+                background = rippleDrawable(
+                    roundedShape(
+                        color = palette.surfaceElevated,
+                        radiusPx = dp(14).toFloat(),
+                        strokeWidthPx = maxOf(1, dp(1)),
+                        strokeColor = palette.border,
+                    ),
+                    palette.rippleOnSurface,
+                )
+                isClickable = true
+                isFocusable = true
+                setOnClickListener {
+                    performSubtleHaptic(it)
+                    dialog.dismiss()
+                    action()
+                }
+            }
+            val iconView = ImageView(this).apply {
+                setImageDrawable(tintedVectorDrawable(this@MainActivity, iconRes, palette.teal))
+                scaleType = ImageView.ScaleType.CENTER_INSIDE
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            }
+            row.addView(iconView, LinearLayout.LayoutParams(dp(24), dp(24)).apply { marginEnd = dp(12) })
+            val col = column().apply {
+                addView(text(title, 14.5f, palette.ink, true))
+                addView(text(subtitle, 12f, palette.muted).apply { setPadding(0, dp(2), 0, 0) })
+            }
+            row.addView(col, LinearLayout.LayoutParams(0, -2, 1f))
+            root.addView(row, LinearLayout.LayoutParams(-1, -2).apply {
+                if (idx == 0) bottomMargin = dp(8)
+            })
+        }
+        dialog = AlertDialog.Builder(this)
+            .setView(root)
+            .setNegativeButton("Close", null)
+            .create()
+        showStyledAlertDialog(dialog, palette)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -1547,6 +1787,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                     showAttachmentPreview(attachedContext)
                     attachmentCard.visibility = View.VISIBLE
                     syncComposerState()
+                    updateWorkspaceSubtitle()
                     updateStatus("Text attached. Review the preview, then add your question.")
                 }
             } catch (e: Exception) {
@@ -1588,6 +1829,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                     showAttachmentPreview(attachedContext)
                     attachmentCard.visibility = View.VISIBLE
                     syncComposerState()
+                    updateWorkspaceSubtitle()
                     updateStatus(
                         if (extraction.limitReached) "PDF text attached with the ${"%,d".format(MAX_ATTACHMENT_CHARS)}-character limit applied. Review it, then ask your question."
                         else "PDF text attached. Review the document name and page count, then add a question."
@@ -3666,18 +3908,33 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
 
     /** Opens the workspace menu dialog grouping chats, notes, memory, models, and privacy. */
     private fun showWorkspaceMenuDialog() {
-        val root = styleDialogContainer(this, palette, paddingDp = 18)
-        root.addView(text("Workspace", 18f, palette.ink, true))
-        root.addView(
-            text("Manage chats, local knowledge, models, and privacy", 12.5f, palette.muted).apply {
-                setPadding(0, dp(4), 0, dp(14))
-            }
-        )
-
         lateinit var dialog: AlertDialog
         val activeProjName = activeProjectId?.let { projectStore.getProject(it)?.name } ?: "Default Workspace"
         val docCount = documentVault.loadAll().size
         val artifactCount = artifactStore.loadAll().size
+        val root = styleDialogContainer(this, palette, paddingDp = 18)
+        root.addView(text("Workspace · v1.2.0", 18f, palette.ink, true))
+        val agentBadge = if (isAgentModeEnabled) "ON" else "OFF"
+        root.addView(
+            text(
+                String.format(
+                    Locale.US,
+                    "%s · Agent %s · Temp %.1f · %d doc%s · %d artifact%s",
+                    activeProjName,
+                    agentBadge,
+                    currentTemperature,
+                    docCount,
+                    if (docCount == 1) "" else "s",
+                    artifactCount,
+                    if (artifactCount == 1) "" else "s",
+                ),
+                12f,
+                palette.teal,
+                true,
+            ).apply {
+                setPadding(0, dp(4), 0, dp(12))
+            }
+        )
         val items = listOf(
             Triple(R.drawable.ic_folder, "Projects & Workspaces" to "Active: $activeProjName") {
                 showProjectsDialog()
@@ -3824,6 +4081,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                         code = code,
                     )
                 )
+                updateWorkspaceSubtitle()
                 updateStatus("Artifact saved to vault ($title).")
                 Toast.makeText(this, "Saved to Artifact Vault", Toast.LENGTH_SHORT).show()
             }
@@ -4045,6 +4303,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 val delBtn = iconTouchButton(this, palette, "✕", "Remove ${doc.name}", palette.muted, 16f) {
                     documentVault.removeDocument(doc.id)
                     refreshVault()
+                    updateWorkspaceSubtitle()
                 }
                 card.addView(delBtn)
                 listCol.addView(card, marginBottom(8))
@@ -4131,6 +4390,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                     dangerButton(this, palette, "Delete", compact = true) {
                         artifactStore.delete(art.id)
                         refreshArtifacts()
+                        updateWorkspaceSubtitle()
                     }
                 )
                 card.addView(btnRow)
@@ -4933,6 +5193,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                         currentTemperature = temp
                         settingsPrefs.edit().putInt(PREF_TEMPERATURE_BITS, java.lang.Float.floatToIntBits(temp)).apply()
                         engineManager.updateTemperature(temp)
+                        updateWorkspaceSubtitle()
                     }
                 }
                 override fun onStartTrackingTouch(seekBar: SeekBar?) {}
@@ -5008,6 +5269,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             inferenceExecutor.execute { engineManager.setVisionMode(isVisionModeEnabled) }
             visionBtn.text = if (isVisionModeEnabled) "Omni Vision Mode: ON (+ Image)" else "Omni Vision Mode: OFF"
             syncComposerState()
+            updateWorkspaceSubtitle()
             Toast.makeText(
                 this,
                 if (isVisionModeEnabled) "Vision enabled (Omni models) — + Image available in + tray"

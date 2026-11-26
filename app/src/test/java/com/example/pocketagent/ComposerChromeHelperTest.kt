@@ -243,4 +243,52 @@ class ComposerChromeHelperTest {
             ComposerChromeHelper.mergeDictationTranscript("First sentence.", "second sentence."),
         )
     }
+
+    @Test
+    fun formatQuickModeLabelsFormatsDefaultsAndActiveProject() {
+        val defaults = ComposerChromeHelper.formatQuickModeLabels(
+            projectName = null,
+            isAgentEnabled = false,
+            temperature = 0.8f,
+            contextUsedTokens = 0,
+            contextMaxTokens = 4096,
+            docCount = 0,
+            artifactCount = 0,
+        )
+        assertEquals("Project: Default ▾", defaults.projectChipLabel)
+        assertEquals("Agent: OFF", defaults.agentChipLabel)
+        assertEquals("/ Commands", defaults.slashChipLabel)
+        assertEquals("Temp 0.8 · 0% ctx", defaults.tuningChipLabel)
+        assertEquals("Vaults", defaults.vaultChipLabel)
+
+        val active = ComposerChromeHelper.formatQuickModeLabels(
+            projectName = "Android Architecture Review",
+            isAgentEnabled = true,
+            temperature = 0.3f,
+            contextUsedTokens = 2048,
+            contextMaxTokens = 4096,
+            docCount = 2,
+            artifactCount = 3,
+        )
+        assertEquals("Project: Android Archi… ▾", active.projectChipLabel)
+        assertEquals("● Agent: ON", active.agentChipLabel)
+        assertEquals("Temp 0.3 · 50% ctx", active.tuningChipLabel)
+        assertEquals("Vaults (5)", active.vaultChipLabel)
+    }
+
+    @Test
+    fun formatQuickModeLabelsClampsTemperatureContextAndNegativeCounts() {
+        val clamped = ComposerChromeHelper.formatQuickModeLabels(
+            projectName = "   ",
+            isAgentEnabled = true,
+            temperature = 9.0f,
+            contextUsedTokens = 99_999,
+            contextMaxTokens = 4096,
+            docCount = -3,
+            artifactCount = 1,
+        )
+        assertEquals("Project: Default ▾", clamped.projectChipLabel)
+        assertEquals("Temp 1.5 · 100% ctx", clamped.tuningChipLabel)
+        assertEquals("Vaults (1)", clamped.vaultChipLabel)
+    }
 }

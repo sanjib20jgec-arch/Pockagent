@@ -9,8 +9,8 @@ android {
         applicationId = "com.example.pocketagent"
         minSdk = 28
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.1.0-dev"
+        versionCode = 3
+        versionName = "1.2.0"
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
     }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }

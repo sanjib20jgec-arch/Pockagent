@@ -31,8 +31,6 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
-        with:
-          gradle-version: '8.14.4'
 
       - name: Verify source archive
         run: python3 scripts/package_source.py --check
@@ -41,7 +39,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          gradle --no-daemon --stacktrace --console=plain testDebugUnitTest assembleDebug 2>&1 | tee gradle-build.log
+          ./gradlew --no-daemon --stacktrace --console=plain testDebugUnitTest assembleDebug 2>&1 | tee gradle-build.log
 
       - name: Summarize Gradle failure
         if: failure()

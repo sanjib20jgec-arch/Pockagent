@@ -7,6 +7,7 @@ import java.io.InputStream
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -299,6 +300,54 @@ class ModelFileStoreTest {
         assertTrue(ex.message!!.contains("Not enough free storage"))
         assertTrue(ex.message!!.contains("Remove the current stored model first to free"))
         assertFalse(partFile(store).exists())
+    }
+
+    @Test
+    fun mismatchedExpectedSha256PreservesPreviousModel() {
+        val store = ModelFileStore(temporaryFolder.root, maxBytes = 100, reservedFreeSpaceBytes = 0, minBytes = 1L)
+        val accepted = byteArrayOf(7, 8, 9, 10)
+        store.importModel(ByteArrayInputStream(accepted))
+        val acceptedHash = requireNotNull(store.storedSha256())
+
+        val failure = assertThrows(IOException::class.java) {
+            store.importModel(ByteArrayInputStream(byteArrayOf(4, 5, 6)), expectedSha256 = acceptedHash)
+        }
+
+        assertTrue(failure.message!!.contains("checksum", ignoreCase = true))
+        assertArrayEquals(accepted, store.modelFile.readBytes())
+        assertEquals(acceptedHash, store.storedSha256())
+        assertFalse(partFile(store).exists())
+    }
+
+    @Test
+    fun validSha256ImportWritesSidecar() {
+        val store = ModelFileStore(temporaryFolder.root, maxBytes = 100, reservedFreeSpaceBytes = 0, minBytes = 1L)
+        val bytes = byteArrayOf(0x50, 0x4B, 0x03, 0x04, 0x09)
+        val digest = ModelIntegrity.sha256Hex(bytes)
+
+        val result = store.importModel(ByteArrayInputStream(bytes), expectedSha256 = digest)
+
+        assertArrayEquals(bytes, result.readBytes())
+        assertEquals(digest, store.storedSha256())
+    }
+
+    @Test
+    fun storedSha256ReturnsNullForInvalidSidecar() {
+        val store = ModelFileStore(temporaryFolder.root, maxBytes = 100, reservedFreeSpaceBytes = 0, minBytes = 1L)
+        ModelIntegrity.sidecarFor(store.modelFile).writeText("garbage\n")
+
+        assertNull(store.storedSha256())
+    }
+
+    @Test
+    fun removeStoredModelDeletesChecksumSidecar() {
+        val store = ModelFileStore(temporaryFolder.root, maxBytes = 100, reservedFreeSpaceBytes = 0, minBytes = 1L)
+        store.importModel(ByteArrayInputStream(byteArrayOf(0x50, 0x4B, 0x03, 0x04)))
+        assertTrue(ModelIntegrity.sidecarFor(store.modelFile).exists())
+
+        assertTrue(store.removeStoredModel())
+
+        assertFalse(ModelIntegrity.sidecarFor(store.modelFile).exists())
     }
 
     private class UnreadGuardedInputStream : InputStream() {

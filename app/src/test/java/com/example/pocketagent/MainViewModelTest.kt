@@ -605,4 +605,31 @@ class MainViewModelTest {
             rawExecutor.shutdownNow()
         }
     }
+
+    @Test
+    fun initModelsRejectsTamperedModelWithStoredHash() {
+        val store = ModelFileStore(filesDir, minBytes = 1L)
+        store.importModel(ByteArrayInputStream(byteArrayOf(0x50, 0x4B, 0x03, 0x04, 0x05, 0x06)))
+        File(filesDir, ModelFileStore.MODEL_FILE_NAME).writeBytes(byteArrayOf(0x50, 0x4B, 0x09, 0x09, 0x09, 0x09))
+        val observed = mutableListOf<MainUiState>()
+        viewModel.addObserver { observed.add(it) }
+
+        viewModel.initModels()
+
+        val state = observed.last()
+        assertFalse(state.isModelReady)
+        assertTrue(state.statusMessage.contains("checksum mismatch", ignoreCase = true))
+    }
+
+    @Test
+    fun initModelsAcceptsUntamperedModelWithStoredHash() {
+        val store = ModelFileStore(filesDir, minBytes = 1L)
+        store.importModel(ByteArrayInputStream(byteArrayOf(0x50, 0x4B, 0x03, 0x04, 0x05, 0x06)))
+        val observed = mutableListOf<MainUiState>()
+        viewModel.addObserver { observed.add(it) }
+
+        viewModel.initModels()
+
+        assertTrue(observed.last().isModelReady)
+    }
 }

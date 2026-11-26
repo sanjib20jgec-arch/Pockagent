@@ -142,7 +142,32 @@ class DuplexVoiceControllerTest {
 
     @Test
     fun `interrupt halts active TTS and re-arms listening`() {
-        controller.startSession(
+        val steadyRecorder = InAppAudioRecorder(
+            buffer = AudioRecordingBuffer(maxDurationSeconds = 5),
+            sourceFactory = {
+                object : AudioInputSource {
+                    @Volatile var stopped = false
+                    override fun startRecording() { stopped = false }
+                    override fun read(buffer: ShortArray, offset: Int, size: Int): Int {
+                        if (stopped) return -1
+                        Thread.sleep(20)
+                        for (i in 0 until minOf(size, 512)) buffer[offset + i] = 1200
+                        return minOf(size, 512)
+                    }
+                    override fun stop() { stopped = true }
+                    override fun close() { stop() }
+                }
+            },
+        )
+        val steadyController = DuplexVoiceController(
+            audioRecorder = steadyRecorder,
+            whisperTranscriber = fakeWhisper,
+            llmRunner = fakeLlm,
+            ttsSpeaker = fakeTts,
+            workerExecutor = Executor { it.run() },
+            mainDispatcher = { it.run() },
+        )
+        steadyController.startSession(
             whisperContext = 100L,
             listener = object : DuplexVoiceController.Listener {
                 override fun onStateChanged(state: DuplexVoiceController.DuplexState, statusMessage: String) {}
@@ -154,10 +179,11 @@ class DuplexVoiceControllerTest {
             }
         )
 
-        controller.interrupt()
+        steadyController.interrupt()
         assertTrue(fakeTts.isStopped)
-        assertTrue(controller.isActive)
-        assertEquals(DuplexVoiceController.DuplexState.LISTENING, controller.state)
+        assertTrue(steadyController.isActive)
+        assertEquals(DuplexVoiceController.DuplexState.LISTENING, steadyController.state)
+        steadyController.stopSession()
     }
 
     /** Builds a controller whose spoken turns use [instructionFor]. */

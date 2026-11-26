@@ -11,6 +11,8 @@ import android.content.res.ColorStateList
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
@@ -42,6 +44,7 @@ import android.widget.ProgressBar
 import android.widget.RadioButton
 import android.widget.RadioGroup
 import android.widget.ScrollView
+import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 import com.google.ai.edge.litertlm.Engine
@@ -65,12 +68,19 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         private const val PICK_WAV = 6
         private const val CREATE_ANSWER_FILE = 7
         private const val REQUEST_RECORD_MIC = 8
+        private const val PICK_IMAGE_OCR = 9
+        private const val CREATE_ARTIFACT_HTML = 10
         private const val STATE_PENDING_ANSWER_SAVE = "pending_answer_to_save"
         private const val STATE_ACTIVE_SESSION_ID = "active_session_id"
         private const val PREFS_SETTINGS = "pocketagent_settings"
         private const val PREF_BACKEND_MODE = "pref_backend_mode"
         private const val PREF_MODEL_DISPLAY_NAME = "pref_model_display_name"
         private const val PREF_GPU_LOADING_GUARD = "pref_gpu_loading_crash_guard"
+        private const val PREF_ACTIVE_PROJECT_ID = "pref_active_project_id"
+        private const val PREF_TEMPERATURE_BITS = "pref_temperature_bits"
+        private const val PREF_MAX_OUTPUT_TOKENS = "pref_max_output_tokens"
+        private const val PREF_AGENT_MODE = "pref_agent_mode"
+        private const val PREF_VISION_ENABLED = "pref_vision_enabled"
         private const val MAX_ATTACHMENT_CHARS = MainUiState.MAX_ATTACHMENT_CHARS
         private const val MAX_RESPONSE_TOKENS = MainUiState.MAX_RESPONSE_TOKENS
         /** Hard ceiling so a stalled engine cannot block the worker thread forever. */
@@ -174,6 +184,22 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     private val sessionStore by lazy { SessionStore(SessionStore.defaultDir(filesDir)) }
     private val userMemoryStore by lazy { UserMemoryStore(UserMemoryStore.defaultDir(filesDir)) }
     private val notesStore by lazy { PersonalNotesStore(PersonalNotesStore.defaultDir(filesDir)) }
+    private val projectStore by lazy { ProjectStore(ProjectStore.defaultDir(filesDir)) }
+    private val modelLibraryStore by lazy { ModelLibraryStore(ModelLibraryStore.defaultDir(filesDir)) }
+    private val artifactStore by lazy { ArtifactStore(ArtifactStore.defaultDir(filesDir)) }
+    private val documentVault by lazy { DocumentVault(DocumentVault.defaultDir(filesDir)) }
+    private var activeProjectId: String? = null
+    private var isAgentModeEnabled: Boolean = false
+    private var isVisionModeEnabled: Boolean = false
+    private var currentTemperature: Float = InferenceEngineManager.DEFAULT_TEMPERATURE
+    private var currentMaxOutputTokens: Int = MAX_RESPONSE_TOKENS
+    @Volatile private var attachedImagePath: String? = null
+    private var attachedImageName: String? = null
+    private var pendingHtmlToExport: String? = null
+    private lateinit var workspaceSubtitleView: TextView
+    private lateinit var slashPopupContainer: LinearLayout
+    private lateinit var agentModeButton: Button
+    private lateinit var attachImageButton: Button
     private val ttsSpeaker by lazy {
         AndroidTtsSpeaker(
             ttsProvider = { tts },
@@ -242,6 +268,24 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             gpuGuardTriggered = true
         }
         engineManager.preference = savedBackend
+        activeProjectId = settingsPrefs.getString(PREF_ACTIVE_PROJECT_ID, null)
+        isAgentModeEnabled = settingsPrefs.getBoolean(PREF_AGENT_MODE, false)
+        isVisionModeEnabled = settingsPrefs.getBoolean(PREF_VISION_ENABLED, false)
+        currentTemperature = if (settingsPrefs.contains(PREF_TEMPERATURE_BITS)) {
+            java.lang.Float.intBitsToFloat(
+                settingsPrefs.getInt(
+                    PREF_TEMPERATURE_BITS,
+                    java.lang.Float.floatToIntBits(InferenceEngineManager.DEFAULT_TEMPERATURE),
+                )
+            ).coerceIn(0.1f, 1.5f)
+        } else {
+            InferenceEngineManager.DEFAULT_TEMPERATURE
+        }
+        currentMaxOutputTokens = settingsPrefs.getInt(PREF_MAX_OUTPUT_TOKENS, MAX_RESPONSE_TOKENS)
+            .takeIf { it in listOf(256, 512, 1024, 2048) } ?: MAX_RESPONSE_TOKENS
+        engineManager.activeTemperature = currentTemperature
+        engineManager.visionEnabled = isVisionModeEnabled
+        ensureLegacyModelRegistered()
         engineManager.onFallback = { reason ->
             settingsPrefs.edit().putString(PREF_BACKEND_MODE, BackendPreference.CPU_ONLY.name).apply()
             mainHandler.post {
@@ -254,11 +298,100 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         buildInterface()
         savedInstanceState?.getString(STATE_ACTIVE_SESSION_ID)?.let { loadSession(it) }
         refreshModelStatus()
+        updateWorkspaceSubtitle()
         if (gpuGuardTriggered) {
             updateStatus("Previous GPU model load ended unexpectedly; switched safely to CPU mode.")
         }
         restoreWhisperModel()
         warmUpModelAfterFirstFrame()
+        if (savedInstanceState == null) {
+            handleSharedIntent(intent)
+        }
+        handleWidgetLaunchIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleSharedIntent(intent)
+        handleWidgetLaunchIntent(intent)
+    }
+
+    private fun handleWidgetLaunchIntent(launchIntent: Intent?) {
+        if (launchIntent?.getBooleanExtra(PocketAgentWidget.EXTRA_WIDGET_VOICE, false) == true) {
+            launchIntent.removeExtra(PocketAgentWidget.EXTRA_WIDGET_VOICE)
+            mainHandler.postDelayed({
+                if (!isDestroyed && !isFinishing) startDictation()
+            }, 450L)
+        }
+    }
+
+    private fun handleSharedIntent(shareIntent: Intent?) {
+        if (shareIntent == null || shareIntent.action != Intent.ACTION_SEND) return
+        val mime = shareIntent.type.orEmpty().lowercase(Locale.ROOT)
+        val sharedText = shareIntent.getStringExtra(Intent.EXTRA_TEXT)
+        val sharedUri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            shareIntent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            shareIntent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+        }
+
+        if (!sharedText.isNullOrBlank()) {
+            val clean = sharedText.trim().take(MAX_ATTACHMENT_CHARS)
+            attachedContext = clean
+            attachedNames.clear()
+            attachedNames.add("Shared text")
+            attachmentGeneration++
+            showAttachmentPreview(attachedContext)
+            attachmentCard.visibility = View.VISIBLE
+            engineManager.invalidateConversation("shared text attached")
+            syncComposerState()
+            updateStatus("Shared text attached (${clean.length} chars). Ask your question.")
+            Toast.makeText(this, "Shared text attached", Toast.LENGTH_SHORT).show()
+            shareIntent.action = null
+        } else if (sharedUri != null) {
+            val displayName = queryDisplayName(sharedUri).orEmpty().lowercase(Locale.ROOT)
+            if (mime.startsWith("image/")) {
+                if (isVisionModeEnabled) {
+                    stageImageUri(sharedUri)
+                } else {
+                    Toast.makeText(this, "Enable Vision Mode in Model Manager first for images.", Toast.LENGTH_LONG).show()
+                }
+            } else if (mime == "application/pdf" || displayName.endsWith(".pdf")) {
+                importPdf(sharedUri)
+            } else {
+                importTextFiles(listOf(sharedUri))
+            }
+            shareIntent.action = null
+        }
+    }
+
+    private fun activeModelFile(): File {
+        val activeEntry = modelLibraryStore.getActive()
+        if (activeEntry != null) {
+            val candidate = File(activeEntry.filePath)
+            if (candidate.exists() && candidate.length() > 0L) {
+                return candidate
+            }
+        }
+        return File(filesDir, "model.litertlm")
+    }
+
+    private fun ensureLegacyModelRegistered() {
+        val legacy = File(filesDir, "model.litertlm")
+        if (legacy.exists() && legacy.length() > 0L) {
+            val existing = modelLibraryStore.loadAll()
+            if (existing.none { it.filePath == legacy.absolutePath }) {
+                val label = settingsPrefs.getString(PREF_MODEL_DISPLAY_NAME, null)
+                    ?.takeIf { it.isNotBlank() } ?: "Primary Model"
+                modelLibraryStore.registerModel(
+                    filePath = legacy.absolutePath,
+                    displayName = label,
+                    makeActive = existing.none { it.isActive },
+                )
+            }
+        }
     }
 
     private fun isDeviceLowMemory(): Boolean {
@@ -291,7 +424,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
      * idle startup RAM pressure or OOM when the user only wants History, Notes, or Privacy tools.
      */
     private fun warmUpModelAfterFirstFrame() {
-        val modelFile = File(filesDir, "model.litertlm")
+        val modelFile = activeModelFile()
         if (!modelFile.exists() || modelFile.length() <= 0) return
         if (modelFile.length() > EAGER_WARMUP_MAX_BYTES || isDeviceLowMemory()) {
             val storedName = settingsPrefs.getString(PREF_MODEL_DISPLAY_NAME, null)
@@ -339,12 +472,22 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         val brand = column().apply {
             setPadding(dp(6), 0, 0, 0)
             addView(text("PocketAgent", 15f, palette.ink, true))
+            workspaceSubtitleView = text("", 10f, palette.teal, true).apply {
+                maxLines = 1
+                ellipsize = TextUtils.TruncateAt.END
+                visibility = View.GONE
+            }
+            addView(workspaceSubtitleView)
         }
         brandRow.addView(brand, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(6) })
 
         modelStatusPill = ModelStatusPillView(this, palette) {
-            val stored = File(filesDir, "model.litertlm")
-            if (stored.exists() && stored.length() > 0L) showModelManagerDialog() else chooseModel()
+            val stored = activeModelFile()
+            if ((stored.exists() && stored.length() > 0L) || modelLibraryStore.loadAll().isNotEmpty()) {
+                showModelManagerDialog()
+            } else {
+                chooseModel()
+            }
         }
         val pillHost = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -597,6 +740,40 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         audioActionsRow.addView(transcribeWavButton, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(5) })
         toolsTray.addView(audioActionsRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4) })
 
+        val agentToolsRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        agentModeButton = pillButton(
+            label = if (isAgentModeEnabled) "Agent Tools: ON" else "Agent Tools: OFF",
+            accessibilityLabel = "Toggle offline multi-step agent tool loop",
+            compact = true,
+        ) {
+            isAgentModeEnabled = !isAgentModeEnabled
+            settingsPrefs.edit().putBoolean(PREF_AGENT_MODE, isAgentModeEnabled).apply()
+            agentModeButton.text = if (isAgentModeEnabled) "Agent Tools: ON" else "Agent Tools: OFF"
+            updateWorkspaceSubtitle()
+            Toast.makeText(
+                this,
+                if (isAgentModeEnabled) "Agent Tool Loop enabled (calc, notes, vault)"
+                else "Agent Tool Loop disabled",
+                Toast.LENGTH_SHORT,
+            ).show()
+        }
+        agentToolsRow.addView(agentModeButton, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(5) })
+
+        attachImageButton = pillButton(
+            label = "+ Image (Omni)",
+            accessibilityLabel = "Attach an image for local Omni vision inference",
+            compact = true,
+        ) {
+            chooseVisionImage()
+        }.apply {
+            visibility = if (isVisionModeEnabled) View.VISIBLE else View.GONE
+        }
+        agentToolsRow.addView(attachImageButton, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(5) })
+        toolsTray.addView(agentToolsRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4) })
+
         // Whisper model management lives here instead of cluttering the chat canvas.
         whisperModelText = text("No local Whisper model selected.", 11f, palette.muted).apply {
             setPadding(dp(4), dp(9), dp(4), dp(2))
@@ -650,6 +827,18 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         toolsTray.addView(attachmentCard)
 
         composerCard.addView(toolsTray)
+
+        slashPopupContainer = column().apply {
+            visibility = View.GONE
+            background = roundedShape(
+                color = palette.surfaceElevated,
+                radiusPx = dp(12).toFloat(),
+                strokeWidthPx = maxOf(1, dp(1)),
+                strokeColor = palette.border,
+            )
+            setPadding(dp(6), dp(4), dp(6), dp(4))
+        }
+        composerCard.addView(slashPopupContainer, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(6) })
 
         // Recording banner shown while in-app audio recording or dictation is active.
         recordingBanner = LinearLayout(this).apply {
@@ -756,6 +945,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
                 override fun afterTextChanged(s: android.text.Editable?) {
                     isUserReadingUpwards = false
+                    updateSlashSuggestions(s?.toString().orEmpty())
                     syncComposerState()
                 }
             })
@@ -888,8 +1078,9 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     private fun syncComposerState() {
         if (!::heroCard.isInitialized) return
         val hasThreadViews = ::chatThreadContainer.isInitialized && chatThreadContainer.childCount > 0
+        val hasImage = !attachedImagePath.isNullOrBlank()
         val hasConversation = hasThreadViews ||
-            taskInput.text.isNotBlank() || attachedContext.isNotBlank() ||
+            taskInput.text.isNotBlank() || attachedContext.isNotBlank() || hasImage ||
             lastPrompt.isNotBlank() || currentSession?.messages?.isNotEmpty() == true
         val welcomeVisibility = if (hasConversation) View.GONE else View.VISIBLE
         if (heroCard.visibility != welcomeVisibility && ::chatCanvas.isInitialized) {
@@ -899,18 +1090,25 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         quickChips.visibility = welcomeVisibility
 
         if (::heroModelCtaButton.isInitialized) {
-            val hasModel = File(filesDir, "model.litertlm").let { it.exists() && it.length() > 0L }
+            val hasModel = activeModelFile().let { it.exists() && it.length() > 0L }
             heroModelCtaButton.visibility = if (hasModel) View.GONE else View.VISIBLE
         }
+        if (::attachImageButton.isInitialized) {
+            attachImageButton.visibility = if (isVisionModeEnabled) View.VISIBLE else View.GONE
+        }
 
-        val hasAttachment = attachedContext.isNotBlank()
+        val effectiveNames = buildList {
+            addAll(attachedNames)
+            attachedImageName?.let { add("Image: $it") }
+        }
+        val hasAttachment = attachedContext.isNotBlank() || hasImage
         if (::attachmentChipContainer.isInitialized) {
             val nextChipVisibility = if (hasAttachment) View.VISIBLE else View.GONE
             if (attachmentChipContainer.visibility != nextChipVisibility && ::composerCard.isInitialized) {
                 TransitionManager.beginDelayedTransition(composerCard)
             }
             if (hasAttachment) {
-                val signature = attachedNames.joinToString("|") + ":" + attachedContext.length
+                val signature = effectiveNames.joinToString("|") + ":" + attachedContext.length
                 attachmentChipContainer.visibility = View.VISIBLE
                 if (signature != lastAttachmentStripSignature) {
                     lastAttachmentStripSignature = signature
@@ -919,7 +1117,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                         ComposerChromeViews.buildAttachmentChipsStrip(
                             context = this,
                             palette = palette,
-                            names = attachedNames,
+                            names = effectiveNames,
                             usedChars = attachedContext.length,
                             maxChars = MAX_ATTACHMENT_CHARS,
                             onInspect = { toggleToolsTray(force = true) },
@@ -950,7 +1148,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             transcribeWavButton.isEnabled = whisperContext != 0L && !isWhisperTranscribing
         }
         if (::suggestButton.isInitialized) {
-            val canSend = (taskInput.text.isNotBlank() || attachedContext.isNotBlank()) &&
+            val canSend = (taskInput.text.isNotBlank() || attachedContext.isNotBlank() || !attachedImagePath.isNullOrBlank()) &&
                 !isWhisperTranscribing && !transcriptReviewPending
             suggestButton.isEnabled = (isGeneratingUi && !isStoppingUi) || (!isGeneratingUi && canSend)
             suggestButton.alpha = if (suggestButton.isEnabled) 1f else 0.5f
@@ -1086,6 +1284,93 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         startActivityForResult(picker, PICK_WAV)
     }
 
+    private fun chooseVisionImage() {
+        val picker = Intent(Intent.ACTION_OPEN_DOCUMENT)
+            .addCategory(Intent.CATEGORY_OPENABLE)
+            .setType("image/*")
+        startActivityForResult(picker, PICK_IMAGE_OCR)
+    }
+
+    private fun updateSlashSuggestions(currentText: String) {
+        if (!::slashPopupContainer.isInitialized) return
+        val trimmed = currentText.trimStart()
+        val exactMatch = SlashCommandDetector.detectCommand(trimmed)
+        val hasTrailingArgs = exactMatch != null && trimmed.length > exactMatch.trigger.length
+        if (!trimmed.startsWith("/") || trimmed.contains('\n') || hasTrailingArgs) {
+            slashPopupContainer.removeAllViews()
+            slashPopupContainer.visibility = View.GONE
+            return
+        }
+        val matches = SlashCommandDetector.getSuggestions(trimmed)
+        if (matches.isEmpty()) {
+            slashPopupContainer.removeAllViews()
+            slashPopupContainer.visibility = View.GONE
+            return
+        }
+        slashPopupContainer.removeAllViews()
+        for ((index, cmd) in matches.withIndex()) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                minimumHeight = dp(48)
+                setPadding(dp(10), dp(6), dp(10), dp(6))
+                background = rippleDrawable(
+                    roundedShape(Color.TRANSPARENT, dp(10).toFloat()),
+                    palette.rippleOnSurface,
+                )
+                isClickable = true
+                isFocusable = true
+                setOnClickListener {
+                    performSubtleHaptic(this)
+                    val filled = "${cmd.trigger} "
+                    taskInput.setText(filled)
+                    taskInput.setSelection(filled.length)
+                    taskInput.requestFocus()
+                    slashPopupContainer.visibility = View.GONE
+                    syncComposerState()
+                }
+            }
+            row.addView(
+                text(cmd.trigger, 13f, palette.teal, true).apply {
+                    setPadding(0, 0, dp(10), 0)
+                }
+            )
+            row.addView(
+                text(cmd.description, 12.5f, palette.muted).apply {
+                    maxLines = 1
+                    ellipsize = TextUtils.TruncateAt.END
+                },
+                LinearLayout.LayoutParams(0, -2, 1f),
+            )
+            slashPopupContainer.addView(row)
+            if (index < matches.lastIndex) {
+                slashPopupContainer.addView(dividerView(this, palette))
+            }
+        }
+        slashPopupContainer.visibility = View.VISIBLE
+    }
+
+    private fun updateWorkspaceSubtitle() {
+        if (!::workspaceSubtitleView.isInitialized) return
+        val proj = activeProjectId?.let { projectStore.getProject(it) }
+        val ctxUsed = engineManager.cachedConversationTokens
+        val parts = buildList {
+            proj?.let { add(it.name) }
+            if (isAgentModeEnabled) add("Agent")
+            if (ctxUsed > 0) {
+                val pct = ((ctxUsed * 100) / ContextBudgetManager.TokenBudget.DEFAULT_MAX_CONTEXT_TOKENS).coerceIn(1, 100)
+                add("Ctx $pct%")
+            }
+        }
+        if (parts.isEmpty()) {
+            workspaceSubtitleView.visibility = View.GONE
+            workspaceSubtitleView.text = ""
+        } else {
+            workspaceSubtitleView.text = parts.joinToString(" · ")
+            workspaceSubtitleView.visibility = View.VISIBLE
+        }
+    }
+
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString(STATE_PENDING_ANSWER_SAVE, pendingAnswerToSave)
         outState.putString(STATE_ACTIVE_SESSION_ID, currentSession?.id)
@@ -1108,6 +1393,15 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             }
             return
         }
+        if (requestCode == CREATE_ARTIFACT_HTML) {
+            val html = pendingHtmlToExport
+            pendingHtmlToExport = null
+            val destination = if (resultCode == RESULT_OK) data?.data else null
+            if (destination != null && !html.isNullOrBlank()) {
+                saveAnswerToUri(destination, html)
+            }
+            return
+        }
         if (resultCode != RESULT_OK || data == null) return
         if (requestCode == PICK_MODEL) {
             data.data?.let(::importModel)
@@ -1122,6 +1416,8 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             data.data?.let(::importWhisperModel)
         } else if (requestCode == PICK_WAV) {
             data.data?.let(::transcribeWav)
+        } else if (requestCode == PICK_IMAGE_OCR) {
+            data.data?.let(::stageImageUri)
         }
     }
 
@@ -1160,8 +1456,19 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
 
                 val labelForProgress = cleanName ?: "model"
                 mainHandler.post { updateStatus("Importing $labelForProgress into private storage…") }
+                val existingLegacy = File(filesDir, "model.litertlm")
+                val targetStoreDir = if (!existingLegacy.exists() || existingLegacy.length() == 0L) {
+                    filesDir
+                } else {
+                    val baseSlug = (cleanName ?: "model")
+                        .replace(".litertlm", "", ignoreCase = true)
+                        .replace(Regex("[^a-zA-Z0-9_-]"), "_")
+                        .take(32)
+                        .ifBlank { "model" }
+                    File(ModelLibraryStore.defaultDir(filesDir), "${baseSlug}_${System.currentTimeMillis()}")
+                }
                 val target = contentResolver.openInputStream(uri)?.use { input ->
-                    ModelFileStore(filesDir).importModel(
+                    ModelFileStore(targetStoreDir).importModel(
                         input = input,
                         expectedBytes = expectedBytes,
                     ) { copied, total ->
@@ -1174,6 +1481,12 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                         mainHandler.post { updateStatus(progressMsg) }
                     }
                 } ?: error("Could not open the selected file.")
+
+                modelLibraryStore.registerModel(
+                    filePath = target.absolutePath,
+                    displayName = cleanName ?: target.name,
+                    makeActive = true,
+                )
 
                 settingsPrefs.edit().apply {
                     if (!cleanName.isNullOrBlank()) putString(PREF_MODEL_DISPLAY_NAME, cleanName)
@@ -1220,6 +1533,11 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                         ?: error("Could not read $name")
                     names.add(name)
                     content.append("\n\n--- $name ---\n").append(text)
+                    if (text.isNotBlank()) {
+                        try {
+                            documentVault.addDocument(id = name, name = name, text = text)
+                        } catch (_: Exception) {}
+                    }
                 }
                 require(content.isNotBlank()) { "The selected files are empty." }
                 attachedContext = content.toString().take(MAX_ATTACHMENT_CHARS)
@@ -1255,6 +1573,15 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 val extraction = PdfTextExtractor.extract(this, input, remaining - sourceLabel.length)
                 attachedContext = (attachedContext + sourceLabel + extraction.text).take(MAX_ATTACHMENT_CHARS)
                 attachedNames.add("$displayName (${extraction.pageCount} pages)")
+                if (extraction.text.isNotBlank()) {
+                    try {
+                        documentVault.addDocument(
+                            id = displayName,
+                            name = displayName,
+                            text = extraction.text,
+                        )
+                    } catch (_: Exception) {}
+                }
                 mainHandler.post {
                     attachmentText.text = attachedNames.joinToString(" · ") +
                         "\n${"%,d".format(attachedContext.length)}/${"%,d".format(MAX_ATTACHMENT_CHARS)} chars used. PDF text extracted locally."
@@ -1555,6 +1882,9 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         attachmentGeneration++
         attachedContext = ""
         attachedNames.clear()
+        attachedImagePath?.let { path -> try { File(path).delete() } catch (_: Exception) {} }
+        attachedImagePath = null
+        attachedImageName = null
         transcriptReviewPending = false
         confirmTranscriptButton.visibility = View.GONE
         attachmentPreview.text = ""
@@ -1566,6 +1896,44 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         engineManager.invalidateConversation("attachment removed")
         syncComposerState()
         updateStatus("Attachment removed.")
+    }
+
+    private fun stageImageUri(uri: Uri) {
+        updateStatus("Staging image locally for Omni vision…")
+        ioExecutor.execute {
+            try {
+                val displayName = (queryDisplayName(uri) ?: "Image")
+                    .replace(Regex("[\\r\\n]+"), " ")
+                    .take(60)
+                val optsBounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, optsBounds) }
+                    ?: error("Could not read image.")
+                var sample = 1
+                val maxDim = 768
+                while (optsBounds.outWidth / (sample * 2) >= maxDim || optsBounds.outHeight / (sample * 2) >= maxDim) {
+                    sample *= 2
+                }
+                val decodeOpts = BitmapFactory.Options().apply { inSampleSize = sample }
+                val decoded = contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, decodeOpts) }
+                    ?: error("Unsupported image format.")
+                val outFile = File(cacheDir, "pocketagent-vision-${System.currentTimeMillis()}.jpg")
+                java.io.FileOutputStream(outFile).use { fos ->
+                    decoded.compress(Bitmap.CompressFormat.JPEG, 88, fos)
+                }
+                decoded.recycle()
+                attachedImagePath?.let { old -> try { File(old).delete() } catch (_: Exception) {} }
+                attachedImagePath = outFile.absolutePath
+                attachedImageName = displayName
+                mainHandler.post {
+                    syncComposerState()
+                    updateStatus("Image attached ($displayName). Ask your question using an Omni model.")
+                }
+            } catch (e: Exception) {
+                mainHandler.post {
+                    updateStatus("Could not attach image: ${e.message ?: "unsupported image"}")
+                }
+            }
+        }
     }
 
     private fun showAttachmentPreview(value: String) {
@@ -1650,7 +2018,36 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             onRefine = { refineLastAnswer() },
             onPreviewCode = { code, language ->
                 performSubtleHaptic(chatThreadContainer, isConfirm = true)
-                HtmlArtifactSandbox.showPreviewDialog(this, code, language, palette)
+                HtmlArtifactSandbox.showPreviewDialog(
+                    context = this,
+                    code = code,
+                    language = language,
+                    palette = palette,
+                    onSaveArtifact = { savedCode, savedLang ->
+                        showSaveArtifactDialog(savedCode, savedLang)
+                    },
+                )
+            },
+            onSaveToNotes = { text ->
+                val toSave = text.ifBlank { answerProvider() }
+                if (toSave.isNotBlank()) showSaveToNotesDialog(toSave)
+            },
+            onEditPrompt = { promptText ->
+                if (promptText.isNotBlank()) {
+                    performSubtleHaptic(taskInput)
+                    taskInput.setText(promptText)
+                    taskInput.setSelection(promptText.length)
+                    taskInput.requestFocus()
+                    syncComposerState()
+                    updateStatus("Editing previous prompt — adjust and tap Ask.")
+                }
+            },
+            onFollowUpChip = { chipPrompt ->
+                taskInput.setText(chipPrompt)
+                taskInput.setSelection(chipPrompt.length)
+                taskInput.requestFocus()
+                syncComposerState()
+                scrollChatToBottom()
             },
         )
 
@@ -1692,6 +2089,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         convKey: String,
         prompt: String,
         systemInstruction: String,
+        imagePath: String? = null,
     ): String {
         val accumulated = StringBuilder()
         val firstChunk = AtomicBoolean(true)
@@ -1717,30 +2115,51 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         activeStreamLatch = streamFinished
         engineManager.beginGeneration()
         try {
-            conversation.sendMessage(
-                prompt,
-                object : MessageCallback {
-                    override fun onMessage(message: Message) {
-                        if (isGeneratingCancelled.get() && !guard.wasCancelled) {
-                            guard.cancel()
-                        }
-                        if (!guard.accept(accumulated, message.toString())) {
-                            conversation.cancel()
-                            streamFinished.countDown()
-                        }
+            val callback = object : MessageCallback {
+                override fun onMessage(message: Message) {
+                    if (isGeneratingCancelled.get() && !guard.wasCancelled) {
+                        guard.cancel()
                     }
-
-                    override fun onDone() {
+                    if (!guard.accept(accumulated, message.toString())) {
+                        conversation.cancel()
                         streamFinished.countDown()
                     }
+                }
 
-                    override fun onError(throwable: Throwable) {
-                        streamError.set(throwable)
-                        streamFinished.countDown()
+                override fun onDone() {
+                    streamFinished.countDown()
+                }
+
+                override fun onError(throwable: Throwable) {
+                    streamError.set(throwable)
+                    streamFinished.countDown()
+                }
+            }
+            if (!imagePath.isNullOrBlank() && engineManager.visionEnabled) {
+                try {
+                    conversation.sendImageMessage(
+                        imagePath = imagePath,
+                        prompt = prompt,
+                        callback = callback,
+                        maxOutputTokens = currentMaxOutputTokens,
+                    )
+                } catch (_: Throwable) {
+                    mainHandler.post {
+                        updateStatus("Current model could not read image; falling back to text.")
                     }
-                },
-                maxOutputTokens = MAX_RESPONSE_TOKENS,
-            )
+                    conversation.sendMessage(
+                        prompt,
+                        callback,
+                        maxOutputTokens = currentMaxOutputTokens,
+                    )
+                }
+            } else {
+                conversation.sendMessage(
+                    prompt,
+                    callback,
+                    maxOutputTokens = currentMaxOutputTokens,
+                )
+            }
 
             // Bounded wait: a stalled engine must not wedge the inference thread, which would
             // make every later request look frozen with the last answer on screen.
@@ -1847,6 +2266,9 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             isLatest = true,
             showActions = true,
         )
+        if (answerIsComplete && !stoppedByUser) {
+            handle.bindFollowUpChips(FollowUpSuggestionGenerator.suggestFollowUps(lastPrompt, result))
+        }
         maybeFollowStreamingOutput()
     }
 
@@ -1964,7 +2386,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         val task = lastPrompt
         val handle = activeAssistantHandle ?: return
         if (task.isBlank() || isGeneratingUi || engineManager.isGenerationActive) return
-        val modelFile = File(filesDir, "model.litertlm")
+        val modelFile = activeModelFile()
         if (!modelFile.exists()) {
             updateStatus("Choose a compatible .litertlm model first.")
             return
@@ -1994,7 +2416,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 val refineTrace = buildList {
                     if (calculation != null) add("Calculator" to "${calculation.expression} = ${calculation.displayOutput}")
                     if (matchedNotes.isNotEmpty()) add("Notes" to matchedNotes.joinToString(", ") { it.title })
-                    memoryEval.second?.let { add(it) }
+                    addAll(memoryEval.second)
                 }
                 if (refineTrace.isNotEmpty()) {
                     mainHandler.post { if (!isDestroyed) handle.bindAgentTraceChips(refineTrace) }
@@ -2081,8 +2503,29 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     private fun buildEffectiveInstructionWithTrace(
         task: String,
         intent: AnswerDirective.Intent,
-    ): Pair<String, Pair<String, String>?> {
-        if (!isMemoryEnabled) return AnswerDirective.systemInstructionFor(intent) to null
+        slashCommand: SlashCommandDetector.SlashCommand? = null,
+    ): Pair<String, List<Pair<String, String>>> {
+        val traces = mutableListOf<Pair<String, String>>()
+        val activeProj = activeProjectId?.let { projectStore.getProject(it) }
+        val baseDirective = buildString {
+            if (slashCommand != null) {
+                append(slashCommand.systemPromptPrefix).append("\n\n")
+                traces += "Command" to slashCommand.trigger
+            }
+            if (activeProj != null) {
+                if (activeProj.systemInstructions.isNotBlank()) {
+                    append("[Active Project: ").append(activeProj.name).append("]\n")
+                    append(activeProj.systemInstructions).append("\n\n")
+                }
+                traces += "Project" to activeProj.name
+            }
+            if (isAgentModeEnabled) {
+                append(AgentToolLoop.AGENT_MODE_INSTRUCTION).append("\n\n")
+                traces += "Agent Mode" to "Tools enabled"
+            }
+            append(AnswerDirective.systemInstructionFor(intent))
+        }
+        if (!isMemoryEnabled) return baseDirective to traces
         val candidateFacts = MemoryFactExtractor.extractCandidateFacts(task)
         for (cf in candidateFacts) {
             userMemoryStore.addFact(
@@ -2094,15 +2537,14 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         }
         val memoryBlock = userMemoryStore.buildPromptContext(maxTokens = 120)
         val enriched = ContextBudgetManager().enrichSystemInstructionWithMemory(
-            AnswerDirective.systemInstructionFor(intent),
+            baseDirective,
             memoryBlock,
         )
-        val trace = when {
-            candidateFacts.isNotEmpty() -> "Memory Saved" to candidateFacts.first().content
-            memoryBlock.isNotBlank() -> "Memory" to "Applied personal context"
-            else -> null
+        when {
+            candidateFacts.isNotEmpty() -> traces += "Memory Saved" to candidateFacts.first().content
+            memoryBlock.isNotBlank() -> traces += "Memory" to "Applied personal context"
         }
-        return enriched to trace
+        return enriched to traces
     }
 
     private fun effectiveSystemInstruction(task: String, intent: AnswerDirective.Intent): String =
@@ -2144,13 +2586,13 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             updateStatus("Expand and review the complete transcript, then tap Use reviewed transcript.")
             return
         }
-        val task = taskInput.text.toString().trim()
-        if (task.isEmpty() && attachedContext.isEmpty()) {
+        val rawTask = taskInput.text.toString().trim()
+        if (rawTask.isEmpty() && attachedContext.isEmpty() && attachedImagePath.isNullOrBlank()) {
             updateStatus("Type a task, dictate it, or attach a text/PDF file first.")
             taskInput.requestFocus()
             return
         }
-        val modelFile = File(filesDir, "model.litertlm")
+        val modelFile = activeModelFile()
         if (!modelFile.exists()) {
             updateStatus("Choose a compatible .litertlm model first.")
             return
@@ -2158,6 +2600,15 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         if (engineManager.isGenerationActive || isGeneratingUi) {
             updateStatus("An answer is already being generated. Tap Stop first.")
             return
+        }
+        val detectedSlash = SlashCommandDetector.detectCommand(rawTask)
+        val task = if (detectedSlash != null) {
+            SlashCommandDetector.stripCommand(rawTask, detectedSlash)
+                .ifBlank { "Apply ${detectedSlash.displayName}: ${detectedSlash.description}" }
+        } else if (rawTask.isBlank() && !attachedImagePath.isNullOrBlank()) {
+            "Describe and analyze this attached image in detail."
+        } else {
+            rawTask
         }
         // Assign session ID before building the cache key so Turn 1 and Turn 2 share the warm KV cache.
         val existingSession = currentSession
@@ -2187,14 +2638,18 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         } else {
             null
         }
-        val attachmentRefs = attachedNames.toList()
+        val attachmentRefs = buildList {
+            addAll(attachedNames)
+            attachedImageName?.let { add("Image: $it") }
+        }
         val userMsg = ChatMessage.user(
-            content = task,
+            content = rawTask.ifBlank { task },
             attachmentContent = if (attachedContext.isNotBlank()) attachedContext else null,
             attachmentSummary = attachmentSummary,
             attachmentReferences = attachmentRefs,
         )
-        val userCard = ChatMessageCardBuilder.buildUserCard(this, userMsg, palette)
+        val cardCallbacks = buildCallbacksForAnswer { latestAssistantText }
+        val userCard = ChatMessageCardBuilder.buildUserCard(this, userMsg, palette, cardCallbacks)
         chatThreadContainer.addView(userCard, marginBottom(10))
         animateCardEntrance(userCard)
 
@@ -2204,7 +2659,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             message = null,
             palette = palette,
             isLatest = true,
-            callbacks = buildCallbacksForAnswer { latestAssistantText },
+            callbacks = cardCallbacks,
         )
         chatThreadContainer.addView(handle.rootCard, marginBottom(12))
         animateCardEntrance(handle.rootCard)
@@ -2239,10 +2694,14 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         )
 
         val attachmentSnapshot = attachedContext
+        val imageSnapshot = attachedImagePath
         inferenceExecutor.execute {
             var localCitations = emptyList<LocalDocumentRetriever.DocumentCitation>()
             val traceChips = mutableListOf<Pair<String, String>>()
             try {
+                if (!imageSnapshot.isNullOrBlank()) {
+                    traceChips += "Vision" to (attachedImageName ?: "Image")
+                }
                 ensureEngineInitialized(modelFile)
                 val activeBackendLabel = engineManager.activeBackend?.name ?: initialBackendLabel
                 if (!modelWasLoaded) {
@@ -2271,6 +2730,11 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                     traceChips += "Notes" to matchedNotes.joinToString(", ") { it.title }
                 }
 
+                val vaultExcerpts = if (task.isNotBlank()) documentVault.search(task, topK = 3) else emptyList()
+                if (vaultExcerpts.isNotEmpty()) {
+                    traceChips += "Vault" to "${vaultExcerpts.size} excerpt${if (vaultExcerpts.size > 1) "s" else ""}"
+                }
+
                 val boundedAttachment = if (attachmentSnapshot.isNotBlank()) {
                     val retrieval = LocalDocumentRetriever.retrieveTextWithCitations(
                         query = task,
@@ -2282,15 +2746,24 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                     if (localCitations.isNotEmpty()) {
                         traceChips += "Documents" to "${localCitations.size} citation${if (localCitations.size > 1) "s" else ""}"
                     }
-                    if (retrieval.promptContext.isNotBlank()) retrieval.promptContext else attachmentSnapshot
+                    val baseAtt = if (retrieval.promptContext.isNotBlank()) retrieval.promptContext else attachmentSnapshot
+                    if (vaultExcerpts.isNotEmpty() && baseAtt.length < MAX_ATTACHMENT_CHARS - 200) {
+                        val remaining = MAX_ATTACHMENT_CHARS - baseAtt.length
+                        (baseAtt + "\n\nKnowledge Vault:\n" + vaultExcerpts.joinToString("\n\n")).take(MAX_ATTACHMENT_CHARS)
+                    } else {
+                        baseAtt
+                    }
+                } else if (vaultExcerpts.isNotEmpty()) {
+                    localCitations = emptyList()
+                    ("Knowledge Vault Excerpts:\n" + vaultExcerpts.joinToString("\n\n")).take(MAX_ATTACHMENT_CHARS)
                 } else {
                     localCitations = emptyList()
                     ""
                 }
 
-                val memoryEval = buildEffectiveInstructionWithTrace(task, intent)
+                val memoryEval = buildEffectiveInstructionWithTrace(task, intent, detectedSlash)
                 val effectiveInstruction = memoryEval.first
-                memoryEval.second?.let { traceChips += it }
+                traceChips += memoryEval.second
 
                 if (traceChips.isNotEmpty()) {
                     val snapshot = traceChips.toList()
@@ -2313,7 +2786,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                     relevantNotes = matchedNotes,
                 )
                 if (isWarm &&
-                    engineManager.cachedConversationTokens + promptBuild.estimatedTotalTokens + MAX_RESPONSE_TOKENS >
+                    engineManager.cachedConversationTokens + promptBuild.estimatedTotalTokens + currentMaxOutputTokens >
                     WARM_CONTEXT_RESET_THRESHOLD
                 ) {
                     engineManager.invalidateConversation("context budget reached")
@@ -2334,7 +2807,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
 
                 runawayFragment = null
                 var activeBuild = promptBuild
-                val result = executeWithGpuFallback(
+                var result = executeWithGpuFallback(
                     modelFile = modelFile,
                     onBeforeCpuRetry = {
                         activeBuild = composePrompt(
@@ -2348,7 +2821,38 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                         )
                     },
                 ) {
-                    runGuardedGeneration(convKey, activeBuild.prompt, effectiveInstruction)
+                    runGuardedGeneration(convKey, activeBuild.prompt, effectiveInstruction, imageSnapshot)
+                }
+
+                if (isAgentModeEnabled && !isGeneratingCancelled.get() && runawayFragment == null) {
+                    val agentLoop = AgentToolLoop(
+                        notesStore = notesStore,
+                        documentVault = documentVault,
+                        maxIterations = 3,
+                    )
+                    var loopPrompt = activeBuild.prompt
+                    var loopIter = 0
+                    while (loopIter < 3 && !isGeneratingCancelled.get() && runawayFragment == null) {
+                        val (hasTools, loopRes) = agentLoop.processOutput(result, loopIter)
+                        if (!hasTools || loopRes.toolResults.isEmpty()) break
+                        for (toolRes in loopRes.toolResults) {
+                            traceChips += "Tool: ${toolRes.toolName}" to toolRes.output.take(40)
+                        }
+                        val traceSnapshot = traceChips.toList()
+                        val toolNames = loopRes.toolResults.joinToString(", ") { it.toolName }
+                        mainHandler.post {
+                            if (!isDestroyed) {
+                                handle.bindAgentTraceChips(traceSnapshot)
+                                currentGenerationStageLabel = "Tool: $toolNames"
+                                updateStatus("Executed offline tool ($toolNames); continuing…")
+                            }
+                        }
+                        streamingRenderer.reset()
+                        loopPrompt = agentLoop.buildEnrichedPrompt(loopPrompt, loopRes.toolResults)
+                        result = runGuardedGeneration(convKey, loopPrompt, effectiveInstruction)
+                        loopIter++
+                    }
+                    result = agentLoop.stripToolCallLines(result)
                 }
 
                 if (!isGeneratingCancelled.get()) {
@@ -2361,9 +2865,21 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                         AnswerDirective.isUnsubstantive(result))
                 maybeShowRefineAffordance = needsRefineHint
                 val elapsedMs = SystemClock.elapsedRealtime() - generationStartElapsedMs
+                val ftMs = firstTokenElapsedMs
+                if (!isGeneratingCancelled.get() && ftMs != null && result.length >= 24) {
+                    val decodeMs = elapsedMs - ftMs
+                    if (decodeMs >= 400L) {
+                        val estTokens = (result.length / 4.0f).coerceAtLeast(1f)
+                        val tokPerSec = (estTokens * 1000.0f) / decodeMs
+                        try {
+                            modelLibraryStore.updateActiveBenchmark(tokPerSec)
+                        } catch (_: Exception) {}
+                    }
+                }
                 mainHandler.post {
                     exitGeneratingState()
                     refreshModelStatus()
+                    updateWorkspaceSubtitle()
                     syncComposerState()
                     currentCitations = localCitations
                     renderCitations(localCitations, handle.citationsContainer)
@@ -2496,10 +3012,11 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         chatThreadContainer.removeAllViews()
 
         val lastAssistantIndex = s.messages.indexOfLast { it.isAssistant }
+        val sessionCallbacks = buildCallbacksForAnswer { latestAssistantText }
         for ((index, msg) in s.messages.withIndex()) {
             when (msg.role) {
                 ChatMessage.Role.USER -> {
-                    val card = ChatMessageCardBuilder.buildUserCard(this, msg, palette)
+                    val card = ChatMessageCardBuilder.buildUserCard(this, msg, palette, sessionCallbacks)
                     chatThreadContainer.addView(card, marginBottom(10))
                 }
                 ChatMessage.Role.ASSISTANT -> {
@@ -2509,19 +3026,21 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                         message = msg,
                         palette = palette,
                         isLatest = isLatest,
-                        callbacks = buildCallbacksForAnswer(
-                            if (isLatest) {
-                                { latestAssistantText }
-                            } else {
-                                { msg.content }
-                            }
-                        ),
+                        callbacks = if (isLatest) {
+                            sessionCallbacks
+                        } else {
+                            buildCallbacksForAnswer { msg.content }
+                        },
                     )
                     chatThreadContainer.addView(handle.rootCard, marginBottom(12))
                     if (isLatest) {
                         activeAssistantHandle = handle
                         latestAssistantText = msg.content
                         answerIsComplete = msg.content.isNotBlank()
+                        if (answerIsComplete) {
+                            val lastUser = s.messages.lastOrNull { it.isUser }?.content.orEmpty()
+                            handle.bindFollowUpChips(FollowUpSuggestionGenerator.suggestFollowUps(lastUser, msg.content))
+                        }
                     }
                 }
                 ChatMessage.Role.SYSTEM -> Unit
@@ -3156,19 +3675,35 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         )
 
         lateinit var dialog: AlertDialog
+        val activeProjName = activeProjectId?.let { projectStore.getProject(it)?.name } ?: "Default Workspace"
+        val docCount = documentVault.loadAll().size
+        val artifactCount = artifactStore.loadAll().size
         val items = listOf(
+            Triple(R.drawable.ic_folder, "Projects & Workspaces" to "Active: $activeProjName") {
+                showProjectsDialog()
+            },
             Triple(R.drawable.ic_history, "Saved Conversations" to "Browse, search, or resume past chats") {
                 showHistoryDialog()
             },
             Triple(R.drawable.ic_notes, "Personal Notes" to "Create and organize sovereign notes") {
                 showNotesManagerDialog()
             },
+            Triple(R.drawable.ic_notes, "Document Vault" to "$docCount indexed local document${if (docCount == 1) "" else "s"}") {
+                showDocumentVaultDialog()
+            },
+            Triple(R.drawable.ic_folder, "Artifact Vault" to "$artifactCount saved code & HTML snippet${if (artifactCount == 1) "" else "s"}") {
+                showArtifactVaultDialog()
+            },
             Triple(R.drawable.ic_memory, "Long-Term Memory" to "Inspect and curate remembered facts") {
                 showMemoryCenterDialog()
             },
-            Triple(R.drawable.ic_folder, "Model Manager" to "Switch or manage local LiteRT-LM models") {
-                val stored = File(filesDir, "model.litertlm")
-                if (stored.exists() && stored.length() > 0L) showModelManagerDialog() else chooseModel()
+            Triple(R.drawable.ic_folder, "Model & Tuning" to "Switch models, temperature, context, vision") {
+                val stored = activeModelFile()
+                if ((stored.exists() && stored.length() > 0L) || modelLibraryStore.loadAll().isNotEmpty()) {
+                    showModelManagerDialog()
+                } else {
+                    chooseModel()
+                }
             },
             Triple(R.drawable.ic_shield, "Privacy & Appearance" to "Privacy audit, theme, and security lock") {
                 showPrivacyCenterDialog()
@@ -3233,6 +3768,385 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         showStyledAlertDialog(dialog, palette)
     }
 
+    private fun showSaveToNotesDialog(answerText: String) {
+        val container = styleDialogContainer(this, palette, paddingDp = 16)
+        val suggested = lastPrompt.trim()
+            .replace(Regex("\\s+"), " ")
+            .take(56)
+            .ifBlank { "PocketAgent Answer" }
+        val titleInput = EditText(this).apply {
+            hint = "Note Title"
+            textSize = 14f
+            styleEditText(this, palette)
+            setText(suggested)
+            setSelection(text.length)
+        }
+        container.addView(titleInput, marginBottom(6))
+        container.addView(
+            text("${answerText.length} chars will be saved locally.", 12f, palette.muted)
+        )
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Save Answer to Notes")
+            .setView(container)
+            .setPositiveButton("Save") { _, _ ->
+                val title = titleInput.text.toString().trim().ifBlank { "PocketAgent Answer" }
+                notesStore.createNote(title = title, content = answerText, tags = listOf("saved-answer"))
+                updateStatus("Saved answer to Personal Notes ($title).")
+                Toast.makeText(this, "Saved to Notes", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Cancel", null)
+            .create()
+        showStyledAlertDialog(dialog, palette)
+    }
+
+    private fun showSaveArtifactDialog(code: String, language: String?) {
+        val container = styleDialogContainer(this, palette, paddingDp = 16)
+        val langLabel = language?.trim()?.takeIf { it.isNotEmpty() } ?: "html"
+        val suggestedTitle = lastPrompt.trim().replace(Regex("\\s+"), " ").take(48)
+            .ifBlank { "${langLabel.uppercase(Locale.ROOT)} Artifact" }
+        val titleInput = EditText(this).apply {
+            hint = "Artifact Title"
+            textSize = 14f
+            styleEditText(this, palette)
+            setText(suggestedTitle)
+            setSelection(text.length)
+        }
+        container.addView(titleInput)
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Save to Artifact Vault")
+            .setView(container)
+            .setPositiveButton("Save") { _, _ ->
+                val title = titleInput.text.toString().trim().ifBlank { "Artifact" }
+                artifactStore.save(
+                    ArtifactStore.Artifact(
+                        title = title,
+                        language = langLabel,
+                        code = code,
+                    )
+                )
+                updateStatus("Artifact saved to vault ($title).")
+                Toast.makeText(this, "Saved to Artifact Vault", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Cancel", null)
+            .create()
+        showStyledAlertDialog(dialog, palette)
+    }
+
+    private fun showProjectsDialog() {
+        val root = styleDialogContainer(this, palette, paddingDp = 16)
+        root.addView(
+            text("Switch project workspace or customize its system prompt:", 12.5f, palette.muted),
+            marginBottom(10),
+        )
+        val listCol = column()
+        val scroll = ScrollView(this).apply {
+            addView(listCol)
+            layoutParams = LinearLayout.LayoutParams(-1, dp(320))
+        }
+        root.addView(scroll)
+
+        lateinit var dialog: AlertDialog
+
+        fun refreshProjectsList() {
+            listCol.removeAllViews()
+            val isDefaultSelected = activeProjectId == null
+            val defaultRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                minimumHeight = dp(48)
+                setPadding(dp(12), dp(10), dp(12), dp(10))
+                background = rippleDrawable(
+                    roundedShape(
+                        color = if (isDefaultSelected) palette.mint else palette.surfaceElevated,
+                        radiusPx = dp(14).toFloat(),
+                        strokeWidthPx = maxOf(1, dp(if (isDefaultSelected) 2 else 1)),
+                        strokeColor = if (isDefaultSelected) palette.teal else palette.border,
+                    ),
+                    palette.rippleOnSurface,
+                )
+                isClickable = true
+                isFocusable = true
+                setOnClickListener {
+                    if (activeProjectId != null) {
+                        activeProjectId = null
+                        settingsPrefs.edit().remove(PREF_ACTIVE_PROJECT_ID).apply()
+                        engineManager.invalidateConversation("project switched to default")
+                        updateWorkspaceSubtitle()
+                    }
+                    dialog.dismiss()
+                    updateStatus("Active workspace: Default")
+                }
+            }
+            val defaultText = column().apply {
+                addView(text(if (isDefaultSelected) "✓ Default Workspace" else "Default Workspace", 14f, if (isDefaultSelected) palette.teal else palette.ink, true))
+                addView(text("Standard general-purpose offline assistant", 12f, palette.muted))
+            }
+            defaultRow.addView(defaultText, LinearLayout.LayoutParams(0, -2, 1f))
+            listCol.addView(defaultRow, marginBottom(8))
+
+            val projects = projectStore.loadAll()
+            for (proj in projects) {
+                val selected = proj.id == activeProjectId
+                val row = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    minimumHeight = dp(48)
+                    setPadding(dp(12), dp(10), dp(6), dp(10))
+                    background = rippleDrawable(
+                        roundedShape(
+                            color = if (selected) palette.mint else palette.surfaceElevated,
+                            radiusPx = dp(14).toFloat(),
+                            strokeWidthPx = maxOf(1, dp(if (selected) 2 else 1)),
+                            strokeColor = if (selected) palette.teal else palette.border,
+                        ),
+                        palette.rippleOnSurface,
+                    )
+                    isClickable = true
+                    isFocusable = true
+                    setOnClickListener {
+                        activeProjectId = proj.id
+                        settingsPrefs.edit().putString(PREF_ACTIVE_PROJECT_ID, proj.id).apply()
+                        engineManager.invalidateConversation("project switched")
+                        updateWorkspaceSubtitle()
+                        dialog.dismiss()
+                        updateStatus("Switched to project: ${proj.name}")
+                    }
+                }
+                val info = column().apply {
+                    addView(text(if (selected) "✓ ${proj.name}" else proj.name, 14f, if (selected) palette.teal else palette.ink, true))
+                    val preview = proj.systemInstructions.ifBlank { "No custom instructions" }
+                    addView(text(preview, 12f, palette.muted).apply {
+                        maxLines = 2
+                        ellipsize = TextUtils.TruncateAt.END
+                    })
+                }
+                row.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
+                val editBtn = iconTouchButton(this, palette, "✎", "Edit project ${proj.name}", palette.teal, 15f) {
+                    promptProjectEditor(proj) { refreshProjectsList() }
+                }
+                row.addView(editBtn)
+                val delBtn = iconTouchButton(this, palette, "✕", "Delete project ${proj.name}", palette.muted, 16f) {
+                    projectStore.delete(proj.id)
+                    if (activeProjectId == proj.id) {
+                        activeProjectId = null
+                        settingsPrefs.edit().remove(PREF_ACTIVE_PROJECT_ID).apply()
+                        engineManager.invalidateConversation("active project deleted")
+                        updateWorkspaceSubtitle()
+                    }
+                    refreshProjectsList()
+                }
+                row.addView(delBtn)
+                listCol.addView(row, marginBottom(8))
+            }
+        }
+
+        dialog = AlertDialog.Builder(this)
+            .setTitle("Projects & Workspaces")
+            .setView(root)
+            .setPositiveButton("+ New Project") { _, _ ->
+                promptProjectEditor(null) {
+                    updateWorkspaceSubtitle()
+                    showProjectsDialog()
+                }
+            }
+            .setNegativeButton("Close", null)
+            .create()
+        refreshProjectsList()
+        showStyledAlertDialog(dialog, palette)
+    }
+
+    private fun promptProjectEditor(existing: ProjectStore.Project?, onSaved: () -> Unit) {
+        val container = styleDialogContainer(this, palette, paddingDp = 16)
+        val nameInput = EditText(this).apply {
+            hint = "Project Name (e.g. Android Coach)"
+            textSize = 14f
+            styleEditText(this, palette)
+            if (existing != null) setText(existing.name)
+        }
+        container.addView(nameInput, marginBottom(10))
+        val instrInput = EditText(this).apply {
+            hint = "Custom System Instructions (role, rules, output format)…"
+            textSize = 13.5f
+            styleEditText(this, palette)
+            minLines = 4
+            gravity = Gravity.TOP or Gravity.START
+            if (existing != null) setText(existing.systemInstructions)
+        }
+        container.addView(instrInput)
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(if (existing == null) "Create Project" else "Edit Project")
+            .setView(container)
+            .setPositiveButton("Save") { _, _ ->
+                val name = nameInput.text.toString().trim()
+                val instr = instrInput.text.toString().trim()
+                if (name.isNotBlank()) {
+                    val toSave = if (existing == null) {
+                        ProjectStore.Project(name = name, systemInstructions = instr)
+                    } else {
+                        existing.copy(name = name, systemInstructions = instr, updatedAt = System.currentTimeMillis())
+                    }
+                    if (projectStore.save(toSave)) {
+                        activeProjectId = toSave.id
+                        settingsPrefs.edit().putString(PREF_ACTIVE_PROJECT_ID, toSave.id).apply()
+                        engineManager.invalidateConversation("project updated")
+                        updateWorkspaceSubtitle()
+                    }
+                    onSaved()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .create()
+        showStyledAlertDialog(dialog, palette)
+    }
+
+    private fun showDocumentVaultDialog() {
+        val root = styleDialogContainer(this, palette, paddingDp = 16)
+        root.addView(
+            text("Attached PDFs & text files are indexed here offline and searched automatically across chats.", 12f, palette.muted),
+            marginBottom(10),
+        )
+        val listCol = column()
+        val scroll = ScrollView(this).apply {
+            addView(listCol)
+            layoutParams = LinearLayout.LayoutParams(-1, dp(320))
+        }
+        root.addView(scroll)
+
+        fun refreshVault() {
+            listCol.removeAllViews()
+            val docs = documentVault.loadAll()
+            if (docs.isEmpty()) {
+                listCol.addView(
+                    text("No documents indexed yet.\nUse + PDF or + Text in the composer to index files.", 13f, palette.muted).apply {
+                        gravity = Gravity.CENTER
+                        setPadding(0, dp(28), 0, dp(28))
+                    }
+                )
+                return
+            }
+            for (doc in docs) {
+                val card = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(dp(12), dp(10), dp(6), dp(10))
+                    background = roundedShape(
+                        color = palette.surfaceElevated,
+                        radiusPx = dp(14).toFloat(),
+                        strokeWidthPx = maxOf(1, dp(1)),
+                        strokeColor = palette.border,
+                    )
+                }
+                val info = column().apply {
+                    addView(text(doc.name, 14f, palette.ink, true))
+                    addView(text("${doc.chunkCount} searchable chunks · ${doc.extractedText.length} chars", 11.5f, palette.teal))
+                }
+                card.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
+                val delBtn = iconTouchButton(this, palette, "✕", "Remove ${doc.name}", palette.muted, 16f) {
+                    documentVault.removeDocument(doc.id)
+                    refreshVault()
+                }
+                card.addView(delBtn)
+                listCol.addView(card, marginBottom(8))
+            }
+        }
+        refreshVault()
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Document Knowledge Vault")
+            .setView(root)
+            .setPositiveButton("+ Add PDF") { _, _ -> choosePdf() }
+            .setNeutralButton("+ Add Text") { _, _ -> chooseTextFiles() }
+            .setNegativeButton("Close", null)
+            .create()
+        showStyledAlertDialog(dialog, palette)
+    }
+
+    private fun showArtifactVaultDialog() {
+        val root = styleDialogContainer(this, palette, paddingDp = 16)
+        root.addView(
+            text("Saved HTML games, visualizations, and code blocks stored offline.", 12f, palette.muted),
+            marginBottom(10),
+        )
+        val listCol = column()
+        val scroll = ScrollView(this).apply {
+            addView(listCol)
+            layoutParams = LinearLayout.LayoutParams(-1, dp(330))
+        }
+        root.addView(scroll)
+
+        fun refreshArtifacts() {
+            listCol.removeAllViews()
+            val artifacts = artifactStore.loadAll()
+            if (artifacts.isEmpty()) {
+                listCol.addView(
+                    text("No saved artifacts yet.\nOpen any ▶ Preview and tap Save to store it here.", 13f, palette.muted).apply {
+                        gravity = Gravity.CENTER
+                        setPadding(0, dp(28), 0, dp(28))
+                    }
+                )
+                return
+            }
+            for (art in artifacts) {
+                val card = cardContainer(this, palette, cornerDp = 14, elevated = true, paddingDp = 12)
+                card.addView(text(art.title, 14f, palette.ink, true))
+                card.addView(
+                    text("${art.language.uppercase(Locale.ROOT).ifBlank { "TEXT" }} · ${art.code.length} chars", 11.5f, palette.muted).apply {
+                        setPadding(0, dp(2), 0, dp(8))
+                    }
+                )
+                val btnRow = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                }
+                if (HtmlArtifactSandbox.isPreviewableCode(art.language, art.code)) {
+                    btnRow.addView(
+                        com.example.pocketagent.pillButton(this, palette, "Preview", compact = true) {
+                            HtmlArtifactSandbox.showPreviewDialog(this, art.code, art.language, palette)
+                        }.apply {
+                            layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(6) }
+                        }
+                    )
+                }
+                btnRow.addView(
+                    secondaryOutlineButton(this, palette, "Export .html", compact = true, textColor = palette.teal) {
+                        val html = artifactStore.exportHtml(art)
+                        pendingHtmlToExport = html
+                        val safeSlug = art.title.replace(Regex("[^a-zA-Z0-9_-]"), "_").take(32).ifBlank { "artifact" }
+                        val createIntent = Intent(Intent.ACTION_CREATE_DOCUMENT)
+                            .addCategory(Intent.CATEGORY_OPENABLE)
+                            .setType("text/html")
+                            .putExtra(Intent.EXTRA_TITLE, "$safeSlug.html")
+                        try {
+                            startActivityForResult(createIntent, CREATE_ARTIFACT_HTML)
+                        } catch (_: ActivityNotFoundException) {
+                            pendingHtmlToExport = null
+                            shareAnswerText(html)
+                        }
+                    }.apply {
+                        layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(6) }
+                    }
+                )
+                btnRow.addView(
+                    dangerButton(this, palette, "Delete", compact = true) {
+                        artifactStore.delete(art.id)
+                        refreshArtifacts()
+                    }
+                )
+                card.addView(btnRow)
+                listCol.addView(card, marginBottom(8))
+            }
+        }
+        refreshArtifacts()
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Artifact Vault")
+            .setView(root)
+            .setNegativeButton("Close", null)
+            .create()
+        showStyledAlertDialog(dialog, palette)
+    }
+
     private fun showDuplexVoiceDialog() {
         if (engineManager.isGenerationActive || isGeneratingUi) {
             Toast.makeText(this, "Stop active text generation before starting voice mode.", Toast.LENGTH_SHORT).show()
@@ -3242,7 +4156,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             Toast.makeText(this, "Select a local Whisper model first.", Toast.LENGTH_SHORT).show()
             return
         }
-        val model = File(filesDir, "model.litertlm")
+        val model = activeModelFile()
         if (!model.exists() || model.length() == 0L) {
             Toast.makeText(this, "Select a local LiteRT-LM model first.", Toast.LENGTH_SHORT).show()
             return
@@ -3597,8 +4511,11 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 .setTitle("Panic Data Wipe")
                 .setMessage("This will permanently delete all conversation history, memories, and personal notes on this device. (AI models will be kept).\n\nProceed?")
                 .setPositiveButton("Erase Everything") { _, _ ->
+                    activeProjectId = null
+                    settingsPrefs.edit().remove(PREF_ACTIVE_PROJECT_ID).apply()
                     PrivacyAuditCenter.wipeAllUserData(filesDir, cacheDir, purgeModels = false)
                     startNewConversation()
+                    updateWorkspaceSubtitle()
                     Toast.makeText(this, "All personal data has been erased.", Toast.LENGTH_LONG).show()
                 }
                 .setNegativeButton("Cancel", null)
@@ -3875,6 +4792,15 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             Toast.makeText(this, "Speech is not ready yet", Toast.LENGTH_SHORT).show()
             return
         }
+        val targetLocale = if (FollowUpSuggestionGenerator.containsBengaliScript(text)) {
+            Locale("bn", "IN")
+        } else {
+            Locale.getDefault()
+        }
+        val langResult = tts?.setLanguage(targetLocale)
+        if (langResult == TextToSpeech.LANG_MISSING_DATA || langResult == TextToSpeech.LANG_NOT_SUPPORTED) {
+            tts?.setLanguage(Locale.getDefault())
+        }
         tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "pocketagent-answer")
     }
 
@@ -3885,9 +4811,12 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
 
     private fun refreshModelStatus() {
         if (!::modelStatusPill.isInitialized) return
-        val model = File(filesDir, "model.litertlm")
+        val model = activeModelFile()
         val hasModel = model.exists() && model.length() > 0L
-        val savedName = if (hasModel) settingsPrefs.getString(PREF_MODEL_DISPLAY_NAME, null) else null
+        val activeEntry = modelLibraryStore.getActive()
+        val savedName = if (hasModel) {
+            activeEntry?.displayName ?: settingsPrefs.getString(PREF_MODEL_DISPLAY_NAME, null)
+        } else null
         val sizeBytes = if (hasModel) model.length() else 0L
         val formattedSize = if (hasModel) formatStorageSize(sizeBytes) else ""
         val badgeState = ComposerChromeHelper.formatModelBadge(
@@ -3901,16 +4830,22 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         if (::heroModelCtaButton.isInitialized) {
             heroModelCtaButton.visibility = if (hasModel) View.GONE else View.VISIBLE
         }
+        updateWorkspaceSubtitle()
     }
 
     private fun showModelManagerDialog() {
-        val model = File(filesDir, "model.litertlm")
-        if (!model.exists() || model.length() == 0L) {
+        ensureLegacyModelRegistered()
+        val model = activeModelFile()
+        val allModels = modelLibraryStore.loadAll()
+        if ((!model.exists() || model.length() == 0L) && allModels.isEmpty()) {
             chooseModel()
             return
         }
-        val modelName = settingsPrefs.getString(PREF_MODEL_DISPLAY_NAME, null) ?: "model.litertlm"
-        val sizeStr = formatStorageSize(model.length())
+        val activeEntry = modelLibraryStore.getActive()
+        val modelName = activeEntry?.displayName
+            ?: settingsPrefs.getString(PREF_MODEL_DISPLAY_NAME, null)
+            ?: model.name
+        val sizeStr = if (model.exists()) formatStorageSize(model.length()) else "0 B"
         val isCpuOnly = engineManager.preference == BackendPreference.CPU_ONLY
         val runtimeState = when (engineManager.activeBackend) {
             ActiveBackend.GPU -> "Loaded in RAM (GPU)"
@@ -3926,11 +4861,18 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         val infoCard = cardContainer(this, palette, cornerDp = 14, elevated = true, paddingDp = 14)
         infoCard.addView(text(modelName, 15f, palette.ink, true))
         infoCard.addView(text("Size: $sizeStr  ·  $runtimeState", 12.5f, palette.muted).apply {
-            setPadding(0, dp(4), 0, dp(8))
+            setPadding(0, dp(4), 0, dp(6))
         })
+        if (activeEntry != null && activeEntry.tokensPerSecond > 0f) {
+            infoCard.addView(
+                text("Measured Speed: ${activeEntry.tokensPerSecondLabel}", 12f, palette.teal, true).apply {
+                    setPadding(0, 0, 0, dp(6))
+                }
+            )
+        }
         infoCard.addView(
             text(
-                "Note: Multimodal (.litertlm Omni) weights occupy storage & memory for their bundle, while PocketAgent runs text inference only (vision/audio towers kept disabled) to save RAM.",
+                "Vision towers remain off by default to save RAM unless Omni Vision Mode is enabled below.",
                 11.5f,
                 palette.muted,
             )
@@ -3938,6 +4880,267 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         bodyCol.addView(infoCard, marginBottom(12))
 
         lateinit var dialog: AlertDialog
+
+        // Context Window Meter Card
+        val maxContext = ContextBudgetManager.TokenBudget.DEFAULT_MAX_CONTEXT_TOKENS
+        val usedContext = engineManager.cachedConversationTokens.coerceIn(0, maxContext)
+        val ctxCard = cardContainer(this, palette, cornerDp = 14, elevated = true, paddingDp = 14)
+        val ctxHeaderRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val ctxTitleView = text("Context Window: $usedContext / $maxContext tok", 13f, palette.ink, true)
+        ctxHeaderRow.addView(ctxTitleView, LinearLayout.LayoutParams(0, -2, 1f))
+        val ctxProgress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = maxContext
+            progress = usedContext
+            progressTintList = ColorStateList.valueOf(
+                if (usedContext >= WARM_CONTEXT_RESET_THRESHOLD) palette.stopCrimson else palette.teal
+            )
+        }
+        val resetCtxBtn = secondaryOutlineButton(this, palette, "Reset", compact = true, textColor = palette.teal) {
+            engineManager.invalidateConversation("manual context reset")
+            ctxTitleView.text = "Context Window: 0 / $maxContext tok"
+            ctxProgress.progress = 0
+            updateWorkspaceSubtitle()
+            Toast.makeText(this, "Conversation KV cache reset", Toast.LENGTH_SHORT).show()
+        }
+        ctxHeaderRow.addView(resetCtxBtn)
+        ctxCard.addView(ctxHeaderRow, marginBottom(8))
+        ctxCard.addView(ctxProgress, LinearLayout.LayoutParams(-1, dp(8)))
+        bodyCol.addView(ctxCard, marginBottom(12))
+
+        // Generation Settings Card (Temperature, Max Tokens, Vision Mode)
+        val settingsCard = cardContainer(this, palette, cornerDp = 14, elevated = true, paddingDp = 14)
+        settingsCard.addView(text("Generation & Capabilities", 14f, palette.ink, true), marginBottom(8))
+
+        val tempLabel = text(
+            String.format(Locale.US, "Temperature: %.1f (lower = precise, higher = creative)", currentTemperature),
+            12.5f,
+            palette.muted,
+        )
+        settingsCard.addView(tempLabel, marginBottom(4))
+        val tempSeek = SeekBar(this).apply {
+            max = 14 // maps 0..14 -> 0.1..1.5
+            progress = (((currentTemperature - 0.1f) * 10f).toInt()).coerceIn(0, 14)
+            progressTintList = ColorStateList.valueOf(palette.teal)
+            thumbTintList = ColorStateList.valueOf(palette.teal)
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                    val temp = (progress + 1) / 10f
+                    tempLabel.text = String.format(Locale.US, "Temperature: %.1f (lower = precise, higher = creative)", temp)
+                    if (fromUser) {
+                        currentTemperature = temp
+                        settingsPrefs.edit().putInt(PREF_TEMPERATURE_BITS, java.lang.Float.floatToIntBits(temp)).apply()
+                        engineManager.updateTemperature(temp)
+                    }
+                }
+                override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+                override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+            })
+        }
+        settingsCard.addView(tempSeek, marginBottom(10))
+
+        settingsCard.addView(text("Max Output Tokens", 12.5f, palette.muted, true), marginBottom(6))
+        val tokenOptions = listOf(256, 512, 1024, 2048)
+        val tokenRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val tokenButtons = mutableListOf<Button>()
+        fun refreshTokenButtons() {
+            tokenButtons.forEachIndexed { i, btn ->
+                val tokVal = tokenOptions[i]
+                val sel = tokVal == currentMaxOutputTokens
+                btn.setTextColor(if (sel) palette.teal else palette.ink)
+                btn.background = rippleDrawable(
+                    roundedShape(
+                        color = if (sel) palette.mint else palette.surface,
+                        radiusPx = dp(12).toFloat(),
+                        strokeWidthPx = maxOf(1, dp(if (sel) 2 else 1)),
+                        strokeColor = if (sel) palette.teal else palette.border,
+                    ),
+                    if (sel) palette.rippleOnMint else palette.rippleOnSurface,
+                )
+            }
+        }
+        for ((index, tok) in tokenOptions.withIndex()) {
+            val btn = Button(this).apply {
+                text = tok.toString()
+                setAllCaps(false)
+                textSize = 12f
+                typeface = Typeface.create("sans-serif", Typeface.BOLD)
+                minHeight = dp(48)
+                minimumHeight = dp(48)
+                backgroundTintList = null
+                stateListAnimator = null
+                setOnClickListener {
+                    currentMaxOutputTokens = tok
+                    settingsPrefs.edit().putInt(PREF_MAX_OUTPUT_TOKENS, tok).apply()
+                    refreshTokenButtons()
+                }
+            }
+            tokenButtons += btn
+            tokenRow.addView(
+                btn,
+                LinearLayout.LayoutParams(0, -2, 1f).apply {
+                    if (index < tokenOptions.lastIndex) marginEnd = dp(6)
+                },
+            )
+        }
+        refreshTokenButtons()
+        settingsCard.addView(tokenRow, marginBottom(10))
+
+        val visionBtn = secondaryOutlineButton(
+            context = this,
+            palette = palette,
+            label = if (isVisionModeEnabled) "Omni Vision Mode: ON (+ Image)" else "Omni Vision Mode: OFF",
+            accessibilityLabel = "Toggle Omni Vision image input support",
+            textColor = if (isVisionModeEnabled) palette.teal else palette.ink,
+        ) {}
+        visionBtn.setOnClickListener {
+            if (engineManager.isGenerationActive || isGeneratingUi) {
+                Toast.makeText(this, "Stop generation first.", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            isVisionModeEnabled = !isVisionModeEnabled
+            settingsPrefs.edit().putBoolean(PREF_VISION_ENABLED, isVisionModeEnabled).apply()
+            inferenceExecutor.execute { engineManager.setVisionMode(isVisionModeEnabled) }
+            visionBtn.text = if (isVisionModeEnabled) "Omni Vision Mode: ON (+ Image)" else "Omni Vision Mode: OFF"
+            syncComposerState()
+            Toast.makeText(
+                this,
+                if (isVisionModeEnabled) "Vision enabled (Omni models) — + Image available in + tray"
+                else "Vision disabled (text-only saves RAM)",
+                Toast.LENGTH_LONG,
+            ).show()
+        }
+        settingsCard.addView(visionBtn, LinearLayout.LayoutParams(-1, -2))
+        bodyCol.addView(settingsCard, marginBottom(12))
+
+        // Saved Model Library Switcher
+        if (allModels.isNotEmpty()) {
+            bodyCol.addView(text("Model Library (${allModels.size})", 12.5f, palette.muted, true), marginBottom(6))
+            for (entry in allModels) {
+                val isAct = entry.isActive
+                val mCard = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(dp(12), dp(10), dp(8), dp(10))
+                    background = roundedShape(
+                        color = if (isAct) palette.mint else palette.surfaceElevated,
+                        radiusPx = dp(14).toFloat(),
+                        strokeWidthPx = maxOf(1, dp(if (isAct) 2 else 1)),
+                        strokeColor = if (isAct) palette.teal else palette.border,
+                    )
+                }
+                val mInfo = column().apply {
+                    addView(text(if (isAct) "✓ ${entry.displayName}" else entry.displayName, 13.5f, if (isAct) palette.teal else palette.ink, true))
+                    addView(text("${entry.sizeLabel}  ·  ${entry.tokensPerSecondLabel}", 11.5f, palette.muted))
+                }
+                mCard.addView(mInfo, LinearLayout.LayoutParams(0, -2, 1f))
+                if (isAct) {
+                    val benchBtn = secondaryOutlineButton(this, palette, "Benchmark", compact = true, textColor = palette.teal) {
+                        if (engineManager.isGenerationActive || isGeneratingUi) {
+                            Toast.makeText(this, "Stop active generation first.", Toast.LENGTH_SHORT).show()
+                            return@secondaryOutlineButton
+                        }
+                        dialog.dismiss()
+                        updateStatus("Benchmarking ${entry.displayName} locally…")
+                        inferenceExecutor.execute {
+                            try {
+                                val benchFile = File(entry.filePath)
+                                ensureEngineInitialized(benchFile)
+                                val conv = engineManager.getOrCreateConversation(
+                                    "benchmark|${benchFile.absolutePath}",
+                                    "Respond concisely.",
+                                )
+                                val startMs = SystemClock.elapsedRealtime()
+                                val latch = CountDownLatch(1)
+                                val sb = StringBuilder()
+                                val benchErr = AtomicReference<Throwable?>(null)
+                                var firstMs: Long? = null
+                                conv.sendMessage(
+                                    "Count cleanly from 1 to 20 separated by commas.",
+                                    object : MessageCallback {
+                                        override fun onMessage(message: Message) {
+                                            if (firstMs == null) firstMs = SystemClock.elapsedRealtime()
+                                            sb.append(message.toString())
+                                        }
+                                        override fun onDone() { latch.countDown() }
+                                        override fun onError(throwable: Throwable) {
+                                            benchErr.set(throwable)
+                                            latch.countDown()
+                                        }
+                                    },
+                                    maxOutputTokens = 64,
+                                )
+                                latch.await(60, TimeUnit.SECONDS)
+                                val endMs = SystemClock.elapsedRealtime()
+                                val err = benchErr.get()
+                                if (err != null) throw err
+                                val decodeMs = (endMs - (firstMs ?: startMs)).coerceAtLeast(250L)
+                                val tokens = (sb.length / 4.0f).coerceAtLeast(1f)
+                                val tokPerSec = (tokens * 1000.0f) / decodeMs
+                                modelLibraryStore.updateBenchmark(entry.id, tokPerSec)
+                                engineManager.invalidateConversation("post-benchmark")
+                                mainHandler.post {
+                                    updateStatus(
+                                        String.format(
+                                            Locale.US,
+                                            "Benchmark complete: ${entry.displayName} · %.1f tok/s",
+                                            tokPerSec,
+                                        )
+                                    )
+                                    Toast.makeText(
+                                        this,
+                                        String.format(Locale.US, "%.1f tok/s", tokPerSec),
+                                        Toast.LENGTH_SHORT,
+                                    ).show()
+                                }
+                            } catch (e: Exception) {
+                                mainHandler.post {
+                                    updateStatus("Benchmark failed: ${e.message ?: "unknown error"}")
+                                }
+                            }
+                        }
+                    }
+                    mCard.addView(benchBtn)
+                } else {
+                    val useBtn = com.example.pocketagent.pillButton(this, palette, "Use", compact = true) {
+                        if (engineManager.isGenerationActive || isGeneratingUi) {
+                            Toast.makeText(this, "Stop generation before switching models.", Toast.LENGTH_SHORT).show()
+                            return@pillButton
+                        }
+                        modelLibraryStore.setActive(entry.id)
+                        settingsPrefs.edit().putString(PREF_MODEL_DISPLAY_NAME, entry.displayName).apply()
+                        dialog.dismiss()
+                        inferenceExecutor.execute {
+                            engineManager.close()
+                            mainHandler.post {
+                                refreshModelStatus()
+                                updateStatus("Switched active model to ${entry.displayName}.")
+                            }
+                        }
+                    }
+                    mCard.addView(useBtn, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(4) })
+                    val delEntryBtn = iconTouchButton(this, palette, "✕", "Delete ${entry.displayName}", palette.muted, 15f) {
+                        dialog.dismiss()
+                        val targetFile = File(entry.filePath)
+                        if (targetFile.parentFile?.parentFile == ModelLibraryStore.defaultDir(filesDir)) {
+                            targetFile.parentFile?.deleteRecursively()
+                        } else if (targetFile.name != ModelFileStore.MODEL_FILE_NAME) {
+                            targetFile.delete()
+                        }
+                        modelLibraryStore.remove(entry.id)
+                        refreshModelStatus()
+                        showModelManagerDialog()
+                    }
+                    mCard.addView(delEntryBtn)
+                }
+                bodyCol.addView(mCard, marginBottom(8))
+            }
+        }
 
         bodyCol.addView(text("Inference Backend", 12.5f, palette.muted, true), marginBottom(6))
 
@@ -4043,7 +5246,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         )
 
         bodyCol.addView(
-            pillButton("Switch / Choose Different .litertlm File", accessibilityLabel = "Pick a different LiteRT-LM model file") {
+            pillButton("+ Import Another .litertlm Model", accessibilityLabel = "Pick a LiteRT-LM model file to add to library") {
                 dialog.dismiss()
                 chooseModel()
             },
@@ -4068,10 +5271,23 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                     .setPositiveButton("Remove") { _, _ ->
                         inferenceExecutor.execute {
                             engineManager.close()
-                            ModelFileStore(filesDir).removeStoredModel()
+                            val activeFile = activeModelFile()
+                            if (activeFile.parentFile?.parentFile == ModelLibraryStore.defaultDir(filesDir)) {
+                                activeFile.parentFile?.deleteRecursively()
+                            } else {
+                                ModelFileStore(filesDir).removeStoredModel()
+                            }
+                            activeEntry?.let { modelLibraryStore.remove(it.id) }
+                            val fallbackNext = modelLibraryStore.loadAll().firstOrNull()
+                            if (fallbackNext != null) {
+                                modelLibraryStore.setActive(fallbackNext.id)
+                            }
                             ModelFileStore.clearEngineCaches(cacheDir)
                             settingsPrefs.edit()
-                                .remove(PREF_MODEL_DISPLAY_NAME)
+                                .apply {
+                                    if (fallbackNext != null) putString(PREF_MODEL_DISPLAY_NAME, fallbackNext.displayName)
+                                    else remove(PREF_MODEL_DISPLAY_NAME)
+                                }
                                 .putBoolean(PREF_GPU_LOADING_GUARD, false)
                                 .apply()
                             mainHandler.post {
@@ -4098,7 +5314,11 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
 
     private fun cleanupStagedInputFiles() {
         cacheDir.listFiles()?.forEach { file ->
-            if (file.name.startsWith("pocketagent-pdf-") || file.name.startsWith("pocketagent-audio-") || file.name.startsWith("pocketagent-mic-")) {
+            if (file.name.startsWith("pocketagent-pdf-") ||
+                file.name.startsWith("pocketagent-audio-") ||
+                file.name.startsWith("pocketagent-mic-") ||
+                file.name.startsWith("pocketagent-vision-")
+            ) {
                 file.delete()
             }
         }

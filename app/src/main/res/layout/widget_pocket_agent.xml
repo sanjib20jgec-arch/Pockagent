@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="horizontal"
+    android:background="@drawable/widget_background"
+    android:paddingStart="12dp"
+    android:paddingTop="6dp"
+    android:paddingEnd="8dp"
+    android:paddingBottom="6dp"
+    android:gravity="center_vertical">
+
+    <TextView
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:text="Ask PocketAgent (Offline)"
+        android:textSize="14sp"
+        android:textColor="#FFFFFFFF"
+        android:fontFamily="sans-serif-medium"
+        android:maxLines="1"
+        android:ellipsize="end"
+        android:layout_marginStart="4dp" />
+
+    <ImageButton
+        android:id="@+id/widget_mic_button"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:src="@drawable/ic_mic"
+        android:padding="12dp"
+        android:scaleType="centerInside"
+        android:background="@android:color/transparent"
+        android:contentDescription="Start PocketAgent voice input" />
+</LinearLayout>

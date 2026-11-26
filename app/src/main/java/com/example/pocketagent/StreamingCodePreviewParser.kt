@@ -17,6 +17,57 @@ object StreamingCodePreviewParser {
             val code: String,
             val isClosed: Boolean,
         ) : Segment()
+        data class Thinking(
+            val text: String,
+            val isClosed: Boolean,
+        ) : Segment()
+    }
+
+    private val THINK_OPEN = "<think>"
+    private val THINK_CLOSE = "</think>"
+
+    /**
+     * Splits [raw] into segments including [Segment.Thinking] for `<think>...</think>` blocks,
+     * [Segment.Code] for fenced code blocks, and [Segment.Prose] for the rest.
+     */
+    fun parse(raw: String): List<Segment> {
+        if (raw.isBlank()) return emptyList()
+        val normalized = raw.replace("\r\n", "\n").replace('\r', '\n')
+        val segments = mutableListOf<Segment>()
+        var cursor = 0
+        while (cursor < normalized.length) {
+            val thinkStart = normalized.indexOf(THINK_OPEN, cursor)
+            if (thinkStart >= 0) {
+                if (thinkStart > cursor) {
+                    val before = normalized.substring(cursor, thinkStart).trim()
+                    if (before.isNotEmpty()) {
+                        segments.addAll(splitForStreamingPreview(before))
+                    }
+                }
+                val contentStart = thinkStart + THINK_OPEN.length
+                val thinkEnd = normalized.indexOf(THINK_CLOSE, contentStart)
+                if (thinkEnd >= 0) {
+                    segments.add(Segment.Thinking(
+                        text = normalized.substring(contentStart, thinkEnd).trim(),
+                        isClosed = true,
+                    ))
+                    cursor = thinkEnd + THINK_CLOSE.length
+                } else {
+                    segments.add(Segment.Thinking(
+                        text = normalized.substring(contentStart).trim(),
+                        isClosed = false,
+                    ))
+                    cursor = normalized.length
+                }
+            } else {
+                val remainder = normalized.substring(cursor).trim()
+                if (remainder.isNotEmpty()) {
+                    segments.addAll(splitForStreamingPreview(remainder))
+                }
+                cursor = normalized.length
+            }
+        }
+        return segments
     }
 
     private val OPEN_FENCE_REGEX = Regex("""^[ \t]*```([a-zA-Z0-9_\-+.]*)(?:[ \t]+[^`]*)?[ \t]*$""")

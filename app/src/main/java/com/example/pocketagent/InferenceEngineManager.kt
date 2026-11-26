@@ -19,6 +19,14 @@ import java.io.File
 interface ConversationHandle : AutoCloseable {
     fun sendMessage(prompt: String, callback: com.google.ai.edge.litertlm.MessageCallback, maxOutputTokens: Int)
 
+    /** Sends an image + text prompt when an Omni vision model is active; falls back cleanly if unsupported. */
+    fun sendImageMessage(
+        imagePath: String,
+        prompt: String,
+        callback: com.google.ai.edge.litertlm.MessageCallback,
+        maxOutputTokens: Int,
+    ) = sendMessage(prompt, callback, maxOutputTokens)
+
     /** Requests early cancellation of an in-flight streaming generation, if supported. */
     fun cancel() {}
 
@@ -27,66 +35,8 @@ interface ConversationHandle : AutoCloseable {
 
 class InferenceEngineManager<T : AutoCloseable>(
     var preference: BackendPreference = BackendPreference.GPU_PREFERRED,
-    private val engineFactory: (isGpu: Boolean, modelFile: File, cacheDir: File) -> T = { isGpu, model, cache ->
-        fun createAndInit(maxTokens: Int?): com.google.ai.edge.litertlm.Engine {
-            val config = com.google.ai.edge.litertlm.EngineConfig(
-                modelPath = model.absolutePath,
-                backend = if (isGpu) com.google.ai.edge.litertlm.Backend.GPU() else com.google.ai.edge.litertlm.Backend.CPU(),
-                maxNumTokens = maxTokens,
-                cacheDir = cache.absolutePath,
-            )
-            return com.google.ai.edge.litertlm.Engine(config).also { it.initialize() }
-        }
-        val initialized = try {
-            createAndInit(ContextBudgetManager.TokenBudget.DEFAULT_MAX_CONTEXT_TOKENS)
-        } catch (explicitCapError: Throwable) {
-            if (!isGpu) {
-                // Fall back to the model's compiled KV-cache default if 4096 is rejected.
-                createAndInit(null)
-            } else {
-                throw explicitCapError
-            }
-        }
-        @Suppress("UNCHECKED_CAST")
-        (initialized as T)
-    },
-    /**
-     * Opens a conversation on the live engine.
-     *
-     * The manager is generic so JVM tests can drive it with fakes; production always resolves to a
-     * real LiteRT-LM [com.google.ai.edge.litertlm.Engine], and that cast lives here rather than
-     * leaking into every caller.
-     */
-    private val conversationFactory: (T, String) -> ConversationHandle = { active, instruction ->
-        val litertEngine = active as? com.google.ai.edge.litertlm.Engine
-            ?: error("Conversation caching requires a real LiteRT-LM Engine.")
-        val conversation = litertEngine.createConversation(
-            com.google.ai.edge.litertlm.ConversationConfig(
-                systemInstruction = com.google.ai.edge.litertlm.Contents.of(instruction)
-            )
-        )
-        object : ConversationHandle {
-            override fun sendMessage(
-                prompt: String,
-                callback: com.google.ai.edge.litertlm.MessageCallback,
-                maxOutputTokens: Int,
-            ) {
-                conversation.sendMessageAsync(prompt, callback, maxOutputToken = maxOutputTokens)
-            }
-
-            override fun cancel() {
-                try {
-                    conversation.cancelProcess()
-                } catch (_: Exception) {
-                    // Best-effort abort; conversation is invalidated afterward.
-                }
-            }
-
-            override fun close() {
-                conversation.close()
-            }
-        }
-    },
+    private val engineFactory: ((isGpu: Boolean, modelFile: File, cacheDir: File) -> T)? = null,
+    private val conversationFactory: ((T, String) -> ConversationHandle)? = null,
 ) : AutoCloseable {
 
     companion object {
@@ -105,10 +55,47 @@ class InferenceEngineManager<T : AutoCloseable>(
     @Volatile var activeBackend: ActiveBackend? = null
         private set
 
+    @Volatile var activeModelPath: String? = null
+        private set
+
+    @Volatile var activeTemperature: Float = DEFAULT_TEMPERATURE
+
+    @Volatile var visionEnabled: Boolean = false
+
     @Volatile var lastFallbackReason: String? = null
         private set
 
     var onFallback: ((reason: String) -> Unit)? = null
+
+    /**
+     * Updates target decoding temperature and resets warm KV conversation when the value shifts.
+     */
+    @Synchronized
+    fun updateTemperature(temp: Float) {
+        val clamped = temp.coerceIn(0.1f, 1.5f)
+        if (kotlin.math.abs(activeTemperature - clamped) > 0.01f) {
+            activeTemperature = clamped
+            invalidateConversation("temperature changed")
+        }
+    }
+
+    /**
+     * Enables/disables vision support (requires engine reload on next inference if model is Omni).
+     */
+    @Synchronized
+    fun setVisionMode(enabled: Boolean) {
+        if (visionEnabled != enabled) {
+            visionEnabled = enabled
+            close()
+        }
+    }
+
+    /**
+     * Loads or switches to an arbitrary model file at [absolutePath].
+     */
+    @Synchronized
+    fun loadModelFromPath(absolutePath: String, cacheDir: File): T =
+        getOrInitializeEngine(File(absolutePath), cacheDir, preference)
 
     /**
      * Obtains the current initialized Engine, or initializes a new one according to the
@@ -127,7 +114,8 @@ class InferenceEngineManager<T : AutoCloseable>(
 
         val current = engine
         if (current != null) {
-            if (preferredBackend == BackendPreference.CPU_ONLY && activeBackend == ActiveBackend.GPU) {
+            val modelChanged = activeModelPath != null && activeModelPath != modelFile.absolutePath
+            if (modelChanged || (preferredBackend == BackendPreference.CPU_ONLY && activeBackend == ActiveBackend.GPU)) {
                 close()
             } else {
                 return current
@@ -139,9 +127,10 @@ class InferenceEngineManager<T : AutoCloseable>(
 
         if (preferredBackend == BackendPreference.GPU_PREFERRED) {
             try {
-                val newEngine = engineFactory(true, modelFile, cacheDir)
+                val newEngine = invokeEngineFactory(true, modelFile, cacheDir)
                 engine = newEngine
                 activeBackend = ActiveBackend.GPU
+                activeModelPath = modelFile.absolutePath
                 return newEngine
             } catch (gpuError: Throwable) {
                 val reason = gpuError.message ?: gpuError.javaClass.simpleName
@@ -151,10 +140,98 @@ class InferenceEngineManager<T : AutoCloseable>(
             }
         }
 
-        val cpuEngine = engineFactory(false, modelFile, cacheDir)
+        val cpuEngine = invokeEngineFactory(false, modelFile, cacheDir)
         engine = cpuEngine
         activeBackend = ActiveBackend.CPU
+        activeModelPath = modelFile.absolutePath
         return cpuEngine
+    }
+
+    private fun invokeEngineFactory(isGpu: Boolean, modelFile: File, cacheDir: File): T {
+        val custom = engineFactory
+        if (custom != null) return custom(isGpu, modelFile, cacheDir)
+
+        fun createAndInit(maxTokens: Int?, withVision: Boolean): com.google.ai.edge.litertlm.Engine {
+            val config = com.google.ai.edge.litertlm.EngineConfig(
+                modelPath = modelFile.absolutePath,
+                backend = if (isGpu) com.google.ai.edge.litertlm.Backend.GPU() else com.google.ai.edge.litertlm.Backend.CPU(),
+                visionBackend = if (withVision) com.google.ai.edge.litertlm.Backend.CPU() else null,
+                maxNumTokens = maxTokens,
+                cacheDir = cacheDir.absolutePath,
+            )
+            return com.google.ai.edge.litertlm.Engine(config).also { it.initialize() }
+        }
+
+        val initialized = try {
+            createAndInit(ContextBudgetManager.TokenBudget.DEFAULT_MAX_CONTEXT_TOKENS, visionEnabled)
+        } catch (visionOrCapError: Throwable) {
+            if (visionEnabled) {
+                try {
+                    createAndInit(ContextBudgetManager.TokenBudget.DEFAULT_MAX_CONTEXT_TOKENS, false)
+                } catch (explicitCapError: Throwable) {
+                    if (!isGpu) createAndInit(null, false) else throw explicitCapError
+                }
+            } else if (!isGpu) {
+                createAndInit(null, false)
+            } else {
+                throw visionOrCapError
+            }
+        }
+        @Suppress("UNCHECKED_CAST")
+        return initialized as T
+    }
+
+    private fun invokeConversationFactory(active: T, instruction: String): ConversationHandle {
+        val custom = conversationFactory
+        if (custom != null) return custom(active, instruction)
+
+        val litertEngine = active as? com.google.ai.edge.litertlm.Engine
+            ?: error("Conversation caching requires a real LiteRT-LM Engine.")
+        val sampler = com.google.ai.edge.litertlm.SamplerConfig(
+            topK = DEFAULT_TOP_K,
+            topP = DEFAULT_TOP_P.toDouble(),
+            temperature = activeTemperature.coerceIn(0.1f, 1.5f).toDouble(),
+        )
+        val conversation = litertEngine.createConversation(
+            com.google.ai.edge.litertlm.ConversationConfig(
+                systemInstruction = com.google.ai.edge.litertlm.Contents.of(instruction),
+                samplerConfig = sampler,
+            )
+        )
+        return object : ConversationHandle {
+            override fun sendMessage(
+                prompt: String,
+                callback: com.google.ai.edge.litertlm.MessageCallback,
+                maxOutputTokens: Int,
+            ) {
+                conversation.sendMessageAsync(prompt, callback, maxOutputToken = maxOutputTokens)
+            }
+
+            override fun sendImageMessage(
+                imagePath: String,
+                prompt: String,
+                callback: com.google.ai.edge.litertlm.MessageCallback,
+                maxOutputTokens: Int,
+            ) {
+                val message = com.google.ai.edge.litertlm.Message.of(
+                    com.google.ai.edge.litertlm.Content.ImageFile(imagePath),
+                    com.google.ai.edge.litertlm.Content.Text(prompt),
+                )
+                conversation.sendMessageAsync(message, callback)
+            }
+
+            override fun cancel() {
+                try {
+                    conversation.cancelProcess()
+                } catch (_: Exception) {
+                    // Best-effort abort; conversation is invalidated afterward.
+                }
+            }
+
+            override fun close() {
+                conversation.close()
+            }
+        }
     }
 
     /**
@@ -276,7 +353,7 @@ class InferenceEngineManager<T : AutoCloseable>(
             closeConversationLocked()
         }
 
-        val created = conversationFactory(activeEngine, systemInstruction)
+        val created = invokeConversationFactory(activeEngine, systemInstruction)
         cachedConversation = created
         cachedKey = key
         cachedConversationTokens = 0
@@ -353,6 +430,7 @@ class InferenceEngineManager<T : AutoCloseable>(
         } finally {
             engine = null
             activeBackend = null
+            activeModelPath = null
         }
     }
 }

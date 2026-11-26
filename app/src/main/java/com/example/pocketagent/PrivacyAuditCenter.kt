@@ -84,7 +84,9 @@ object PrivacyAuditCenter {
     fun auditStorage(filesDir: File, cacheDir: File): StorageAudit {
         val modelFile = File(filesDir, "model.litertlm")
         val whisperFile = File(filesDir, "whisper-model.bin")
+        val libraryModelsBytes = getDirectorySize(File(filesDir, "models"))
         val modelBytes = (if (modelFile.exists()) modelFile.length() else 0L) +
+                libraryModelsBytes +
                 (if (whisperFile.exists()) whisperFile.length() else 0L)
 
         val sessionsBytes = getDirectorySize(File(filesDir, "sessions"))
@@ -114,6 +116,9 @@ object PrivacyAuditCenter {
             File(filesDir, "sessions").deleteRecursively()
             File(filesDir, "memories").deleteRecursively()
             File(filesDir, "notes").deleteRecursively()
+            File(filesDir, "projects").deleteRecursively()
+            File(filesDir, "artifacts").deleteRecursively()
+            File(filesDir, "doc_vault").deleteRecursively()
             cacheDir.listFiles()?.forEach { file ->
                 if (!file.deleteRecursively()) success = false
             }
@@ -130,6 +135,7 @@ object PrivacyAuditCenter {
             }
 
             if (purgeModels) {
+                File(filesDir, "models").deleteRecursively()
                 listOf("model.litertlm", "whisper-model.bin").forEach { name ->
                     val f = File(filesDir, name)
                     if (f.exists() && !f.delete()) success = false

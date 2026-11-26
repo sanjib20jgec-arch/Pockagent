@@ -158,6 +158,7 @@ object HtmlArtifactSandbox {
         code: String,
         language: String?,
         palette: UiPalette,
+        onSaveArtifact: ((code: String, language: String?) -> Unit)? = null,
     ) {
         if (context is Activity && (context.isFinishing || context.isDestroyed)) return
 
@@ -256,6 +257,17 @@ object HtmlArtifactSandbox {
                 performSubtleHaptic(this)
                 onClick()
             }
+        }
+
+        if (onSaveArtifact != null) {
+            val saveButton = createHeaderActionButton(
+                label = "Save",
+                accessibilityLabel = "Save to Artifact Vault",
+                textColor = palette.teal,
+            ) {
+                onSaveArtifact(code, language)
+            }
+            headerRow.addView(saveButton)
         }
 
         val reloadButton = createHeaderActionButton(

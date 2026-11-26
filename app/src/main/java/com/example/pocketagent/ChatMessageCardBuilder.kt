@@ -136,12 +136,15 @@ data class AssistantTurnCallbacks(
     val onRegenerate: () -> Unit = {},
     val onRefine: () -> Unit = {},
     val onPreviewCode: (code: String, language: String?) -> Unit = { _, _ -> },
+    val onSaveToNotes: (text: String) -> Unit = {},
+    val onEditPrompt: (text: String) -> Unit = {},
+    val onFollowUpChip: (promptText: String) -> Unit = {},
 )
 
 /**
  * Mutable handle to an assistant message card supporting live streaming updates (including
- * incremental code-fence cards), optional tool trace chips, and completed rich markdown binding
- * with collapsible long-turn support.
+ * incremental code-fence cards), optional tool trace chips, follow-up chips, and completed rich
+ * markdown binding with collapsible long-turn support.
  */
 class ActiveAssistantCardHandle(
     val rootCard: LinearLayout,
@@ -157,6 +160,8 @@ class ActiveAssistantCardHandle(
     val showMoreButton: Button,
     val toolTraceContainer: LinearLayout,
     val liveStreamContainer: LinearLayout,
+    val followUpContainer: HorizontalScrollView,
+    private val followUpRow: LinearLayout,
     private val latestOnlyActionViews: List<View> = emptyList(),
     private val palette: UiPalette,
     private val callbacks: AssistantTurnCallbacks,
@@ -187,8 +192,10 @@ class ActiveAssistantCardHandle(
         richMarkdownContainer.removeAllViews()
         showMoreButton.visibility = View.GONE
         actionsContainer.visibility = View.GONE
+        followUpContainer.visibility = View.GONE
+        followUpRow.removeAllViews()
 
-        if (!plainText.contains("```")) {
+        if (!plainText.contains("```") && !plainText.contains("<think>")) {
             liveStreamContainer.visibility = View.GONE
             liveStreamContainer.removeAllViews()
             streamingTextView.text = plainText
@@ -200,7 +207,7 @@ class ActiveAssistantCardHandle(
         streamingTextView.visibility = View.GONE
         liveStreamContainer.removeAllViews()
 
-        val segments = StreamingCodePreviewParser.splitForStreamingPreview(plainText)
+        val segments = StreamingCodePreviewParser.parse(plainText)
         if (segments.isEmpty()) {
             liveStreamContainer.visibility = View.GONE
             return
@@ -212,9 +219,44 @@ class ActiveAssistantCardHandle(
             val child = when (segment) {
                 is StreamingCodePreviewParser.Segment.Prose -> buildStreamingProseView(context, segment.text)
                 is StreamingCodePreviewParser.Segment.Code -> buildStreamingCodeCard(context, segment)
+                is StreamingCodePreviewParser.Segment.Thinking -> buildStreamingThinkingCard(context, segment)
             }
             liveStreamContainer.addView(child)
         }
+    }
+
+    /**
+     * Binds clickable offline follow-up suggestion chips beneath the completed assistant turn.
+     */
+    fun bindFollowUpChips(chips: List<FollowUpSuggestionGenerator.SuggestionChip>) {
+        followUpRow.removeAllViews()
+        if (!latestActionsEnabled || chips.isEmpty()) {
+            followUpContainer.visibility = View.GONE
+            return
+        }
+        val context = followUpRow.context
+        for ((index, chip) in chips.withIndex()) {
+            val btn = secondaryOutlineButton(
+                context = context,
+                palette = palette,
+                label = chip.label,
+                accessibilityLabel = "Follow up: ${chip.label}",
+                compact = true,
+                textColor = palette.teal,
+            ) {
+                performSubtleHaptic(followUpContainer)
+                callbacks.onFollowUpChip(chip.promptText)
+            }.apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply {
+                    if (index < chips.lastIndex) marginEnd = dp(context, 6)
+                }
+            }
+            followUpRow.addView(btn)
+        }
+        followUpContainer.visibility = View.VISIBLE
     }
 
     /**
@@ -253,6 +295,7 @@ class ActiveAssistantCardHandle(
         }
         if (!latest) {
             refineButton.visibility = View.GONE
+            followUpContainer.visibility = View.GONE
         }
     }
 
@@ -394,6 +437,9 @@ class ActiveAssistantCardHandle(
             items += Triple("Save to .txt", "Save answer to a text file", callbacks.onSaveAnswer)
             items += Triple("Export Markdown", "Export answer as Markdown", callbacks.onExportMarkdown)
         }
+        // Save to Notes is always available
+        val saveToNotesAction: () -> Unit = { callbacks.onSaveToNotes(fullMarkdown) }
+        items += Triple("\uD83D\uDCDD Save to Notes", "Save this answer to personal notes", saveToNotesAction)
 
         val container = styleDialogContainer(context, palette, paddingDp = 16)
         val titleView = styledText(
@@ -449,6 +495,49 @@ class ActiveAssistantCardHandle(
         }
 
         showStyledAlertDialog(dialog, palette)
+    }
+
+    private fun buildStreamingThinkingCard(
+        context: Context,
+        segment: StreamingCodePreviewParser.Segment.Thinking,
+    ): LinearLayout {
+        val card = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            background = roundedShape(
+                color = palette.surfaceElevated,
+                radiusPx = dp(context, 12).toFloat(),
+                strokeWidthPx = maxOf(1, dp(context, 1)),
+                strokeColor = palette.border,
+            )
+            setPadding(dp(context, 12), dp(context, 8), dp(context, 12), dp(context, 8))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply {
+                topMargin = dp(context, 4)
+                bottomMargin = dp(context, 6)
+            }
+        }
+        val title = TextView(context).apply {
+            text = if (segment.isClosed) "Thought process" else "Thinking…"
+            textSize = 11.5f
+            setTextColor(palette.teal)
+            typeface = Typeface.create("sans-serif", Typeface.BOLD)
+        }
+        card.addView(title)
+        if (segment.text.isNotBlank()) {
+            val body = TextView(context).apply {
+                text = segment.text
+                textSize = 12.5f
+                setTextColor(palette.muted)
+                typeface = Typeface.create("sans-serif", Typeface.ITALIC)
+                maxLines = 4
+                ellipsize = TextUtils.TruncateAt.START
+                setPadding(0, dp(context, 4), 0, 0)
+            }
+            card.addView(body)
+        }
+        return card
     }
 
     private fun buildStreamingProseView(context: Context, text: String): TextView =
@@ -575,6 +664,7 @@ object ChatMessageCardBuilder {
         context: Context,
         message: ChatMessage,
         palette: UiPalette,
+        callbacks: AssistantTurnCallbacks = AssistantTurnCallbacks(),
     ): LinearLayout {
         val screenWidthPx = context.resources.displayMetrics.widthPixels
         // Reserve chatCanvas (28dp) + row start indent (44dp) so the bubble never overflows narrow windows.
@@ -655,25 +745,65 @@ object ChatMessageCardBuilder {
         }
 
         val tsLabel = formatTimestampLabel(message.timestamp)
+        val metaRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.END or Gravity.CENTER_VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply {
+                gravity = Gravity.END
+                topMargin = dp(context, 4)
+            }
+        }
         if (tsLabel.isNotEmpty()) {
             val tsView = TextView(context).apply {
                 text = tsLabel
                 textSize = 11f
                 setTextColor(palette.muted)
                 typeface = Typeface.create("sans-serif", Typeface.NORMAL)
-                gravity = Gravity.END
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT,
                 ).apply {
-                    gravity = Gravity.END
-                    topMargin = dp(context, 4)
+                    marginEnd = if (message.content.isNotBlank()) dp(context, 8) else 0
                 }
             }
-            bubble.addView(tsView)
+            metaRow.addView(tsView)
+        }
+        if (message.content.isNotBlank()) {
+            val editLabel = TextView(context).apply {
+                text = "✎ Edit"
+                contentDescription = "Edit previous prompt"
+                textSize = 11.5f
+                setTextColor(palette.teal)
+                typeface = Typeface.create("sans-serif", Typeface.BOLD)
+                minWidth = dp(context, 48)
+                minimumWidth = dp(context, 48)
+                minHeight = dp(context, 48)
+                minimumHeight = dp(context, 48)
+                gravity = Gravity.END or Gravity.CENTER_VERTICAL
+                setPadding(dp(context, 8), dp(context, 4), dp(context, 2), dp(context, 4))
+                isClickable = true
+                isFocusable = true
+                setOnClickListener {
+                    performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    callbacks.onEditPrompt(message.content)
+                }
+            }
+            metaRow.addView(editLabel)
+        }
+        if (metaRow.childCount > 0) {
+            bubble.addView(metaRow)
         }
 
         row.addView(bubble)
+        // Long-press to edit the prompt
+        bubble.setOnLongClickListener {
+            it.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+            callbacks.onEditPrompt(message.content)
+            true
+        }
         return row
     }
 
@@ -949,6 +1079,24 @@ object ChatMessageCardBuilder {
         }
         rootCard.addView(actionsContainer)
 
+        val followUpRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val followUpContainer = HorizontalScrollView(context).apply {
+            isHorizontalScrollBarEnabled = false
+            overScrollMode = View.OVER_SCROLL_NEVER
+            visibility = View.GONE
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply {
+                topMargin = dp(context, 8)
+            }
+            addView(followUpRow)
+        }
+        rootCard.addView(followUpContainer)
+
         val handle = ActiveAssistantCardHandle(
             rootCard = rootCard,
             statusDot = statusDot,
@@ -963,6 +1111,8 @@ object ChatMessageCardBuilder {
             showMoreButton = showMoreButton,
             toolTraceContainer = toolTraceContainer,
             liveStreamContainer = liveStreamContainer,
+            followUpContainer = followUpContainer,
+            followUpRow = followUpRow,
             latestOnlyActionViews = latestOnlyViews,
             palette = palette,
             callbacks = callbacks,

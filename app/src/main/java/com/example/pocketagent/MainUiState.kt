@@ -64,6 +64,19 @@ data class MainUiState(
     val agentSteps: List<AgentActivityTracker.AgentStepBadge> = emptyList(),
     val liveStageLabel: String = "",
     val lastGenerationMetrics: String = "",
+
+    // Projects / Workspaces
+    val activeProjectId: String? = null,
+    val activeProjectName: String? = null,
+
+    // Generation Settings
+    val temperature: Float = 0.8f,
+    val maxOutputTokens: Int = MAX_RESPONSE_TOKENS,
+    val contextWindowUsedTokens: Int = 0,
+    val contextWindowMaxTokens: Int = 4096,
+
+    // Agent Mode
+    val isAgentModeEnabled: Boolean = false,
 ) {
     companion object {
         // Conservative for 4K-context models: ~1700 tokens, leaving room for system/history/response.
@@ -382,5 +395,27 @@ data class MainUiState(
 
     fun withGenerationMetrics(metrics: String): MainUiState = copy(
         lastGenerationMetrics = metrics,
+    )
+
+    fun withActiveProject(id: String?, name: String?): MainUiState = copy(
+        activeProjectId = id,
+        activeProjectName = name,
+    )
+
+    fun withTemperature(temp: Float): MainUiState = copy(
+        temperature = temp.coerceIn(0.1f, 1.5f),
+    )
+
+    fun withMaxOutputTokens(tokens: Int): MainUiState = copy(
+        maxOutputTokens = tokens,
+    )
+
+    fun withContextWindow(used: Int, max: Int): MainUiState = copy(
+        contextWindowUsedTokens = used.coerceAtLeast(0),
+        contextWindowMaxTokens = max.coerceAtLeast(1),
+    )
+
+    fun withAgentMode(enabled: Boolean): MainUiState = copy(
+        isAgentModeEnabled = enabled,
     )
 }

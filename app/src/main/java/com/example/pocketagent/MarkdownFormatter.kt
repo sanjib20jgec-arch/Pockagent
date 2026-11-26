@@ -355,9 +355,10 @@ object MarkdownFormatter {
      * - Clipboard copying when raw formatting is not desired.
      */
     fun stripToPlainText(markdown: String): String {
-        if (markdown.isBlank()) return ""
+        val withoutThink = stripThinkingBlocks(markdown)
+        if (withoutThink.isBlank()) return ""
 
-        val elements = parseElements(markdown)
+        val elements = parseElements(withoutThink)
         val sb = StringBuilder()
 
         for ((index, element) in elements.withIndex()) {
@@ -518,5 +519,13 @@ object MarkdownFormatter {
         }
 
         return sb.toString().trim()
+    }
+
+    private val THINK_BLOCK_REGEX = Regex("""<think>[\s\S]*?(?:</think>|\z)""")
+
+    /** Strips `<think>...</think>` reasoning blocks so TTS and plain exports read only the answer. */
+    fun stripThinkingBlocks(text: String): String {
+        if (!text.contains("<think>")) return text
+        return THINK_BLOCK_REGEX.replace(text, "").trim()
     }
 }

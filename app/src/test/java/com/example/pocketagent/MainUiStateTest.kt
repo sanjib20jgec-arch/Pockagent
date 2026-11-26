@@ -208,4 +208,22 @@ class MainUiStateTest {
         assertFalse(MainUiState.SYSTEM_INSTRUCTION.contains("usually 3–5 steps"))
         assertEquals(MainUiState.SYSTEM_INSTRUCTION, AnswerDirective.SYSTEM_INSTRUCTION)
     }
+
+    @Test
+    fun supportsProjectGenerationSettingsAndAgentModeTransitions() {
+        val updated = MainUiState()
+            .withActiveProject("proj-1", "Research Coach")
+            .withTemperature(2.5f)
+            .withMaxOutputTokens(512)
+            .withContextWindow(1024, 4096)
+            .withAgentMode(true)
+
+        assertEquals("proj-1", updated.activeProjectId)
+        assertEquals("Research Coach", updated.activeProjectName)
+        assertEquals(1.5f, updated.temperature, 0.001f)
+        assertEquals(512, updated.maxOutputTokens)
+        assertEquals(1024, updated.contextWindowUsedTokens)
+        assertEquals(4096, updated.contextWindowMaxTokens)
+        assertTrue(updated.isAgentModeEnabled)
+    }
 }

@@ -313,6 +313,101 @@ object SystemActionTools {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
         }
+
+        /**
+         * Action: Draft an email via the user's default email client.
+         */
+        data class EmailDraft(
+            val to: String,
+            val subject: String,
+            val body: String,
+        ) : SystemAction() {
+            init {
+                require(to.isNotBlank()) { "Email recipient cannot be blank." }
+            }
+
+            override val actionType = ActionType.EMAIL
+            override val intentAction = Intent.ACTION_SENDTO
+            override val userSummary = "Draft email to ${to.trim()}: \"${subject.trim().take(40)}\""
+
+            val mailtoUriString: String
+                get() = "mailto:${encodeUriComponent(to.trim())}"
+
+            override fun toDescriptor() = IntentDescriptor(
+                action = intentAction,
+                dataUri = mailtoUriString,
+                extras = buildMap {
+                    if (subject.isNotBlank()) put(Intent.EXTRA_SUBJECT, subject.trim())
+                    if (body.isNotBlank()) put(Intent.EXTRA_TEXT, body.trim())
+                },
+            )
+
+            override fun toIntent(): Intent = Intent(intentAction).apply {
+                data = Uri.parse(mailtoUriString)
+                if (subject.isNotBlank()) putExtra(Intent.EXTRA_SUBJECT, subject.trim())
+                if (body.isNotBlank()) putExtra(Intent.EXTRA_TEXT, body.trim())
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+        }
+
+        /**
+         * Action: Draft an SMS via the user's default messaging app.
+         */
+        data class SmsDraft(
+            val to: String,
+            val body: String,
+        ) : SystemAction() {
+            init {
+                require(to.isNotBlank()) { "SMS recipient cannot be blank." }
+            }
+
+            override val actionType = ActionType.SMS
+            override val intentAction = Intent.ACTION_SENDTO
+            override val userSummary = "Draft SMS to ${to.trim()}"
+
+            val smsToUriString: String
+                get() = "smsto:${encodeUriComponent(to.trim())}"
+
+            override fun toDescriptor() = IntentDescriptor(
+                action = intentAction,
+                dataUri = smsToUriString,
+                extras = mapOf("sms_body" to body.trim()),
+            )
+
+            override fun toIntent(): Intent = Intent(intentAction).apply {
+                data = Uri.parse(smsToUriString)
+                putExtra("sms_body", body.trim())
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+        }
+
+        /**
+         * Action: Open the dialer with a pre-filled phone number for the user to review.
+         */
+        data class DialerPreview(
+            val number: String,
+        ) : SystemAction() {
+            init {
+                require(number.isNotBlank()) { "Phone number cannot be blank." }
+            }
+
+            override val actionType = ActionType.DIALER
+            override val intentAction = Intent.ACTION_DIAL
+            override val userSummary = "Dial ${number.trim()}"
+
+            val telUriString: String
+                get() = "tel:${encodeUriComponent(number.trim())}"
+
+            override fun toDescriptor() = IntentDescriptor(
+                action = intentAction,
+                dataUri = telUriString,
+            )
+
+            override fun toIntent(): Intent = Intent(intentAction).apply {
+                data = Uri.parse(telUriString)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+        }
     }
 
     enum class ActionType {
@@ -321,6 +416,9 @@ object SystemActionTools {
         CALENDAR_EVENT,
         OPEN_MAP,
         CREATE_NOTE,
+        EMAIL,
+        SMS,
+        DIALER,
     }
 
     /**
@@ -396,8 +494,41 @@ object SystemActionTools {
                         "Choose an app to save the note.",
                 targetAppCategory = "Notes",
             )
+            is SystemAction.EmailDraft -> ActionReviewUi(
+                action = action,
+                buttonLabel = "Review & Draft Email (${action.to.take(22)})",
+                dialogTitle = "Open Email App to Review Draft?",
+                dialogMessage = "PocketAgent prepares this email draft in your email app:\n\n" +
+                        "• To: ${action.to}\n" +
+                        (if (action.subject.isNotBlank()) "• Subject: ${action.subject}\n" else "") +
+                        (if (action.body.isNotBlank()) "• Message: ${action.body.take(140)}\n" else "") +
+                        "\nYou must review and tap Send yourself.",
+                targetAppCategory = "Email",
+            )
+            is SystemAction.SmsDraft -> ActionReviewUi(
+                action = action,
+                buttonLabel = "Review & Draft SMS (${action.to.take(18)})",
+                dialogTitle = "Open Messages to Review SMS?",
+                dialogMessage = "PocketAgent prepares this SMS draft in your Messages app:\n\n" +
+                        "• To: ${action.to}\n" +
+                        (if (action.body.isNotBlank()) "• Message: ${action.body.take(140)}\n" else "") +
+                        "\nYou must review and tap Send yourself.",
+                targetAppCategory = "Messages",
+            )
+            is SystemAction.DialerPreview -> ActionReviewUi(
+                action = action,
+                buttonLabel = "Review & Open Dialer (${action.number.take(18)})",
+                dialogTitle = "Open Phone Dialer?",
+                dialogMessage = "PocketAgent pre-fills this number in your Phone dialer:\n\n" +
+                        "• Number: ${action.number}\n\n" +
+                        "No call is placed automatically; tap Call in the dialer if you wish to proceed.",
+                targetAppCategory = "Phone Dialer",
+            )
         }
     }
+
+    private fun encodeUriComponent(value: String): String =
+        URLEncoder.encode(value, StandardCharsets.UTF_8.name()).replace("+", "%20")
 
     // =========================================================================
     // Parser for Structured Directives and Conversational Assistant Suggestions
@@ -424,6 +555,18 @@ object SystemActionTools {
         """\[ACTION:NOTE\s+([^\]]+)\]""",
         Pattern.CASE_INSENSITIVE
     )
+    private val STRUCTURED_EMAIL = Pattern.compile(
+        """\[ACTION:EMAIL\s+([^\]]+)\]""",
+        Pattern.CASE_INSENSITIVE
+    )
+    private val STRUCTURED_SMS = Pattern.compile(
+        """\[ACTION:SMS\s+([^\]]+)\]""",
+        Pattern.CASE_INSENSITIVE
+    )
+    private val STRUCTURED_DIAL = Pattern.compile(
+        """\[ACTION:DIAL\s+([^\]]+)\]""",
+        Pattern.CASE_INSENSITIVE
+    )
 
     // Conversational / suggestion regexes
     private val CONV_TIMER = Pattern.compile(
@@ -443,6 +586,15 @@ object SystemActionTools {
     )
     private val CONV_NOTE = Pattern.compile(
         """(?i)(?:create|take|save|draft)\s+(?:a\s+)?note[:\s]+(?:["']([^"'\n]+)["']|([^.\n]+))"""
+    )
+    private val CONV_EMAIL = Pattern.compile(
+        """(?i)(?:send|draft|compose|write)\s+(?:an?\s+)?email\s+to\s+([^\s,;:"']+@[^\s,;:"']+)(?:\s+(?:with\s+)?subject[:\s]+["']?([^"'\n]+)["']?)?"""
+    )
+    private val CONV_SMS = Pattern.compile(
+        """(?i)(?:send|draft|text)\s+(?:an?\s+)?sms\s+to\s+([+\d][\d\s-]{5,18}\d)(?:\s*(?::|saying|message)\s*["']?([^"'\n]+)["']?)?"""
+    )
+    private val CONV_DIAL = Pattern.compile(
+        """(?i)\b(?:dial|call)\s+(\+?\d[\d\s-]{5,18}\d)\b"""
     )
 
     /**
@@ -555,6 +707,45 @@ object SystemActionTools {
                 } catch (_: IllegalArgumentException) {}
             }
         }
+
+        // [ACTION:EMAIL ...]
+        val emailMatcher = STRUCTURED_EMAIL.matcher(text)
+        while (emailMatcher.find()) {
+            val params = parseKeyValueParams(emailMatcher.group(1))
+            val to = params["to"] ?: ""
+            if (to.isNotBlank()) {
+                val subject = params["subject"] ?: ""
+                val body = params["body"] ?: params["text"] ?: ""
+                try {
+                    out.add(SystemAction.EmailDraft(to, subject, body))
+                } catch (_: IllegalArgumentException) {}
+            }
+        }
+
+        // [ACTION:SMS ...]
+        val smsMatcher = STRUCTURED_SMS.matcher(text)
+        while (smsMatcher.find()) {
+            val params = parseKeyValueParams(smsMatcher.group(1))
+            val to = params["to"] ?: ""
+            if (to.isNotBlank()) {
+                val body = params["body"] ?: params["text"] ?: ""
+                try {
+                    out.add(SystemAction.SmsDraft(to, body))
+                } catch (_: IllegalArgumentException) {}
+            }
+        }
+
+        // [ACTION:DIAL ...]
+        val dialMatcher = STRUCTURED_DIAL.matcher(text)
+        while (dialMatcher.find()) {
+            val params = parseKeyValueParams(dialMatcher.group(1))
+            val number = params["number"] ?: params["to"] ?: ""
+            if (number.isNotBlank()) {
+                try {
+                    out.add(SystemAction.DialerPreview(number))
+                } catch (_: IllegalArgumentException) {}
+            }
+        }
     }
 
     private fun parseConversationalPatterns(text: String, out: MutableList<SystemAction>) {
@@ -651,6 +842,44 @@ object SystemActionTools {
             if (content.isNotBlank()) {
                 try {
                     out.add(SystemAction.CreateNote(text = content))
+                    return
+                } catch (_: IllegalArgumentException) {}
+            }
+        }
+
+        // Email draft
+        val emailMatcher = CONV_EMAIL.matcher(text)
+        if (emailMatcher.find()) {
+            val to = emailMatcher.group(1)?.trim().orEmpty()
+            val subject = emailMatcher.group(2)?.trim().orEmpty()
+            if (to.isNotBlank()) {
+                try {
+                    out.add(SystemAction.EmailDraft(to = to, subject = subject, body = ""))
+                    return
+                } catch (_: IllegalArgumentException) {}
+            }
+        }
+
+        // SMS draft
+        val smsMatcher = CONV_SMS.matcher(text)
+        if (smsMatcher.find()) {
+            val to = smsMatcher.group(1)?.trim().orEmpty()
+            val body = smsMatcher.group(2)?.trim().orEmpty()
+            if (to.isNotBlank()) {
+                try {
+                    out.add(SystemAction.SmsDraft(to = to, body = body))
+                    return
+                } catch (_: IllegalArgumentException) {}
+            }
+        }
+
+        // Dialer preview
+        val dialMatcher = CONV_DIAL.matcher(text)
+        if (dialMatcher.find()) {
+            val number = dialMatcher.group(1)?.trim().orEmpty()
+            if (number.isNotBlank()) {
+                try {
+                    out.add(SystemAction.DialerPreview(number = number))
                     return
                 } catch (_: IllegalArgumentException) {}
             }

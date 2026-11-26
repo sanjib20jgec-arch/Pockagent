@@ -177,7 +177,14 @@ class DefaultLlmInferenceRunner(
         return finalText
     }
 
-    private fun modelFile(): File = File(filesDir, "model.litertlm")
+    private fun modelFile(): File {
+        val active = ModelLibraryStore(ModelLibraryStore.defaultDir(filesDir)).getActive()
+        if (active != null) {
+            val file = File(active.filePath)
+            if (file.exists() && file.length() > 0L) return file
+        }
+        return File(filesDir, "model.litertlm")
+    }
 
     override fun close() {
         isClosed = true
@@ -253,6 +260,8 @@ class MainViewModel internal constructor(
     )
 
     private val promptContext = AnswerPromptComposer()
+    private val projectStore by lazy { ProjectStore(ProjectStore.defaultDir(filesDir)) }
+    private val documentVault by lazy { DocumentVault(DocumentVault.defaultDir(filesDir)) }
 
     private val _uiState = MutableStateFlow(MainUiState())
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
@@ -610,11 +619,19 @@ class MainViewModel internal constructor(
             updateState { it.withStatus("Expand and review the complete transcript, then tap Use reviewed transcript.") }
             return
         }
-        val task = state.taskInput.trim()
+        val rawTask = state.taskInput.trim()
         val attached = state.attachedContext.trim()
-        if (task.isEmpty() && attached.isEmpty()) {
+        if (rawTask.isEmpty() && attached.isEmpty()) {
             updateState { it.withStatus("Type a task, dictate it, or attach a text/PDF file first.") }
             return
+        }
+        val detectedSlash = SlashCommandDetector.detectCommand(rawTask)
+        val task = if (detectedSlash != null) {
+            SlashCommandDetector.stripCommand(rawTask, detectedSlash).ifBlank {
+                "Apply ${detectedSlash.displayName}: ${detectedSlash.description}"
+            }
+        } else {
+            rawTask
         }
         if (!llmRunner.isAvailable()) {
             updateState { it.withStatus("Choose a compatible .litertlm model first.") }
@@ -661,6 +678,18 @@ class MainViewModel internal constructor(
                         detail = "${calculation.expression} = ${calculation.displayOutput}",
                     )
                 }
+                val rawVaultHits = if (task.isNotBlank()) documentVault.search(task, topK = 3) else emptyList()
+                val vaultBlock = if (rawVaultHits.isNotEmpty() && attached.isBlank()) {
+                    stepBadges += AgentActivityTracker.AgentStepBadge(
+                        kind = StepKind.DOCUMENT,
+                        title = "Document Vault",
+                        detail = "${rawVaultHits.size} excerpt${if (rawVaultHits.size > 1) "s" else ""}",
+                    )
+                    "Knowledge Vault Excerpts:\n" + rawVaultHits.joinToString("\n\n").take(MainUiState.MAX_ATTACHMENT_CHARS)
+                } else {
+                    ""
+                }
+
                 val contextToInject = if (attached.isNotBlank()) {
                     val retrieval = LocalDocumentRetriever.retrieveTextWithCitations(
                         query = task,
@@ -678,11 +707,29 @@ class MainViewModel internal constructor(
                     }
                     if (retrieval.promptContext.isNotBlank()) retrieval.promptContext else attached
                 } else {
-                    ""
+                    vaultBlock
                 }
 
                 // Long-term memory (from main) enriches the intent-aware instruction rather than
                 // replacing it, so the runaway guard and answer-shaped prompting still apply.
+                val activeProj = state.activeProjectId?.let { projectStore.getProject(it) }
+                val baseDirective = buildString {
+                    if (detectedSlash != null) {
+                        append(detectedSlash.systemPromptPrefix).append("\n\n")
+                    }
+                    if (activeProj != null && activeProj.systemInstructions.isNotBlank()) {
+                        append("[Active Project: ").append(activeProj.name).append("]\n")
+                        append(activeProj.systemInstructions).append("\n\n")
+                    }
+                    append(AnswerDirective.systemInstructionFor(intent))
+                }
+                if (activeProj != null) {
+                    stepBadges += AgentActivityTracker.AgentStepBadge(
+                        kind = StepKind.DOCUMENT,
+                        title = "Project",
+                        detail = activeProj.name,
+                    )
+                }
                 val effectiveInstruction = if (state.isMemoryEnabled) {
                     val candidateFacts = MemoryFactExtractor.extractCandidateFacts(task)
                     for (cf in candidateFacts) {
@@ -710,11 +757,11 @@ class MainViewModel internal constructor(
                         )
                     }
                     ContextBudgetManager().enrichSystemInstructionWithMemory(
-                        AnswerDirective.systemInstructionFor(intent),
+                        baseDirective,
                         memoryBlock,
                     )
                 } else {
-                    AnswerDirective.systemInstructionFor(intent)
+                    baseDirective
                 }
 
                 updateState { it.withAgentSteps(stepBadges.toList()) }
@@ -765,7 +812,7 @@ class MainViewModel internal constructor(
                         prompt = prompt,
                         // Memory-enriched, intent-aware instruction.
                         systemInstruction = effectiveInstruction,
-                        maxTokens = MainUiState.MAX_RESPONSE_TOKENS,
+                        maxTokens = state.maxOutputTokens,
                         onChunk = { chunk ->
                             if (isGenerationCancelled.get()) {
                                 guard.cancel()
@@ -1118,6 +1165,23 @@ class MainViewModel internal constructor(
      */
     fun clearActiveCalculation() {
         updateState { it.withActiveCalculation(null) }
+    }
+
+    fun setActiveProject(projectId: String?) {
+        val project = projectId?.let { projectStore.getProject(it) }
+        updateState { it.withActiveProject(project?.id, project?.name) }
+    }
+
+    fun setTemperature(temp: Float) {
+        updateState { it.withTemperature(temp) }
+    }
+
+    fun setMaxOutputTokens(tokens: Int) {
+        updateState { it.withMaxOutputTokens(tokens) }
+    }
+
+    fun setAgentModeEnabled(enabled: Boolean) {
+        updateState { it.withAgentMode(enabled) }
     }
 
     /**

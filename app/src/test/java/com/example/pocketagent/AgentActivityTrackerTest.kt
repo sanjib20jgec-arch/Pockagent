@@ -203,4 +203,24 @@ class AgentActivityTrackerTest {
         assertEquals("Streaming · 1.8s · ~24 tok · 13.3 t/s", updated.liveStageLabel)
         assertEquals("PocketAgent · GPU · 2.4s · 16.0 t/s", updated.lastGenerationMetrics)
     }
+
+    @Test
+    fun `followUpSuggestionGenerator detects Bengali and returns bounded contextual chips`() {
+        assertTrue(FollowUpSuggestionGenerator.containsBengaliScript("বাংলায় অনুবাদ করো"))
+        assertFalse(FollowUpSuggestionGenerator.containsBengaliScript("Offline Android code"))
+
+        val codeChips = FollowUpSuggestionGenerator.suggestFollowUps(
+            prompt = "Write quicksort",
+            answer = "```kotlin\nfun sort() {}\n```",
+        )
+        assertEquals(3, codeChips.size)
+        assertTrue(codeChips.any { it.label == "Explain code" })
+
+        val bengaliChips = FollowUpSuggestionGenerator.suggestFollowUps(
+            prompt = "বাংলায় বলো",
+            answer = "এটি সম্পূর্ণ অফলাইনে চলে।",
+        )
+        assertTrue(bengaliChips.any { it.label == "Translate to English" })
+        assertTrue(FollowUpSuggestionGenerator.suggestFollowUps("hi", "").isEmpty())
+    }
 }

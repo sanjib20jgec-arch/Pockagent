@@ -38,6 +38,17 @@ class AndroidTtsSpeaker(
             }
         })
 
+        val targetLocale = if (FollowUpSuggestionGenerator.containsBengaliScript(text)) {
+            java.util.Locale("bn", "IN")
+        } else {
+            java.util.Locale.getDefault()
+        }
+        val langStatus = tts.setLanguage(targetLocale)
+        if (langStatus == android.speech.tts.TextToSpeech.LANG_MISSING_DATA ||
+            langStatus == android.speech.tts.TextToSpeech.LANG_NOT_SUPPORTED) {
+            tts.setLanguage(java.util.Locale.getDefault())
+        }
+
         tts.speak(text, android.speech.tts.TextToSpeech.QUEUE_ADD, null, utteranceId)
     }
 

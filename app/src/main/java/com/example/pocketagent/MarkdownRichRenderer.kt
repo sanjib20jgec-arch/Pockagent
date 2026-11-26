@@ -478,6 +478,126 @@ object MarkdownRichRenderer {
         if (markdown.isBlank()) return
 
         val context = container.context
+        if (markdown.contains("<think>")) {
+            val topSegments = splitThinkingSections(markdown)
+            for (seg in topSegments) {
+                when (seg) {
+                    is ThinkOrBody.Think -> container.addView(buildThinkingBlockView(context, seg.text, palette))
+                    is ThinkOrBody.Body -> renderMarkdownElementsInto(container, context, seg.markdown, palette, onCopyCode, onPreviewCode)
+                }
+            }
+            return
+        }
+        renderMarkdownElementsInto(container, context, markdown, palette, onCopyCode, onPreviewCode)
+    }
+
+    private sealed class ThinkOrBody {
+        data class Think(val text: String) : ThinkOrBody()
+        data class Body(val markdown: String) : ThinkOrBody()
+    }
+
+    private fun splitThinkingSections(raw: String): List<ThinkOrBody> {
+        val result = mutableListOf<ThinkOrBody>()
+        var cursor = 0
+        while (cursor < raw.length) {
+            val open = raw.indexOf("<think>", cursor)
+            if (open < 0) {
+                val tail = raw.substring(cursor).trim()
+                if (tail.isNotEmpty()) result.add(ThinkOrBody.Body(tail))
+                break
+            }
+            if (open > cursor) {
+                val before = raw.substring(cursor, open).trim()
+                if (before.isNotEmpty()) result.add(ThinkOrBody.Body(before))
+            }
+            val start = open + "<think>".length
+            val close = raw.indexOf("</think>", start)
+            if (close >= 0) {
+                val thinkText = raw.substring(start, close).trim()
+                if (thinkText.isNotEmpty()) result.add(ThinkOrBody.Think(thinkText))
+                cursor = close + "</think>".length
+            } else {
+                val thinkText = raw.substring(start).trim()
+                if (thinkText.isNotEmpty()) result.add(ThinkOrBody.Think(thinkText))
+                cursor = raw.length
+            }
+        }
+        return result
+    }
+
+    private fun buildThinkingBlockView(
+        context: Context,
+        thoughtText: String,
+        palette: UiPalette,
+    ): LinearLayout {
+        val card = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            background = roundedShape(
+                color = palette.surfaceElevated,
+                radiusPx = dp(context, 12).toFloat(),
+                strokeWidthPx = maxOf(1, dp(context, 1)),
+                strokeColor = palette.border,
+            )
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply {
+                topMargin = dp(context, 4)
+                bottomMargin = dp(context, 8)
+            }
+        }
+
+        val bodyView = TextView(context).apply {
+            text = thoughtText
+            textSize = 13f
+            setTextColor(palette.muted)
+            typeface = Typeface.create("sans-serif", Typeface.ITALIC)
+            setLineSpacing(dp(context, 3).toFloat(), 1f)
+            setTextIsSelectable(true)
+            setPadding(dp(context, 12), 0, dp(context, 12), dp(context, 10))
+            visibility = View.GONE
+        }
+
+        var isExpanded = false
+        val headerBtn = Button(context).apply {
+            text = "Thought process ▸"
+            contentDescription = "Expand or collapse model thought process"
+            setAllCaps(false)
+            textSize = 12.5f
+            typeface = Typeface.create("sans-serif", Typeface.BOLD)
+            setTextColor(palette.muted)
+            gravity = Gravity.START or Gravity.CENTER_VERTICAL
+            minHeight = dp(context, 48)
+            minimumHeight = dp(context, 48)
+            setPadding(dp(context, 12), dp(context, 6), dp(context, 12), dp(context, 6))
+            background = rippleDrawable(
+                roundedShape(android.graphics.Color.TRANSPARENT, dp(context, 12).toFloat()),
+                palette.rippleOnSurface,
+            )
+            backgroundTintList = null
+            stateListAnimator = null
+            isFocusable = true
+            setOnClickListener {
+                performSubtleHaptic(this)
+                isExpanded = !isExpanded
+                android.transition.TransitionManager.beginDelayedTransition(card)
+                bodyView.visibility = if (isExpanded) View.VISIBLE else View.GONE
+                text = if (isExpanded) "Thought process ▾" else "Thought process ▸"
+            }
+        }
+        card.addView(headerBtn)
+        card.addView(bodyView)
+        return card
+    }
+
+    private fun renderMarkdownElementsInto(
+        container: LinearLayout,
+        context: Context,
+        markdown: String,
+        palette: UiPalette,
+        onCopyCode: (code: String, language: String?) -> Unit,
+        onPreviewCode: ((code: String, language: String?) -> Unit)?,
+    ) {
         val elements = MarkdownFormatter.parseElements(markdown)
         if (elements.isEmpty()) return
 

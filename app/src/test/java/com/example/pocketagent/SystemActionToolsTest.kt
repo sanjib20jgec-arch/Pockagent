@@ -340,4 +340,30 @@ class SystemActionToolsTest {
         assertTrue(ui.dialogMessage.contains("Tea"))
         assertEquals("Clock", ui.targetAppCategory)
     }
+
+    @Test
+    fun emailSmsAndDialerActionsSatisfySafetyAndParseCleanly() {
+        val emailAction = SystemActionTools.parseFirstAction(
+            """I drafted that email: [ACTION:EMAIL to="team@example.com" subject="Weekly Update" body="All tests pass."]"""
+        ) as SystemActionTools.SystemAction.EmailDraft
+        assertEquals("team@example.com", emailAction.to)
+        assertEquals("Weekly Update", emailAction.subject)
+        assertTrue(emailAction.toDescriptor().dataUri!!.startsWith("mailto:"))
+        assertEquals("Email", SystemActionTools.getReviewUi(emailAction).targetAppCategory)
+
+        val smsAction = SystemActionTools.parseFirstAction(
+            """[ACTION:SMS to="+15551234567" body="Running 5 mins late"]"""
+        ) as SystemActionTools.SystemAction.SmsDraft
+        assertEquals("+15551234567", smsAction.to)
+        assertEquals("Running 5 mins late", smsAction.toDescriptor().extras["sms_body"])
+        assertEquals("Messages", SystemActionTools.getReviewUi(smsAction).targetAppCategory)
+
+        val dialAction = SystemActionTools.parseFirstAction(
+            """You can call the support line: dial +1 555-987-6543."""
+        ) as SystemActionTools.SystemAction.DialerPreview
+        assertTrue(dialAction.requiresUserConfirmation)
+        assertFalse(dialAction.autoExecute)
+        assertTrue(dialAction.toDescriptor().dataUri!!.startsWith("tel:"))
+        assertEquals("Phone Dialer", SystemActionTools.getReviewUi(dialAction).targetAppCategory)
+    }
 }

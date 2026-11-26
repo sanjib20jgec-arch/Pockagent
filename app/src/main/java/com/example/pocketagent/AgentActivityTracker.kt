@@ -226,3 +226,51 @@ object NotesRetriever {
         return clean.trimEnd() + "…"
     }
 }
+
+/**
+ * Pure-Kotlin generator of rule-based follow-up prompt chips displayed below a completed answer,
+ * plus bilingual Bengali/default language script detection for offline TTS.
+ */
+object FollowUpSuggestionGenerator {
+
+    data class SuggestionChip(
+        val label: String,
+        val promptText: String,
+    )
+
+    private val CODE_FENCE_REGEX = Regex("```")
+
+    fun suggestFollowUps(prompt: String, answer: String, maxChips: Int = 3): List<SuggestionChip> {
+        if (answer.isBlank() || maxChips <= 0) return emptyList()
+        val hasBengali = containsBengaliScript(prompt) || containsBengaliScript(answer)
+        val hasCode = CODE_FENCE_REGEX.containsMatchIn(answer)
+        val isLong = answer.length > 500
+
+        val candidates = buildList {
+            if (hasCode) {
+                add(SuggestionChip("Explain code", "Explain how the code above works step by step."))
+                add(SuggestionChip("Optimize", "Can you simplify or optimize the solution above?"))
+            } else if (isLong) {
+                add(SuggestionChip("Summarize", "Summarize the key takeaways above in 3 bullet points."))
+                add(SuggestionChip("Give example", "Give a concrete real-world example of this."))
+            } else {
+                add(SuggestionChip("Give example", "Give a clear example to illustrate that."))
+                add(SuggestionChip("Step by step", "Break that down into clear actionable steps."))
+            }
+
+            if (hasBengali) {
+                add(SuggestionChip("Translate to English", "Translate the answer above into clear English."))
+            } else {
+                add(SuggestionChip("Translate to Bengali", "/translate $answer".take(360)))
+            }
+
+            if (!hasCode) {
+                add(SuggestionChip("Explain simpler", "/eli5 Explain your previous answer even more simply."))
+            }
+        }
+        return candidates.distinctBy { it.label }.take(maxChips)
+    }
+
+    fun containsBengaliScript(text: String): Boolean =
+        text.any { it.code in 0x0980..0x09FF }
+}

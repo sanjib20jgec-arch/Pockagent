@@ -59,7 +59,7 @@ internal object StoreMigration {
         return when {
             json.trimStart().startsWith("{") -> {
                 val index = json.indexOf('{')
-                json.substring(0, index + 1) + "\n  \"$FIELD\": $SCHEMA_VERSION," + json.substring(index + 1)
+                json.substring(0, index + 1) + "\n  \"$FIELD\":$SCHEMA_VERSION," + json.substring(index + 1)
             }
             json.trimStart().startsWith("[") -> tagArrayObjects(json)
             else -> json
@@ -84,7 +84,7 @@ internal object StoreMigration {
             when (char) {
                 '"' -> inString = true
                 '{' -> {
-                    if (depth == 0) output.append("\n    \"$FIELD\": $SCHEMA_VERSION,")
+                    if (depth == 0) output.append("\n    \"$FIELD\":$SCHEMA_VERSION,")
                     depth++
                 }
                 '}' -> if (depth > 0) depth--

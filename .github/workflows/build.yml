@@ -37,11 +37,66 @@ jobs:
       - name: Verify source archive
         run: python3 scripts/package_source.py --check
 
-      - name: Run unit tests and assemble debug APK
+      - name: Run unit tests, debug APK, and release R8 APK
         shell: bash
         run: |
           set -o pipefail
-          gradle --no-daemon --stacktrace --console=plain testDebugUnitTest assembleDebug 2>&1 | tee gradle-build.log
+          gradle --no-daemon --stacktrace --console=plain testDebugUnitTest assembleDebug assembleRelease 2>&1 | tee gradle-build.log
+
+      - name: Audit Release APK, DEX, and R8 Mapping
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import glob, os, zipfile
+
+          lines = ["### Release Hardening & Optimization Audit", ""]
+          debug_apks = sorted(glob.glob("app/build/outputs/apk/debug/*.apk"))
+          release_apks = sorted(glob.glob("app/build/outputs/apk/release/*.apk"))
+          for p in debug_apks:
+              lines.append(f"- Debug APK: `{os.path.basename(p)}` — {os.path.getsize(p) / (1024*1024):.2f} MB ({os.path.getsize(p):,} bytes)")
+          for p in release_apks:
+              lines.append(f"- Release APK: `{os.path.basename(p)}` — {os.path.getsize(p) / (1024*1024):.2f} MB ({os.path.getsize(p):,} bytes)")
+              with zipfile.ZipFile(p) as zf:
+                  names = zf.namelist()
+                  dex_files = [n for n in names if n.endswith(".dex")]
+                  so_files = [n for n in names if n.endswith(".so")]
+                  debug_probes = [n for n in names if "DebugProbesKt.bin" in n]
+                  lines.append(f"- Release DEX count: {len(dex_files)} ({', '.join(dex_files)})")
+                  lines.append(f"- Release native .so count: {len(so_files)} ({', '.join(so_files)})")
+                  lines.append(f"- DebugProbesKt.bin present: {bool(debug_probes)}")
+                  reflect_hits = 0
+                  probe_impl_hits = 0
+                  for d in dex_files:
+                      data = zf.read(d)
+                      if b"kotlin/reflect/" in data or b"Lkotlin/reflect/" in data:
+                          reflect_hits += 1
+                      if b"DebugProbesImpl" in data:
+                          probe_impl_hits += 1
+                  lines.append(f"- DEX `kotlin/reflect` hits: {reflect_hits}")
+                  lines.append(f"- DEX `DebugProbesImpl` hits: {probe_impl_hits}")
+
+          mapping_path = "app/build/outputs/mapping/release/mapping.txt"
+          if os.path.exists(mapping_path):
+              mapping_text = open(mapping_path, encoding="utf-8", errors="ignore").read()
+              obf_samples = []
+              for target in ("InferenceEngineManager", "AgentToolLoop", "PdfTextExtractor"):
+                  for line in mapping_text.splitlines():
+                      if line.startswith(f"com.example.pocketagent.{target} -> "):
+                          obf_samples.append(line.rstrip(":"))
+                          break
+              lines.append(f"- R8 mapping.txt size: {os.path.getsize(mapping_path):,} bytes")
+              for s in obf_samples:
+                  lines.append(f"  - `{s}`")
+
+          report = "\n".join(lines) + "\n"
+          with open("release-audit.txt", "w", encoding="utf-8") as f:
+              f.write(report)
+          summary = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary:
+              with open(summary, "a", encoding="utf-8") as s:
+                  s.write("\n" + report)
+          print(report)
+          PY
 
       - name: Summarize Gradle failure
         if: failure()
@@ -123,5 +178,16 @@ jobs:
         with:
           name: PocketAgent-debug-apk
           path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Release APK & Audit artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: PocketAgent-release-apk
+          path: |
+            app/build/outputs/apk/release/*.apk
+            release-audit.txt
+            app/build/outputs/mapping/release/mapping.txt
           if-no-files-found: error
           retention-days: 14

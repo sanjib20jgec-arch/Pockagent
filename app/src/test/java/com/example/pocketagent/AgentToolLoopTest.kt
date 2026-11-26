@@ -1,5 +1,6 @@
 package com.example.pocketagent
 
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -79,5 +80,43 @@ class AgentToolLoopTest {
         val result = loopWithVault.executeToolCall("search_docs", "LiteRT-LM backend")
         assertTrue(result.contains("Offline Guide"))
         assertTrue(result.contains("LiteRT-LM"))
+    }
+
+    @Test fun `executeToolCall catches unexpected tool exceptions`() {
+        val throwingLoop = object : AgentToolLoop(toolTimeoutMs = 200L) {
+            override fun executeToolCallInternal(toolName: String, input: String): String {
+                throw IllegalStateException("boom")
+            }
+        }
+        val result = throwingLoop.executeToolCall("calc", "1+1")
+        assertTrue(result.contains("failed"))
+        assertTrue(result.contains("boom"))
+    }
+
+    @Test fun `executeToolCallSafe bounds hanging tool with timeout`() = runTest {
+        val hangingLoop = object : AgentToolLoop(toolTimeoutMs = 50L) {
+            override fun executeToolCallInternal(toolName: String, input: String): String {
+                Thread.sleep(2_000L)
+                return "never"
+            }
+        }
+        val result = hangingLoop.executeToolCallSafe("calc", "1+1")
+        assertTrue(result.contains("timed out"))
+    }
+
+    @Test fun `processOutputSafe isolates throwing and succeeding tool calls`() = runTest {
+        val mixedLoop = object : AgentToolLoop(toolTimeoutMs = 200L) {
+            override fun executeToolCallInternal(toolName: String, input: String): String {
+                if (toolName == "search_notes") throw RuntimeException("disk error")
+                return super.executeToolCallInternal(toolName, input)
+            }
+        }
+        val (hasTools, loopResult) = mixedLoop.processOutputSafe(
+            "TOOL_CALL: search_notes(test)\nTOOL_CALL: calc(2 + 3)\nDone."
+        )
+        assertTrue(hasTools)
+        assertEquals(2, loopResult.toolResults.size)
+        assertTrue(loopResult.toolResults[0].output.contains("disk error"))
+        assertTrue(loopResult.toolResults[1].output.contains("5"))
     }
 }

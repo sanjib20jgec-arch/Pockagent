@@ -11,26 +11,55 @@ android {
         targetSdk = 35
         versionCode = 12
         versionName = "1.6.0"
-        ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
     }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
         }
     }
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a")
+            isUniversalApk = false
+        }
+    }
     externalNativeBuild {
         cmake { path = file("src/main/cpp/CMakeLists.txt"); version = "3.22.1" }
     }
-    packaging { jniLibs.useLegacyPackaging = true }
+    packaging {
+        jniLibs.useLegacyPackaging = true
+        resources {
+            excludes += setOf(
+                "DebugProbesKt.bin",
+                "META-INF/AL2.0",
+                "META-INF/LGPL2.1",
+                "META-INF/*.kotlin_module",
+                "META-INF/DEPENDENCIES",
+                "META-INF/LICENSE*",
+                "META-INF/NOTICE*",
+                "kotlin/**.kotlin_builtins",
+            )
+        }
+    }
 }
 kotlin {
     compilerOptions {
         jvmTarget.set(JvmTarget.JVM_17)
+    }
+}
+configurations.configureEach {
+    if (!name.contains("test", ignoreCase = true)) {
+        exclude(group = "org.jetbrains.kotlin", module = "kotlin-reflect")
+        exclude(group = "com.google.code.gson", module = "gson")
+        exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-coroutines-debug")
     }
 }
 dependencies {

@@ -1,5 +1,11 @@
 package com.example.pocketagent
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.runInterruptible
+import kotlinx.coroutines.withTimeout
+
 /**
  * Offline multi-step tool execution loop for PocketAgent.
  *
@@ -14,13 +20,15 @@ package com.example.pocketagent
  *
  * 100% offline, zero network calls, zero telemetry.
  */
-class AgentToolLoop(
+open class AgentToolLoop(
     private val notesStore: PersonalNotesStore? = null,
     private val documentVault: DocumentVault? = null,
     private val maxIterations: Int = 3,
+    private val toolTimeoutMs: Long = TOOL_EXECUTION_TIMEOUT_MS,
 ) {
 
     companion object {
+        const val TOOL_EXECUTION_TIMEOUT_MS = 10_000L
         const val AGENT_MODE_INSTRUCTION =
             "Agent Mode is active. You have access to offline on-device tools:\n" +
                 "- TOOL_CALL: calc(<math_or_conversion_expression>)\n" +
@@ -81,6 +89,43 @@ class AgentToolLoop(
         )
     }
 
+    /**
+     * Suspending variant of [processOutput] that executes each tool call with a structured
+     * timeout and exception boundary via [executeToolCallSafe].
+     */
+    suspend fun processOutputSafe(modelOutput: String, iterationIndex: Int = 0): Pair<Boolean, LoopResult> {
+        val toolCalls = extractToolCalls(modelOutput)
+        if (toolCalls.isEmpty()) {
+            return false to LoopResult(
+                finalAnswer = modelOutput,
+                toolResults = emptyList(),
+                iterationsUsed = iterationIndex,
+                wasTerminatedEarly = false,
+            )
+        }
+
+        val results = mutableListOf<ToolCallResult>()
+        for ((toolName, toolInput) in toolCalls) {
+            val output = executeToolCallSafe(toolName, toolInput)
+            results.add(
+                ToolCallResult(
+                    toolName = toolName,
+                    input = toolInput,
+                    output = output,
+                    iterationIndex = iterationIndex,
+                )
+            )
+        }
+
+        val cleanedOutput = removeToolCallLines(modelOutput)
+        return true to LoopResult(
+            finalAnswer = cleanedOutput,
+            toolResults = results,
+            iterationsUsed = iterationIndex + 1,
+            wasTerminatedEarly = iterationIndex + 1 >= maxIterations,
+        )
+    }
+
     fun buildEnrichedPrompt(originalPrompt: String, toolResults: List<ToolCallResult>): String {
         if (toolResults.isEmpty()) return originalPrompt
         val sb = StringBuilder(originalPrompt)
@@ -102,7 +147,39 @@ class AgentToolLoop(
         return results
     }
 
+    /**
+     * Executes a single tool call with a structured [timeoutMs] boundary and exception guard so a
+     * hanging or throwing tool never crashes the inference loop.
+     */
+    suspend fun executeToolCallSafe(
+        toolName: String,
+        input: String,
+        timeoutMs: Long = toolTimeoutMs,
+    ): String {
+        return try {
+            withTimeout(timeoutMs) {
+                runInterruptible(Dispatchers.IO) {
+                    executeToolCallInternal(toolName, input)
+                }
+            }
+        } catch (_: TimeoutCancellationException) {
+            "Tool '$toolName' timed out after ${timeoutMs}ms."
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            "Tool '$toolName' failed: ${e.message ?: e.javaClass.simpleName}"
+        }
+    }
+
     fun executeToolCall(toolName: String, input: String): String {
+        return try {
+            executeToolCallInternal(toolName, input)
+        } catch (e: Exception) {
+            "Tool '$toolName' failed: ${e.message ?: e.javaClass.simpleName}"
+        }
+    }
+
+    protected open fun executeToolCallInternal(toolName: String, input: String): String {
         return when (toolName) {
             "calc", "calculate" -> {
                 val result = LocalCalculatorTool.tryEvaluate(input)

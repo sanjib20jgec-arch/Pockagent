@@ -14,7 +14,8 @@
         android:largeHeap="true"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.PocketAgent">
+        android:theme="@style/Theme.PocketAgent"
+        android:usesCleartextTraffic="false">
         <!-- Hardware acceleration native libraries for LiteRT-LM GPU OpenCL backend -->
         <uses-native-library android:name="libvndksupport.so" android:required="false" />
         <uses-native-library android:name="libOpenCL.so" android:required="false" />

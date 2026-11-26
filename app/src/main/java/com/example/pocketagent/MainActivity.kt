@@ -31,8 +31,11 @@ import android.speech.tts.TextToSpeech
 import android.text.TextUtils
 import android.transition.TransitionManager
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.animation.DecelerateInterpolator
+import android.view.inputmethod.InputMethodManager
+import androidx.activity.OnBackPressedCallback
 import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
@@ -301,6 +304,25 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
 
         cleanupStagedInputFiles()
         buildInterface()
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                when {
+                    ::slashPopupContainer.isInitialized && slashPopupContainer.visibility == View.VISIBLE -> {
+                        slashPopupContainer.visibility = View.GONE
+                    }
+                    isToolsTrayOpen -> {
+                        toggleToolsTray(force = false)
+                    }
+                    ::taskInput.isInitialized && taskInput.hasFocus() -> {
+                        hideKeyboard(clearInputFocus = true)
+                    }
+                    else -> {
+                        isEnabled = false
+                        onBackPressedDispatcher.onBackPressed()
+                    }
+                }
+            }
+        })
         savedInstanceState?.getString(STATE_ACTIVE_SESSION_ID)?.let { loadSession(it) }
         refreshModelStatus()
         updateWorkspaceSubtitle()
@@ -456,6 +478,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(palette.bg)
             fitsSystemWindows = true
+            isFocusableInTouchMode = true
         }
         applyImeInsets(rootLayout)
 
@@ -719,6 +742,17 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 // height resizes like opening toolsTray or keyboard do not falsely trigger "↓ Latest").
                 isUserReadingUpwards = scrollY + height < (chatCanvas.height + paddingTop + paddingBottom - dp(56))
                 updateJumpToBottomVisibility()
+            }
+            setOnTouchListener { _, event ->
+                if (event.actionMasked == MotionEvent.ACTION_DOWN || event.actionMasked == MotionEvent.ACTION_MOVE) {
+                    val hasOpenControls = (::taskInput.isInitialized && taskInput.hasFocus()) ||
+                        isToolsTrayOpen ||
+                        (::slashPopupContainer.isInitialized && slashPopupContainer.visibility == View.VISIBLE)
+                    if (hasOpenControls) {
+                        dismissComposerOverlays(hideIme = true)
+                    }
+                }
+                false
             }
         }
 
@@ -1052,7 +1086,11 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 }
             }
             setOnFocusChangeListener { _, hasFocus ->
-                if (hasFocus && isToolsTrayOpen) toggleToolsTray(force = false)
+                if (hasFocus && isToolsTrayOpen) {
+                    toggleToolsTray(force = false)
+                } else if (!hasFocus && ::slashPopupContainer.isInitialized && slashPopupContainer.visibility == View.VISIBLE) {
+                    slashPopupContainer.visibility = View.GONE
+                }
             }
             addTextChangedListener(object : android.text.TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
@@ -1166,6 +1204,10 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             TransitionManager.beginDelayedTransition(composerCard)
         }
         isToolsTrayOpen = open
+        if (open) {
+            if (::slashPopupContainer.isInitialized) slashPopupContainer.visibility = View.GONE
+            hideKeyboard(clearInputFocus = true)
+        }
         toolsTray.visibility = if (open) View.VISIBLE else View.GONE
         toolsToggleButton.setImageDrawable(
             tintedVectorDrawable(
@@ -1344,13 +1386,44 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         }
     }
 
-    /** Scrolls the chat canvas to the newest content unless the reader scrolled up. */
+    /** Hides the soft keyboard and optionally clears focus from [taskInput]. */
+    private fun hideKeyboard(clearInputFocus: Boolean = true) {
+        if (::taskInput.isInitialized && clearInputFocus) {
+            taskInput.clearFocus()
+        }
+        val target = currentFocus ?: if (::taskInput.isInitialized) taskInput else window?.decorView
+        val imm = getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager
+        if (target != null) {
+            imm?.hideSoftInputFromWindow(target.windowToken, 0)
+        }
+    }
+
+    /** Dismisses open composer popups (slash menu, tools tray) and optionally hides the keyboard. */
+    private fun dismissComposerOverlays(hideIme: Boolean = false) {
+        if (::slashPopupContainer.isInitialized && slashPopupContainer.visibility == View.VISIBLE) {
+            slashPopupContainer.visibility = View.GONE
+        }
+        if (isToolsTrayOpen) {
+            toggleToolsTray(force = false)
+        }
+        if (hideIme) {
+            hideKeyboard(clearInputFocus = true)
+        }
+    }
+
+    /** Scrolls the chat canvas to the newest content unless the reader scrolled up, without stealing focus. */
     private fun scrollChatToBottom(force: Boolean = false) {
-        if (!::chatScroll.isInitialized) return
+        if (!::chatScroll.isInitialized || !::chatCanvas.isInitialized) return
         if (!force && isUserReadingUpwards) return
         chatScroll.post {
             if (!force && isUserReadingUpwards) return@post
-            chatScroll.fullScroll(View.FOCUS_DOWN)
+            val bottom = (chatCanvas.height + chatScroll.paddingTop + chatScroll.paddingBottom - chatScroll.height)
+                .coerceAtLeast(0)
+            if (force) {
+                chatScroll.smoothScrollTo(0, bottom)
+            } else {
+                chatScroll.scrollTo(0, bottom)
+            }
             updateJumpToBottomVisibility()
         }
     }
@@ -1547,6 +1620,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun showVaultChooserDialog() {
+        dismissComposerOverlays(hideIme = true)
         val docsCount = runCatching { documentVault.loadAll().size }.getOrDefault(0)
         val artCount = runCatching { artifactStore.loadAll().size }.getOrDefault(0)
         val root = styleDialogContainer(this, palette, paddingDp = 18)
@@ -2000,6 +2074,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun startInAppRecording() {
+        dismissComposerOverlays(hideIme = true)
         val generationAtStart = attachmentGeneration
         suggestButton.isEnabled = false
         transcribeWavButton.isEnabled = false
@@ -2843,6 +2918,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             updateStatus("An answer is already being generated. Tap Stop first.")
             return
         }
+        dismissComposerOverlays(hideIme = true)
         val detectedSlash = SlashCommandDetector.detectCommand(rawTask)
         val task = if (detectedSlash != null) {
             SlashCommandDetector.stripCommand(rawTask, detectedSlash)
@@ -3214,6 +3290,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             updateStatus("Stop active generation before starting a new chat.")
             return
         }
+        dismissComposerOverlays(hideIme = true)
         val newSession = ConversationSession.createWithInitialPrompt("New Conversation")
         try {
             sessionStore.saveSession(newSession)
@@ -3908,6 +3985,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
 
     /** Opens the workspace menu dialog grouping chats, notes, memory, models, and privacy. */
     private fun showWorkspaceMenuDialog() {
+        dismissComposerOverlays(hideIme = true)
         lateinit var dialog: AlertDialog
         val activeProjName = activeProjectId?.let { projectStore.getProject(it)?.name } ?: "Default Workspace"
         val docCount = documentVault.loadAll().size
@@ -4091,6 +4169,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun showProjectsDialog() {
+        dismissComposerOverlays(hideIme = true)
         val root = styleDialogContainer(this, palette, paddingDp = 16)
         root.addView(
             text("Switch project workspace or customize its system prompt:", 12.5f, palette.muted),
@@ -4914,6 +4993,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             return
         }
         recognizer?.destroy()
+        dismissComposerOverlays(hideIme = true)
         val speech = SpeechRecognizer.createSpeechRecognizer(this)
         recognizer = speech
         isDictating = true
@@ -5094,6 +5174,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun showModelManagerDialog() {
+        dismissComposerOverlays(hideIme = true)
         ensureLegacyModelRegistered()
         val model = activeModelFile()
         val allModels = modelLibraryStore.loadAll()

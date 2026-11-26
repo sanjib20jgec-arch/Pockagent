@@ -9,7 +9,7 @@ class ArtifactStoreTest {
 
     @get:Rule val tmp = TemporaryFolder()
 
-    private fun store() = ArtifactStore(tmp.newFolder("artifacts"))
+    private fun store() = ArtifactStore(tmp.newFolder())
 
     @Test fun `empty store returns empty list`() {
         assertTrue(store().loadAll().isEmpty())

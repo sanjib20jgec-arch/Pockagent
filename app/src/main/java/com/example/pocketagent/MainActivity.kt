@@ -3152,7 +3152,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                         add("Document Vault:\n" + vaultExcerpts.joinToString("\n") { it.take(140) })
                     }
                     if (localCitations.isNotEmpty()) {
-                        add("Attachments: " + localCitations.joinToString(" | ") { it.excerpt.take(100) })
+                        add("Attachments: " + localCitations.joinToString(" | ") { it.excerptSnippet.take(100) })
                     }
                 }.joinToString("\n\n").ifBlank { null }
 

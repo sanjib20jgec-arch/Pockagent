@@ -8,6 +8,7 @@ import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption.ATOMIC_MOVE
 import java.nio.file.StandardCopyOption.REPLACE_EXISTING
+import java.security.MessageDigest
 import java.util.Locale
 
 /** Copies a selected model transactionally, preserving the last working file if import fails. */
@@ -30,6 +31,7 @@ internal class ModelFileStore(
     fun importModel(
         input: InputStream,
         expectedBytes: Long? = null,
+        expectedSha256: String? = null,
         onProgress: ((copiedBytes: Long, totalBytes: Long?) -> Unit)? = null,
     ): File {
         if (!directory.exists() && !directory.mkdirs()) {
@@ -55,6 +57,7 @@ internal class ModelFileStore(
         }
 
         var committed = false
+        val digest = MessageDigest.getInstance("SHA-256")
         try {
             var copied = 0L
             var lastReported = 0L
@@ -73,6 +76,7 @@ internal class ModelFileStore(
                             throw IOException(sizeLimitMessage(needed, copyLimit, maxBytes, normalizedExpectedBytes))
                         }
                         output.write(singleByte)
+                        digest.update(singleByte.toByte())
                         if (magicRead < magic.size) {
                             magic[magicRead] = singleByte.toByte()
                             magicRead++
@@ -84,6 +88,7 @@ internal class ModelFileStore(
                             throw IOException(sizeLimitMessage(needed, copyLimit, maxBytes, normalizedExpectedBytes))
                         }
                         output.write(buffer, 0, count)
+                        digest.update(buffer, 0, count)
                         if (magicRead < magic.size) {
                             val toCopy = minOf(count, magic.size - magicRead)
                             System.arraycopy(buffer, 0, magic, magicRead, toCopy)
@@ -106,12 +111,43 @@ internal class ModelFileStore(
                 output.fd.sync()
             }
 
+            val computedSha256 = ModelIntegrity.toHex(digest.digest())
+            if (expectedSha256 != null &&
+                (!ModelIntegrity.isValidHex(expectedSha256) || computedSha256 != expectedSha256)
+            ) {
+                throw IOException("Model checksum mismatch. The selected bytes differ from the expected SHA-256.")
+            }
+
             replaceCurrentModel(temporary, modelFile)
             committed = true
+            writeChecksumSidecar(computedSha256)
             onProgress?.invoke(copied, normalizedExpectedBytes ?: copied)
             return modelFile
         } finally {
             if (!committed && temporary.exists()) temporary.delete()
+        }
+    }
+
+    /** Returns the stored lowercase SHA-256 digest, or null when absent or malformed. */
+    fun storedSha256(): String? {
+        val sidecar = ModelIntegrity.sidecarFor(modelFile)
+        if (!sidecar.isFile) return null
+        val value = try {
+            sidecar.readText().trim()
+        } catch (_: IOException) {
+            return null
+        }
+        return value.takeIf { ModelIntegrity.isValidHex(it) }
+    }
+
+    private fun writeChecksumSidecar(sha256: String) {
+        val sidecar = ModelIntegrity.sidecarFor(modelFile)
+        val pending = File(directory, "$MODEL_FILE_NAME.sha256.part")
+        try {
+            pending.writeText("$sha256\n")
+            if (!pending.renameTo(sidecar)) throw IOException("Could not store the model checksum.")
+        } finally {
+            if (pending.exists()) pending.delete()
         }
     }
 
@@ -182,6 +218,8 @@ internal class ModelFileStore(
             modelFile,
             File(directory, "$MODEL_FILE_NAME.part"),
             File(directory, "$MODEL_FILE_NAME.backup"),
+            ModelIntegrity.sidecarFor(modelFile),
+            File(directory, "$MODEL_FILE_NAME.sha256.part"),
         ).forEach { f ->
             if (f.exists() && !f.delete()) ok = false
         }

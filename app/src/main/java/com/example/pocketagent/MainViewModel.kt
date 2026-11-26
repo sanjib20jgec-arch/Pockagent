@@ -332,7 +332,14 @@ class MainViewModel internal constructor(
         refreshNotes()
         val model = modelFileStore.modelFile
         if (model.exists() && model.length() > 0) {
-            updateState { it.withModelReady(model.length()) }
+            val storedHash = modelFileStore.storedSha256()
+            val checksumMismatch = storedHash != null &&
+                (ModelIntegrity.sha256Hex(model) != storedHash)
+            if (checksumMismatch) {
+                updateState { it.withModelImportFailed("Stored model checksum mismatch.") }
+            } else {
+                updateState { it.withModelReady(model.length()) }
+            }
         }
 
         val whisperFile = whisperModelStore.modelFile

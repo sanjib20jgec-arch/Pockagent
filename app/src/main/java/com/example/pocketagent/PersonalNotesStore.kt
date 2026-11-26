@@ -3,6 +3,7 @@ package com.example.pocketagent
 import java.io.File
 import java.io.IOException
 import java.util.UUID
+import kotlinx.serialization.Serializable
 
 /**
  * Sovereign local notes vault for PocketAgent.
@@ -28,6 +29,7 @@ class PersonalNotesStore(
         fun defaultDir(filesDir: File): File = File(filesDir, "notes")
     }
 
+    @Serializable
     data class PersonalNote(
         val id: String = UUID.randomUUID().toString(),
         val title: String,
@@ -72,7 +74,12 @@ class PersonalNotesStore(
         }
         return try {
             val json = notesFile.readText(Charsets.UTF_8)
-            parseNotesJson(json).sortedWith(
+            val decoded = if (StoreMigration.hasSchemaVersion(json)) {
+                StoreMigration.json.decodeFromString<List<PersonalNote>>(json)
+            } else {
+                parseNotesJson(json)
+            }
+            decoded.sortedWith(
                 compareByDescending<PersonalNote> { it.isPinned }
                     .thenByDescending { it.updatedAt }
             )
@@ -200,7 +207,7 @@ class PersonalNotesStore(
             baseDir.mkdirs()
         }
         val tempFile = File(baseDir, "$NOTES_FILE_NAME$TEMP_FILE_SUFFIX")
-        val json = serializeNotesJson(notes)
+        val json = StoreMigration.tagWithSchemaVersion(serializeNotesJson(notes))
 
         try {
             tempFile.writeText(json, Charsets.UTF_8)

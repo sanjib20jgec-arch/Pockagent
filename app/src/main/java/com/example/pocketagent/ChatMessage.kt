@@ -1,6 +1,7 @@
 package com.example.pocketagent
 
 import java.util.UUID
+import kotlinx.serialization.Serializable
 
 /**
  * Represents a single conversational turn in PocketAgent.
@@ -14,6 +15,7 @@ import java.util.UUID
  * @property attachmentContent Optional untrusted raw or extracted attachment text.
  * @property estimatedTokens Estimated token count for this turn including attachments.
  */
+@Serializable
 data class ChatMessage(
     val id: String = UUID.randomUUID().toString(),
     val role: Role,
@@ -24,6 +26,7 @@ data class ChatMessage(
     val attachmentContent: String? = null,
     val estimatedTokens: Int = estimateTokens(content, attachmentSummary, attachmentContent),
 ) {
+    @Serializable
     enum class Role {
         USER,
         ASSISTANT,

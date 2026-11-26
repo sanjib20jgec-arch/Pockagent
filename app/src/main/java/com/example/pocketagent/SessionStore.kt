@@ -85,7 +85,7 @@ class SessionStore(
             throw IOException("Session limit of $maxSessions reached. Clear or delete older sessions first.")
         }
 
-        val jsonString = SessionJsonCodec.serialize(session)
+        val jsonString = StoreMigration.tagWithSchemaVersion(SessionJsonCodec.serialize(session))
         val jsonBytes = jsonString.toByteArray(Charsets.UTF_8)
         if (jsonBytes.size > maxSessionBytes) {
             throw IOException("Session size (${jsonBytes.size} bytes) exceeds maximum limit of $maxSessionBytes bytes.")
@@ -254,7 +254,11 @@ class SessionStore(
             throw IOException("Session file ${file.name} exceeds max size bound.")
         }
         val text = file.readText(Charsets.UTF_8)
-        return SessionJsonCodec.deserialize(text)
+        return if (StoreMigration.hasSchemaVersion(text)) {
+            StoreMigration.json.decodeFromString<ConversationSession>(text)
+        } else {
+            SessionJsonCodec.deserialize(text)
+        }
     }
 
     private fun commitAtomic(temporary: File, target: File) {

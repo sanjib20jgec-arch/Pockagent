@@ -1,6 +1,7 @@
 package com.example.pocketagent
 
 import java.util.UUID
+import kotlinx.serialization.Serializable
 
 /**
  * Represents a local multi-turn conversation session.
@@ -14,6 +15,7 @@ import java.util.UUID
  * @property updatedAt Epoch millisecond timestamp of the last update or message.
  * @property messages Ordered list of turns in this session.
  */
+@Serializable
 data class ConversationSession(
     val id: String = UUID.randomUUID().toString(),
     val title: String,

@@ -3,6 +3,7 @@ package com.example.pocketagent
 import java.io.File
 import java.io.IOException
 import java.util.UUID
+import kotlinx.serialization.Serializable
 
 /**
  * Sovereign local long-term memory store for PocketAgent.
@@ -28,6 +29,7 @@ class UserMemoryStore(
         fun defaultDir(filesDir: File): File = File(filesDir, "memories")
     }
 
+    @Serializable
     enum class MemoryCategory {
         PREFERENCE,
         PROFILE,
@@ -41,6 +43,7 @@ class UserMemoryStore(
         }
     }
 
+    @Serializable
     data class UserMemory(
         val id: String = UUID.randomUUID().toString(),
         val content: String,
@@ -81,7 +84,11 @@ class UserMemoryStore(
         }
         return try {
             val json = memoriesFile.readText(Charsets.UTF_8)
-            parseMemoriesJson(json)
+            if (StoreMigration.hasSchemaVersion(json)) {
+                StoreMigration.json.decodeFromString<List<UserMemory>>(json)
+            } else {
+                parseMemoriesJson(json)
+            }
         } catch (_: Exception) {
             emptyList()
         }
@@ -184,7 +191,7 @@ class UserMemoryStore(
             baseDir.mkdirs()
         }
         val tempFile = File(baseDir, "$MEMORIES_FILE_NAME$TEMP_FILE_SUFFIX")
-        val json = serializeMemoriesJson(memories)
+        val json = StoreMigration.tagWithSchemaVersion(serializeMemoriesJson(memories))
 
         try {
             tempFile.writeText(json, Charsets.UTF_8)

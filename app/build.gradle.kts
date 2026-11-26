@@ -1,6 +1,10 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
-plugins { id("com.android.application"); id("org.jetbrains.kotlin.android") }
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.serialization")
+}
 android {
     namespace = "com.example.pocketagent"
     compileSdk = 35
@@ -38,6 +42,7 @@ dependencies {
     implementation("com.google.ai.edge.litertlm:litertlm-android:0.19.1")
     implementation("com.dineshdev:pdfbox-android:2.0.27.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
 }

@@ -114,7 +114,7 @@ object AgentTelemetryFormatter {
  */
 object NotesRetriever {
 
-    private val ALPHANUMERIC_TOKEN_REGEX = Regex("[a-z0-9]+")
+    private val ALPHANUMERIC_TOKEN_REGEX = Regex("""[\p{L}\p{M}\p{N}]+""")
     private val EXTRA_STOP_WORDS = setOf(
         "can", "would", "please", "also", "like", "make", "tell", "give", "show", "find",
     )
@@ -207,7 +207,10 @@ object NotesRetriever {
     private fun tokenizeQuery(query: String): List<String> =
         ALPHANUMERIC_TOKEN_REGEX.findAll(query.lowercase(Locale.US))
             .map { it.value }
-            .filter { it.length >= 3 && it !in STOP_WORDS }
+            .filter { token ->
+                val minLen = if (token.any { it.code > 127 }) 2 else 3
+                token.length >= minLen && token !in STOP_WORDS
+            }
             .distinct()
             .toList()
 

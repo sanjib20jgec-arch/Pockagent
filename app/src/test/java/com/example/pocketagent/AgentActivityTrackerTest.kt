@@ -223,4 +223,23 @@ class AgentActivityTrackerTest {
         assertTrue(bengaliChips.any { it.label == "Translate to English" })
         assertTrue(FollowUpSuggestionGenerator.suggestFollowUps("hi", "").isEmpty())
     }
+
+    @Test
+    fun `notesRetriever and offlineKeywordIndex match Bengali script queries accurately`() {
+        val bnNote = PersonalNotesStore.PersonalNote(
+            title = "বাজারের তালিকা",
+            content = "আজ চাল, ডাল এবং আলু কিনতে হবে।",
+        )
+        val enNote = PersonalNotesStore.PersonalNote(
+            title = "Grocery List",
+            content = "Buy milk and eggs.",
+        )
+        val matched = NotesRetriever.findRelevantNotes("বাজারের তালিকা দেখাও", listOf(enNote, bnNote))
+        assertEquals(1, matched.size)
+        assertEquals("বাজারের তালিকা", matched.first().title)
+
+        val tokens = OfflineKeywordIndex.tokenize("বাংলা নোটস সার্চ")
+        assertTrue(tokens.contains("বাংলা"))
+        assertTrue(tokens.contains("নোটস"))
+    }
 }

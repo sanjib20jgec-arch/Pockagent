@@ -35,6 +35,7 @@ data class ModelBadgeState(
 data class QuickModeBarLabels(
     val projectChipLabel: String,
     val agentChipLabel: String,
+    val deepThinkChipLabel: String,
     val slashChipLabel: String,
     val tuningChipLabel: String,
     val vaultChipLabel: String,
@@ -53,6 +54,7 @@ object ComposerChromeHelper {
     fun formatQuickModeLabels(
         projectName: String?,
         isAgentEnabled: Boolean,
+        isDeepThinkEnabled: Boolean = false,
         temperature: Float,
         contextUsedTokens: Int,
         contextMaxTokens: Int,
@@ -62,6 +64,7 @@ object ComposerChromeHelper {
         val cleanProject = projectName?.trim()?.takeIf { it.isNotEmpty() } ?: "Default"
         val shortProject = truncateWithEllipsis(cleanProject, MAX_PROJECT_SHORT_LEN)
         val agentLabel = if (isAgentEnabled) "● Agent: ON" else "Agent: OFF"
+        val deepThinkLabel = if (isDeepThinkEnabled) "● Deep Think: ON" else "Deep Think: OFF"
         val safeTemp = temperature.takeIf { !it.isNaN() }?.coerceIn(0.1f, 1.5f) ?: 0.8f
         val ctxPct = if (contextUsedTokens <= 0 || contextMaxTokens <= 0) {
             0
@@ -74,6 +77,7 @@ object ComposerChromeHelper {
         return QuickModeBarLabels(
             projectChipLabel = "Project: $shortProject ▾",
             agentChipLabel = agentLabel,
+            deepThinkChipLabel = deepThinkLabel,
             slashChipLabel = "/ Commands",
             tuningChipLabel = tuningLabel,
             vaultChipLabel = vaultLabel,

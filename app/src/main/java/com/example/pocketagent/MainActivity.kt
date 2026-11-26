@@ -84,6 +84,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         private const val PREF_MAX_OUTPUT_TOKENS = "pref_max_output_tokens"
         private const val PREF_MAX_CONTEXT_TOKENS = "pref_max_context_tokens"
         private const val PREF_AGENT_MODE = "pref_agent_mode"
+        private const val PREF_DEEP_THINK = "pref_deep_think"
         private const val PREF_VISION_ENABLED = "pref_vision_enabled"
         private const val MAX_ATTACHMENT_CHARS = MainUiState.MAX_ATTACHMENT_CHARS
         private const val MAX_RESPONSE_TOKENS = MainUiState.MAX_RESPONSE_TOKENS
@@ -197,6 +198,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     private val slideDrawer by lazy { ClaudeSlideDrawer(this) }
     private var activeProjectId: String? = null
     private var isAgentModeEnabled: Boolean = false
+    private var isDeepThinkEnabled: Boolean = false
     private var isVisionModeEnabled: Boolean = false
     private var currentTemperature: Float = InferenceEngineManager.DEFAULT_TEMPERATURE
     private var currentMaxOutputTokens: Int = MAX_RESPONSE_TOKENS
@@ -210,6 +212,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     private lateinit var attachImageButton: Button
     private lateinit var quickProjectChip: Button
     private lateinit var quickAgentChip: Button
+    private lateinit var quickDeepThinkChip: Button
     private lateinit var quickSlashChip: Button
     private lateinit var quickTuningChip: Button
     private lateinit var quickVaultChip: Button
@@ -285,6 +288,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         engineManager.preference = savedBackend
         activeProjectId = settingsPrefs.getString(PREF_ACTIVE_PROJECT_ID, null)
         isAgentModeEnabled = settingsPrefs.getBoolean(PREF_AGENT_MODE, false)
+        isDeepThinkEnabled = settingsPrefs.getBoolean(PREF_DEEP_THINK, false)
         isVisionModeEnabled = settingsPrefs.getBoolean(PREF_VISION_ENABLED, false)
         currentTemperature = if (settingsPrefs.contains(PREF_TEMPERATURE_BITS)) {
             java.lang.Float.intBitsToFloat(
@@ -796,6 +800,11 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             a11y = "Toggle offline agent tool loop",
             active = isAgentModeEnabled,
         ) { toggleAgentMode(showToast = true) }
+        quickDeepThinkChip = createQuickModeChip(
+            label = if (isDeepThinkEnabled) "● Deep Think: ON" else "Deep Think: OFF",
+            a11y = "Toggle two-pass self-critique Deep Think mode",
+            active = isDeepThinkEnabled,
+        ) { toggleDeepThinkMode() }
         quickSlashChip = createQuickModeChip(
             label = "/ Commands",
             a11y = "Open slash command picker",
@@ -818,7 +827,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             a11y = "Open Document Vault and Artifact Vault",
             active = false,
         ) { showVaultChooserDialog() }
-        val modeChips = listOf(quickProjectChip, quickAgentChip, quickSlashChip, quickTuningChip, quickVaultChip)
+        val modeChips = listOf(quickProjectChip, quickAgentChip, quickDeepThinkChip, quickSlashChip, quickTuningChip, quickVaultChip)
         modeChips.forEachIndexed { idx, chip ->
             quickModeRow.addView(
                 chip,
@@ -1591,6 +1600,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             val labels = ComposerChromeHelper.formatQuickModeLabels(
                 projectName = proj?.name,
                 isAgentEnabled = isAgentModeEnabled,
+                isDeepThinkEnabled = isDeepThinkEnabled,
                 temperature = currentTemperature,
                 contextUsedTokens = ctxUsed,
                 contextMaxTokens = ctxMax,
@@ -1602,6 +1612,9 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
 
             quickAgentChip.text = labels.agentChipLabel
             ComposerChromeViews.styleQuickModePill(quickAgentChip, palette, isAgentModeEnabled)
+
+            quickDeepThinkChip.text = labels.deepThinkChipLabel
+            ComposerChromeViews.styleQuickModePill(quickDeepThinkChip, palette, isDeepThinkEnabled)
 
             quickSlashChip.text = labels.slashChipLabel
             quickTuningChip.text = labels.tuningChipLabel
@@ -1685,6 +1698,18 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 Toast.LENGTH_SHORT,
             ).show()
         }
+    }
+
+    private fun toggleDeepThinkMode() {
+        isDeepThinkEnabled = !isDeepThinkEnabled
+        settingsPrefs.edit().putBoolean(PREF_DEEP_THINK, isDeepThinkEnabled).apply()
+        updateWorkspaceSubtitle()
+        Toast.makeText(
+            this,
+            if (isDeepThinkEnabled) "Deep Think ON (2-pass verify on complex tasks)"
+            else "Deep Think OFF (fast 1-pass)",
+            Toast.LENGTH_SHORT,
+        ).show()
     }
 
     private fun openSlashCommandPicker() {
@@ -3142,7 +3167,8 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                     traceChips += "Notes" to matchedNotes.joinToString(", ") { it.title }
                 }
 
-                val vaultExcerpts = if (task.isNotBlank()) documentVault.search(task, topK = 3) else emptyList()
+                val rawVaultExcerpts = if (task.isNotBlank()) documentVault.search(task, topK = 3) else emptyList()
+                val vaultExcerpts = ReasoningRouter.deduplicateExcerpts(rawVaultExcerpts)
                 if (vaultExcerpts.isNotEmpty()) {
                     traceChips += "Vault" to "${vaultExcerpts.size} excerpt${if (vaultExcerpts.size > 1) "s" else ""}"
                 }
@@ -3174,8 +3200,21 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 }
 
                 val memoryEval = buildEffectiveInstructionWithTrace(task, intent, detectedSlash)
-                val effectiveInstruction = memoryEval.first
+                val routing = ReasoningRouter.route(
+                    task = task,
+                    hasGroundedContext = boundedAttachment.isNotBlank() || matchedNotes.isNotEmpty(),
+                    userTemperature = currentTemperature,
+                )
+                val effectiveInstruction = if (routing.compactDirective.isNotBlank()) {
+                    "${routing.compactDirective}\n\n${memoryEval.first}"
+                } else {
+                    memoryEval.first
+                }
                 traceChips += memoryEval.second
+                if (routing.profile != ReasoningRouter.TaskProfile.QUICK || routing.languageMode != ReasoningRouter.LanguageMode.ENGLISH) {
+                    traceChips += "Router" to "${routing.profile.name.lowercase(Locale.ROOT)} · temp ${String.format(Locale.US, "%.2f", routing.recommendedTemperature)}"
+                }
+                engineManager.updateTemperature(routing.recommendedTemperature)
 
                 val evidenceParts = buildList {
                     calculation?.let { add("Calculator: ${it.expression} = ${it.displayOutput}") }
@@ -3281,6 +3320,23 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                         loopIter++
                     }
                     result = agentLoop.stripToolCallLines(result)
+                }
+
+                if (isDeepThinkEnabled && routing.shouldAllowDeepThink && !isGeneratingCancelled.get() && runawayFragment == null && result.isNotBlank()) {
+                    traceChips += "Deep Think" to "Self-critique pass"
+                    evidenceParts += "Deep Think: Verified draft logic, math, and constraints in a second pass."
+                    val traceSnapshot = traceChips.toList()
+                    val updatedEvidence = evidenceParts.joinToString("\n\n").ifBlank { null }
+                    mainHandler.post {
+                        if (!isDestroyed) {
+                            handle.bindAgentTraceChips(traceSnapshot, updatedEvidence)
+                            currentGenerationStageLabel = "Deep Think · Verifying"
+                            updateStatus("Deep Think: verifying and refining answer…")
+                        }
+                    }
+                    streamingRenderer.reset()
+                    val critiquePrompt = ReasoningRouter.buildDeepThinkCritiquePrompt(task, result)
+                    result = runGuardedGeneration(convKey, critiquePrompt, effectiveInstruction)
                 }
 
                 if (!isGeneratingCancelled.get()) {

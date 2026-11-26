@@ -40,7 +40,7 @@ class OfflineKeywordIndex(
          */
         fun tokenize(text: String, stopWords: Set<String> = STOP_WORDS): List<String> {
             val terms = mutableListOf<String>()
-            val regex = Regex("""\b[\p{L}\p{N}_-]+\b""")
+            val regex = Regex("""[\p{L}\p{M}\p{N}_-]+""")
             for (match in regex.findAll(text.lowercase(Locale.ROOT))) {
                 val token = match.value.trim('-', '_')
                 if (token.length >= 2) {

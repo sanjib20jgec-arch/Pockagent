@@ -347,6 +347,112 @@ object MarkdownFormatter {
         return normalizeSpacing(sb.toString())
     }
 
+    private val PARTIAL_FENCE_LINE_REGEX = Regex("""^[ \t]*`{1,2}[ \t]*$""")
+
+    /**
+     * Fast, single-pass live streaming formatter for partial model output.
+     *
+     * Strips incomplete trailing code fences and formats headers, bullets, blockquotes, and
+     * inline bold/italic markers cleanly so raw `###`, `**`, and dangling backticks don't flash
+     * in the UI before [formatForDisplay] runs on completion.
+     */
+    fun formatStreamingPreview(raw: String): String {
+        if (raw.isBlank()) return ""
+        if (!containsMarkdownSyntax(raw)) return raw.trimEnd()
+
+        val normalized = raw.replace("\r\n", "\n").replace('\r', '\n')
+        val lines = normalized.split('\n')
+        val sb = StringBuilder(normalized.length)
+        var inCodeBlock = false
+
+        for (i in lines.indices) {
+            val line = lines[i]
+            val isLastLine = i == lines.lastIndex
+
+            val fenceMatch = CODE_FENCE_REGEX.matchEntire(line)
+            if (fenceMatch != null) {
+                if (!inCodeBlock) {
+                    // Drop an incomplete trailing fence opener (e.g. "```" or "```kotlin" at EOF)
+                    if (isLastLine) continue
+                    inCodeBlock = true
+                    val lang = fenceMatch.groupValues[1].trim().ifEmpty { "Code" }
+                    if (sb.isNotEmpty()) sb.append('\n')
+                    sb.append("┌── ").append(lang)
+                } else {
+                    inCodeBlock = false
+                    if (sb.isNotEmpty()) sb.append('\n')
+                    sb.append("└──")
+                }
+                continue
+            }
+
+            if (inCodeBlock) {
+                if (sb.isNotEmpty()) sb.append('\n')
+                sb.append("│ ").append(line)
+                continue
+            }
+
+            // Drop dangling 1-2 backtick fence prefix on the final line while streaming
+            if (isLastLine && PARTIAL_FENCE_LINE_REGEX.matches(line)) {
+                continue
+            }
+
+            val formattedLine = when {
+                HR_REGEX.matches(line) -> "────────────────────────────"
+                else -> {
+                    val headerMatch = HEADER_REGEX.matchEntire(line)
+                    val bulletMatch = if (headerMatch == null) BULLET_REGEX.matchEntire(line) else null
+                    val numberedMatch = if (headerMatch == null && bulletMatch == null) NUMBERED_REGEX.matchEntire(line) else null
+                    val quoteMatch = if (headerMatch == null && bulletMatch == null && numberedMatch == null) {
+                        BLOCKQUOTE_REGEX.matchEntire(line)
+                    } else {
+                        null
+                    }
+                    when {
+                        headerMatch != null -> {
+                            val level = headerMatch.groupValues[1].length
+                            val text = cleanStreamingInline(headerMatch.groupValues[2].trim())
+                            when (level) {
+                                1 -> text.uppercase()
+                                2 -> "■ $text"
+                                else -> "◆ $text"
+                            }
+                        }
+                        bulletMatch != null -> {
+                            val indent = "  ".repeat(bulletMatch.groupValues[1].length / 2)
+                            "$indent• ${cleanStreamingInline(bulletMatch.groupValues[2].trim())}"
+                        }
+                        numberedMatch != null -> {
+                            val number = numberedMatch.groupValues[2]
+                            "$number. ${cleanStreamingInline(numberedMatch.groupValues[3].trim())}"
+                        }
+                        quoteMatch != null -> {
+                            "┃ ${cleanStreamingInline(quoteMatch.groupValues[1].trim())}"
+                        }
+                        else -> cleanStreamingInline(line)
+                    }
+                }
+            }
+
+            if (sb.isNotEmpty()) sb.append('\n')
+            sb.append(formattedLine)
+        }
+
+        return sb.toString().trimEnd()
+    }
+
+    private fun cleanStreamingInline(text: String): String {
+        var result = cleanInlineFormatting(text)
+        // Strip unclosed bold/bold-italic openers that haven't received their closing delimiter yet
+        if (result.contains("***")) {
+            result = result.replace("***", "")
+        }
+        if (result.contains("**")) {
+            result = result.replace("**", "")
+        }
+        return result
+    }
+
     /**
      * Strips all markdown syntax to produce clean, natural plain text.
      * Ideal for:

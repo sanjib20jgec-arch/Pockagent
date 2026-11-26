@@ -198,7 +198,7 @@ class ActiveAssistantCardHandle(
         if (!plainText.contains("```") && !plainText.contains("<think>")) {
             liveStreamContainer.visibility = View.GONE
             liveStreamContainer.removeAllViews()
-            streamingTextView.text = plainText
+            streamingTextView.text = buildStreamingSpannable(plainText, palette)
             streamingTextView.visibility = if (plainText.isNotEmpty()) View.VISIBLE else View.GONE
             return
         }
@@ -394,37 +394,83 @@ class ActiveAssistantCardHandle(
         }
 
         if (trimmedSummary.isNotEmpty()) {
-            val collapsedMaxLines = if (cleanedSteps.isEmpty()) 3 else 1
             var expanded = false
-            val summaryView = TextView(context).apply {
+            val minTouch = dp(context, 48)
+            val vInset = dp(context, 6)
+
+            val evidenceText = TextView(context).apply {
                 text = trimmedSummary
-                textSize = 11.5f
+                textSize = 12f
                 setTextColor(palette.muted)
                 typeface = Typeface.create("sans-serif", Typeface.NORMAL)
-                maxLines = collapsedMaxLines
-                ellipsize = TextUtils.TruncateAt.END
-                if (cleanedSteps.isEmpty()) {
-                    background = roundedShape(
-                        color = palette.surfaceElevated,
-                        radiusPx = dp(context, 12).toFloat(),
-                        strokeWidthPx = maxOf(1, dp(context, 1)),
-                        strokeColor = palette.border,
-                    )
-                    setPadding(dp(context, 10), dp(context, 6), dp(context, 10), dp(context, 6))
-                } else {
-                    setPadding(dp(context, 2), dp(context, 5), dp(context, 2), 0)
-                }
+                setLineSpacing(0f, 1.35f)
+                setTextIsSelectable(true)
+            }
+            val evidencePanel = LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                visibility = View.GONE
+                background = roundedShape(
+                    color = palette.surfaceElevated,
+                    radiusPx = dp(context, 12).toFloat(),
+                    strokeWidthPx = maxOf(1, dp(context, 1)),
+                    strokeColor = palette.border,
+                )
+                setPadding(dp(context, 12), dp(context, 10), dp(context, 12), dp(context, 10))
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply {
+                    topMargin = dp(context, 4)
+                }
+                addView(evidenceText)
+            }
+
+            val toggleView = Button(context).apply {
+                text = "Sources & Tools ▸"
+                contentDescription = "Toggle sources and tools evidence"
+                setAllCaps(false)
+                textSize = 12f
+                typeface = Typeface.create("sans-serif", Typeface.BOLD)
+                setTextColor(palette.teal)
+                gravity = Gravity.START or Gravity.CENTER_VERTICAL
+                minHeight = minTouch
+                minimumHeight = minTouch
+                background = InsetDrawable(
+                    rippleDrawable(
+                        roundedShape(
+                            color = palette.surfaceElevated,
+                            radiusPx = dp(context, 10).toFloat(),
+                            strokeWidthPx = maxOf(1, dp(context, 1)),
+                            strokeColor = palette.border,
+                        ),
+                        palette.rippleOnSurface,
+                    ),
+                    0,
+                    vInset,
+                    0,
+                    vInset,
                 )
+                setPadding(dp(context, 12), dp(context, 8), dp(context, 12), dp(context, 8))
+                backgroundTintList = null
+                stateListAnimator = null
+                isFocusable = true
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply {
+                    if (cleanedSteps.isNotEmpty()) topMargin = dp(context, 4)
+                }
                 setOnClickListener {
+                    performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                     expanded = !expanded
                     TransitionManager.beginDelayedTransition(rootCard)
-                    maxLines = if (expanded) Int.MAX_VALUE else collapsedMaxLines
+                    text = if (expanded) "Sources & Tools ▾" else "Sources & Tools ▸"
+                    evidencePanel.visibility = if (expanded) View.VISIBLE else View.GONE
                 }
             }
-            toolTraceContainer.addView(summaryView)
+
+            toolTraceContainer.addView(toggleView)
+            toolTraceContainer.addView(evidencePanel)
         }
     }
 
@@ -542,14 +588,14 @@ class ActiveAssistantCardHandle(
 
     private fun buildStreamingProseView(context: Context, text: String): TextView =
         TextView(context).apply {
-            this.text = text
+            this.text = buildStreamingSpannable(text, palette)
             textSize = 15f
             setTextColor(palette.ink)
             typeface = Typeface.create("sans-serif", Typeface.NORMAL)
             includeFontPadding = true
             breakStrategy = Layout.BREAK_STRATEGY_HIGH_QUALITY
             setHorizontallyScrolling(false)
-            setLineSpacing(dp(context, 4).toFloat(), 1f)
+            setLineSpacing(0f, 1.45f)
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -558,6 +604,29 @@ class ActiveAssistantCardHandle(
                 bottomMargin = dp(context, 6)
             }
         }
+
+    private fun buildStreamingSpannable(raw: String, palette: UiPalette): CharSequence {
+        if (raw.isBlank()) return ""
+        if (!MarkdownFormatter.containsMarkdownSyntax(raw)) return raw
+        val formatted = MarkdownFormatter.formatStreamingPreview(raw)
+        if (formatted.isEmpty()) return ""
+
+        val ssb = SpannableStringBuilder(formatted)
+        var lineStart = 0
+        while (lineStart < ssb.length) {
+            val nlIndex = ssb.indexOf('\n', lineStart)
+            val lineEnd = if (nlIndex == -1) ssb.length else nlIndex
+            val line = ssb.subSequence(lineStart, lineEnd).toString()
+            if (line.startsWith("■ ") || line.startsWith("◆ ")) {
+                ssb.setSpan(StyleSpan(Typeface.BOLD), lineStart, lineEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                ssb.setSpan(ForegroundColorSpan(palette.ink), lineStart, lineEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            } else if (line.isNotEmpty() && line == line.uppercase(Locale.ROOT) && line.any { it.isLetter() } && line.length <= 64) {
+                ssb.setSpan(StyleSpan(Typeface.BOLD), lineStart, lineEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+            lineStart = if (nlIndex == -1) ssb.length else nlIndex + 1
+        }
+        return ssb
+    }
 
     private fun buildStreamingCodeCard(
         context: Context,
@@ -820,13 +889,8 @@ object ChatMessageCardBuilder {
     ): ActiveAssistantCardHandle {
         val rootCard = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            background = roundedShape(
-                color = palette.assistantBubbleBg,
-                radiusPx = dp(context, 18).toFloat(),
-                strokeWidthPx = maxOf(1, dp(context, 1)),
-                strokeColor = palette.assistantBubbleBorder,
-            )
-            setPadding(dp(context, 16), dp(context, 14), dp(context, 16), dp(context, 14))
+            background = null
+            setPadding(dp(context, 4), dp(context, 16), dp(context, 4), dp(context, 18))
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -910,7 +974,7 @@ object ChatMessageCardBuilder {
             typeface = Typeface.create("sans-serif", Typeface.NORMAL)
             includeFontPadding = true
             breakStrategy = Layout.BREAK_STRATEGY_HIGH_QUALITY
-            setLineSpacing(dp(context, 4).toFloat(), 1f)
+            setLineSpacing(0f, 1.45f)
             visibility = View.GONE
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,

@@ -191,6 +191,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     private val modelLibraryStore by lazy { ModelLibraryStore(ModelLibraryStore.defaultDir(filesDir)) }
     private val artifactStore by lazy { ArtifactStore(ArtifactStore.defaultDir(filesDir)) }
     private val documentVault by lazy { DocumentVault(DocumentVault.defaultDir(filesDir)) }
+    private val slideDrawer by lazy { ClaudeSlideDrawer(this) }
     private var activeProjectId: String? = null
     private var isAgentModeEnabled: Boolean = false
     private var isVisionModeEnabled: Boolean = false
@@ -208,6 +209,8 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     private lateinit var quickSlashChip: Button
     private lateinit var quickTuningChip: Button
     private lateinit var quickVaultChip: Button
+    private lateinit var contextContinuityBanner: LinearLayout
+    private lateinit var contextContinuityText: TextView
     private val ttsSpeaker by lazy {
         AndroidTtsSpeaker(
             ttsProvider = { tts },
@@ -307,6 +310,9 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 when {
+                    slideDrawer.isOpen() -> {
+                        slideDrawer.close()
+                    }
                     ::slashPopupContainer.isInitialized && slashPopupContainer.visibility == View.VISIBLE -> {
                         slashPopupContainer.visibility = View.GONE
                     }
@@ -482,24 +488,24 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         }
         applyImeInsets(rootLayout)
 
-        // ---------------------------------------------------------------- Zone A: pinned header
+        // ---------------------------------------------------------------- Zone A: quiet Claude-style header
         val brandRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(10), dp(6), dp(6), dp(6))
+            setPadding(dp(6), dp(6), dp(6), dp(6))
         }
-        val mark = ImageView(this).apply {
-            setImageDrawable(tintedVectorDrawable(this@MainActivity, R.drawable.ic_brand_logo, WHITE))
-            scaleType = ImageView.ScaleType.CENTER_INSIDE
-            setPadding(dp(7), dp(7), dp(7), dp(7))
-            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            background = shape(palette.teal, 12)
-            layoutParams = LinearLayout.LayoutParams(dp(34), dp(34))
-        }
-        brandRow.addView(mark)
+        val drawerBtn = vectorIconButton(
+            context = this,
+            palette = palette,
+            drawableRes = R.drawable.ic_menu,
+            accessibilityLabel = "Open sidebar: chats, projects, vaults, and settings",
+            onClick = { openClaudeDrawer() },
+        )
+        brandRow.addView(drawerBtn, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginEnd = dp(4) })
+
         val brand = column().apply {
-            setPadding(dp(6), 0, 0, 0)
-            addView(text("PocketAgent", 15f, palette.ink, true))
+            setPadding(dp(2), 0, 0, 0)
+            addView(text("PocketAgent", 15.5f, palette.ink, true))
             workspaceSubtitleView = text("", 10f, palette.teal, true).apply {
                 maxLines = 1
                 ellipsize = TextUtils.TruncateAt.END
@@ -542,9 +548,6 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             Triple(R.drawable.ic_add_chat, "Start a fresh conversation") {
                 startNewConversation()
             },
-            Triple(R.drawable.ic_menu, "Open workspace menu: chats, notes, memory, models, and privacy") {
-                showWorkspaceMenuDialog()
-            },
         )
         for ((index, spec) in headerActions.withIndex()) {
             val (iconRes, a11y, action) = spec
@@ -569,17 +572,17 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             setPadding(dp(14), dp(4), dp(14), dp(12))
         }
 
-        // Modernized welcome block, shown only while the conversation is empty.
+        // Calm, spacious welcome card, shown only while the conversation is empty.
         heroCard = column().apply {
             background = GradientDrawable(
                 GradientDrawable.Orientation.TL_BR,
                 intArrayOf(palette.heroGradientStart, palette.heroGradientEnd),
             ).apply { cornerRadius = dp(20).toFloat() }
-            setPadding(dp(18), dp(16), dp(18), dp(16))
+            setPadding(dp(20), dp(18), dp(20), dp(18))
         }
         val trustBadge = styledText(
             context = this,
-            text = "v1.2 · 100% Offline · Agents · Vaults",
+            text = "v1.3 · 100% Offline",
             sizeSp = 11.5f,
             color = WHITE,
             bold = true,
@@ -591,62 +594,17 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             }
         }
         heroCard.addView(trustBadge)
-        heroCard.addView(text("Your sovereign AI workspace", 21f, WHITE, true))
+        heroCard.addView(text("How can I help you today?", 21f, WHITE, true))
         heroCard.addView(
             text(
-                "On-device AI with custom Projects, Agent Tool Loops, Slash Commands, Document & HTML Vaults.",
+                "Private on-device AI · Projects, Agent Tools, Document & HTML Vaults.",
                 13.5f,
                 palette.heroSubtitleInk,
             ).apply {
-                setPadding(0, dp(6), 0, dp(12))
+                setPadding(0, dp(6), 0, 0)
                 setLineSpacing(dp(3).toFloat(), 1f)
             }
         )
-        val featureTiles = listOf(
-            Triple("Projects", "Custom prompts") { showProjectsDialog() },
-            Triple("Agent Tools", "Calc, notes & search") { toggleAgentMode(showToast = true) },
-            Triple("/ Commands", "6 instant prompts") { openSlashCommandPicker() },
-            Triple("Knowledge Vaults", "PDFs & HTML previews") { showVaultChooserDialog() },
-        )
-        val tileGrid = column()
-        for (rowTiles in featureTiles.chunked(2)) {
-            val rowLayout = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-            }
-            rowTiles.forEachIndexed { colIndex, (title, subtitle, action) ->
-                val tile = column().apply {
-                    minimumHeight = dp(48)
-                    setPadding(dp(10), dp(8), dp(10), dp(8))
-                    background = rippleDrawable(
-                        roundedShape(
-                            color = 0x24FFFFFF,
-                            radiusPx = dp(12).toFloat(),
-                            strokeWidthPx = maxOf(1, dp(1)),
-                            strokeColor = 0x44FFFFFF,
-                        ),
-                        palette.rippleOnAccent,
-                    )
-                    isClickable = true
-                    isFocusable = true
-                    contentDescription = "$title: $subtitle"
-                    addView(text(title, 12.5f, WHITE, true))
-                    addView(text(subtitle, 11f, palette.heroSubtitleInk).apply { setPadding(0, dp(1), 0, 0) })
-                    setOnClickListener {
-                        performSubtleHaptic(this)
-                        action()
-                    }
-                }
-                rowLayout.addView(
-                    tile,
-                    LinearLayout.LayoutParams(0, -2, 1f).apply {
-                        if (colIndex == 0) marginEnd = dp(8)
-                    },
-                )
-            }
-            tileGrid.addView(rowLayout, marginBottom(8))
-        }
-        heroCard.addView(tileGrid)
         heroModelCtaButton = Button(this).apply {
             text = "Choose .litertlm Model"
             contentDescription = "Choose a LiteRT-LM model file to get started"
@@ -855,6 +813,48 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         }
         quickModeScroll.addView(quickModeRow)
         composerDock.addView(quickModeScroll, marginBottom(4))
+
+        contextContinuityBanner = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            visibility = View.GONE
+            background = roundedShape(
+                color = palette.warningBg,
+                radiusPx = dp(12).toFloat(),
+                strokeWidthPx = maxOf(1, dp(1)),
+                strokeColor = palette.warningBorder,
+            )
+            setPadding(dp(12), dp(6), dp(8), dp(6))
+        }
+        contextContinuityText = styledText(
+            context = this,
+            text = "",
+            sizeSp = 12f,
+            color = palette.warningInk,
+            bold = true,
+        ).apply {
+            layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+        }
+        contextContinuityBanner.addView(contextContinuityText)
+        val continueBtn = secondaryOutlineButton(
+            context = this,
+            palette = palette,
+            label = "Continue Fresh",
+            accessibilityLabel = "Summarize context and continue in a fresh conversation",
+            compact = true,
+            textColor = palette.teal,
+        ) {
+            val seed = ContextContinuityHelper.buildCarryOverSeed(currentSession)
+            startNewConversation()
+            if (seed.isNotBlank()) {
+                taskInput.setText("Continue from previous context:\n$seed\n\nNext question: ")
+                taskInput.setSelection(taskInput.text.length)
+                taskInput.requestFocus()
+                syncComposerState()
+            }
+        }
+        contextContinuityBanner.addView(continueBtn)
+        composerDock.addView(contextContinuityBanner, marginBottom(6))
 
         composerCard = column().apply {
             background = shape(palette.surface, 20, palette.border)
@@ -1587,6 +1587,66 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             quickVaultChip.text = labels.vaultChipLabel
             ComposerChromeViews.styleQuickModePill(quickVaultChip, palette, docCount + artifactCount > 0)
         }
+        if (::contextContinuityBanner.isInitialized) {
+            if (ContextContinuityHelper.shouldSuggestContinue(ctxUsed, ctxMax)) {
+                contextContinuityText.text = ContextContinuityHelper.formatContextAlert(ctxUsed, ctxMax)
+                contextContinuityBanner.visibility = View.VISIBLE
+            } else {
+                contextContinuityBanner.visibility = View.GONE
+            }
+        }
+    }
+
+    private fun openClaudeDrawer() {
+        dismissComposerOverlays(hideIme = true)
+        val model = activeModelFile()
+        val hasModel = model.exists() && model.length() > 0L
+        val activeEntry = modelLibraryStore.getActive()
+        val modelLabel = if (hasModel) {
+            activeEntry?.displayName ?: settingsPrefs.getString(PREF_MODEL_DISPLAY_NAME, null) ?: model.name
+        } else {
+            "No model selected"
+        }
+        val backendLabel = when {
+            !hasModel -> "Tap to import .litertlm"
+            engineManager.activeBackend == ActiveBackend.GPU -> "GPU Active"
+            engineManager.activeBackend == ActiveBackend.CPU -> "CPU Mode"
+            else -> if (engineManager.preference == BackendPreference.CPU_ONLY) "Standby · CPU" else "Standby · GPU"
+        }
+        val activeProjName = activeProjectId?.let { projectStore.getProject(it)?.name } ?: "Default Workspace"
+        val sessions = runCatching { sessionStore.listSessions() }.getOrDefault(emptyList())
+        val docCount = runCatching { documentVault.loadAll().size }.getOrDefault(0)
+        val artCount = runCatching { artifactStore.loadAll().size }.getOrDefault(0)
+
+        slideDrawer.open(
+            data = DrawerData(
+                sessions = sessions,
+                activeSessionId = currentSession?.id,
+                activeProjectName = activeProjName,
+                documentCount = docCount,
+                artifactCount = artCount,
+                activeModelLabel = modelLabel,
+                activeBackendLabel = backendLabel,
+                appVersionLabel = "v1.3 · Offline",
+            ),
+            palette = palette,
+            callbacks = DrawerCallbacks(
+                onNewChat = { startNewConversation() },
+                onSelectSession = { sess -> loadSession(sess.id) },
+                onOpenProjects = { showProjectsDialog() },
+                onOpenDocumentVault = { showDocumentVaultDialog() },
+                onOpenArtifactVault = { showArtifactVaultDialog() },
+                onOpenNotesMemory = { showNotesManagerDialog() },
+                onOpenModelTuning = {
+                    if (hasModel || modelLibraryStore.loadAll().isNotEmpty()) {
+                        showModelManagerDialog()
+                    } else {
+                        chooseModel()
+                    }
+                },
+                onOpenPrivacyTheme = { showPrivacyCenterDialog() },
+            ),
+        )
     }
 
     private fun toggleAgentMode(showToast: Boolean) {
@@ -3083,10 +3143,23 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 val effectiveInstruction = memoryEval.first
                 traceChips += memoryEval.second
 
+                val evidenceSummary = buildList {
+                    calculation?.let { add("Calculator: ${it.expression} = ${it.displayOutput}") }
+                    if (matchedNotes.isNotEmpty()) {
+                        add("Notes: " + matchedNotes.joinToString(" | ") { "${it.title}: ${it.content.take(100)}" })
+                    }
+                    if (vaultExcerpts.isNotEmpty()) {
+                        add("Document Vault:\n" + vaultExcerpts.joinToString("\n") { it.take(140) })
+                    }
+                    if (localCitations.isNotEmpty()) {
+                        add("Attachments: " + localCitations.joinToString(" | ") { it.excerpt.take(100) })
+                    }
+                }.joinToString("\n\n").ifBlank { null }
+
                 if (traceChips.isNotEmpty()) {
                     val snapshot = traceChips.toList()
                     mainHandler.post {
-                        if (!isDestroyed) handle.bindAgentTraceChips(snapshot)
+                        if (!isDestroyed) handle.bindAgentTraceChips(snapshot, evidenceSummary)
                     }
                 }
 
@@ -5211,6 +5284,21 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 }
             )
         }
+        val diag = ContextContinuityHelper.formatBackendDiagnostic(
+            activeBackend = engineManager.activeBackend,
+            preference = engineManager.preference,
+            lastFallbackReason = engineManager.lastFallbackReason,
+            visionEnabled = isVisionModeEnabled,
+        )
+        infoCard.addView(
+            text(
+                "${diag.headline}\n${diag.tip}",
+                11.5f,
+                if (diag.isCpuFallback) palette.warningInk else palette.muted,
+            ).apply {
+                setPadding(0, 0, 0, dp(6))
+            }
+        )
         infoCard.addView(
             text(
                 "Vision towers remain off by default to save RAM unless Omni Vision Mode is enabled below.",

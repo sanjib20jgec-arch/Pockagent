@@ -310,4 +310,47 @@ class MarkdownFormatterTest {
         assertFalse(plain.contains("---"))
         assertFalse(plain.contains("`"))
     }
+
+    @Test
+    fun formatStreamingPreviewStripsIncompleteTrailingFencesAndFormatsInline() {
+        assertEquals("", MarkdownFormatter.formatStreamingPreview(""))
+        assertEquals("", MarkdownFormatter.formatStreamingPreview("   \n\t  "))
+        assertEquals("Plain prose stays untouched.", MarkdownFormatter.formatStreamingPreview("Plain prose stays untouched."))
+
+        // Incomplete trailing code fence openers are stripped cleanly
+        assertEquals("Here is code:", MarkdownFormatter.formatStreamingPreview("Here is code:\n```kotlin"))
+        assertEquals("Here is code:", MarkdownFormatter.formatStreamingPreview("Here is code:\n```"))
+        assertEquals("Here is code:", MarkdownFormatter.formatStreamingPreview("Here is code:\n``"))
+
+        // Headers, bullets, closed bold, and unclosed trailing bold are cleaned
+        val partial = """
+            # Overview
+            ## Key Points
+            ### Details
+            - **First** item
+            - **Second item still streaming
+            Calculate 3 * 5 = 15.
+        """.trimIndent()
+        val preview = MarkdownFormatter.formatStreamingPreview(partial)
+
+        assertTrue(preview.contains("OVERVIEW"))
+        assertTrue(preview.contains("■ Key Points"))
+        assertTrue(preview.contains("◆ Details"))
+        assertTrue(preview.contains("• First item"))
+        assertTrue(preview.contains("• Second item still streaming"))
+        assertTrue(preview.contains("Calculate 3 * 5 = 15."))
+        assertFalse(preview.contains("###"))
+        assertFalse(preview.contains("**"))
+    }
+
+    @Test
+    fun formatStreamingPreviewFramesCodeBlocksWithContent() {
+        val streamingCode = "Intro\n```kotlin\nval x = 42"
+        val preview = MarkdownFormatter.formatStreamingPreview(streamingCode)
+
+        assertTrue(preview.contains("Intro"))
+        assertTrue(preview.contains("┌── kotlin"))
+        assertTrue(preview.contains("│ val x = 42"))
+        assertFalse(preview.contains("```"))
+    }
 }

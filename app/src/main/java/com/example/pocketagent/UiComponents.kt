@@ -12,6 +12,7 @@ import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
 import android.os.Build
+import android.provider.Settings
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.View
@@ -89,7 +90,7 @@ fun pillButton(
     compact = compact,
     textColor = palette.teal,
     backgroundDrawable = rippleDrawable(
-        roundedShape(palette.mint, dp(context, 30).toFloat()),
+        roundedShape(palette.mint, dp(context, UiTokens.PILL_RADIUS_DP).toFloat()),
         palette.rippleOnMint,
     ),
     onClick = onClick,
@@ -113,8 +114,8 @@ fun secondaryOutlineButton(
     backgroundDrawable = rippleDrawable(
         roundedShape(
             color = palette.surface,
-            radiusPx = dp(context, 30).toFloat(),
-            strokeWidthPx = maxOf(1, dp(context, 1)),
+            radiusPx = dp(context, UiTokens.PILL_RADIUS_DP).toFloat(),
+            strokeWidthPx = maxOf(UiTokens.BORDER_DP, dp(context, UiTokens.BORDER_DP)),
             strokeColor = palette.border,
         ),
         palette.rippleOnSurface,
@@ -139,8 +140,8 @@ fun dangerButton(
     backgroundDrawable = rippleDrawable(
         roundedShape(
             color = palette.dangerBg,
-            radiusPx = dp(context, 30).toFloat(),
-            strokeWidthPx = maxOf(1, dp(context, 1)),
+            radiusPx = dp(context, UiTokens.PILL_RADIUS_DP).toFloat(),
+            strokeWidthPx = maxOf(UiTokens.BORDER_DP, dp(context, UiTokens.BORDER_DP)),
             strokeColor = palette.dangerBorder,
         ),
         palette.rippleOnSurface,
@@ -161,9 +162,9 @@ fun iconTouchButton(
     textSizeSp: Float = 18f,
     onClick: () -> Unit,
 ): Button = Button(context).apply {
-    val touchSize = dp(context, 48)
-    val pad = dp(context, 8)
-    val mask = roundedShape(Color.WHITE, dp(context, 24).toFloat())
+    val touchSize = dp(context, UiTokens.TOUCH_TARGET_DP)
+    val pad = dp(context, UiTokens.SPACING_8_DP)
+    val mask = roundedShape(palette.surface, dp(context, UiTokens.ICON_CANVAS_DP).toFloat())
     text = iconText
     contentDescription = accessibilityLabel
     setAllCaps(false)
@@ -202,9 +203,9 @@ fun vectorIconButton(
     bgColor: Int = palette.surfaceElevated,
     borderColor: Int? = palette.border,
     rippleColor: Int = palette.rippleOnSurface,
-    cornerDp: Int = 24,
-    sizeDp: Int = 48,
-    iconSizeDp: Int = 20,
+    cornerDp: Int = UiTokens.ICON_CANVAS_DP,
+    sizeDp: Int = UiTokens.TOUCH_TARGET_DP,
+    iconSizeDp: Int = UiTokens.ICON_GLYPH_DP,
     onClick: () -> Unit,
 ): ImageButton = ImageButton(context).apply {
     val touchPx = dp(context, sizeDp)
@@ -219,7 +220,7 @@ fun vectorIconButton(
         roundedShape(
             color = bgColor,
             radiusPx = dp(context, cornerDp).toFloat(),
-            strokeWidthPx = if (borderColor != null) maxOf(1, dp(context, 1)) else 0,
+            strokeWidthPx = if (borderColor != null) maxOf(UiTokens.BORDER_DP, dp(context, UiTokens.BORDER_DP)) else 0,
             strokeColor = borderColor,
         ),
         rippleColor,
@@ -245,22 +246,22 @@ fun performSubtleHaptic(view: View?, isConfirm: Boolean = false) {
 fun cardContainer(
     context: Context,
     palette: UiPalette,
-    cornerDp: Int = 16,
+    cornerDp: Int = UiTokens.CARD_RADIUS_DP,
     elevated: Boolean = false,
-    paddingDp: Int = 14,
+    paddingDp: Int = UiTokens.SPACING_14_DP,
 ): LinearLayout = LinearLayout(context).apply {
     orientation = LinearLayout.VERTICAL
     val bgColor = if (elevated) palette.surfaceElevated else palette.surface
     background = roundedShape(
         color = bgColor,
         radiusPx = dp(context, cornerDp).toFloat(),
-        strokeWidthPx = maxOf(1, dp(context, 1)),
+        strokeWidthPx = maxOf(UiTokens.BORDER_DP, dp(context, UiTokens.BORDER_DP)),
         strokeColor = palette.border,
     )
     val pad = dp(context, paddingDp)
     setPadding(pad, pad, pad, pad)
     if (elevated) {
-        elevation = dp(context, 2).toFloat()
+        elevation = dp(context, UiTokens.ELEVATION_DP).toFloat()
     }
 }
 
@@ -269,7 +270,7 @@ fun dividerView(context: Context, palette: UiPalette): View = View(context).appl
     setBackgroundColor(palette.border)
     layoutParams = LinearLayout.LayoutParams(
         LinearLayout.LayoutParams.MATCH_PARENT,
-        maxOf(1, dp(context, 1)),
+        maxOf(UiTokens.BORDER_DP, dp(context, UiTokens.BORDER_DP)),
     )
 }
 
@@ -277,11 +278,11 @@ fun dividerView(context: Context, palette: UiPalette): View = View(context).appl
 fun styleEditText(
     editText: EditText,
     palette: UiPalette,
-    cornerDp: Int = 14,
+    cornerDp: Int = UiTokens.INPUT_RADIUS_DP,
 ) {
     val context = editText.context
-    val hPad = dp(context, 14)
-    val vPad = dp(context, 12)
+    val hPad = dp(context, UiTokens.SPACING_14_DP)
+    val vPad = dp(context, UiTokens.SPACING_12_DP)
     editText.setTextColor(palette.ink)
     editText.setHintTextColor(palette.muted)
     editText.typeface = Typeface.create("sans-serif", Typeface.NORMAL)
@@ -290,13 +291,13 @@ fun styleEditText(
     editText.background = roundedShape(
         color = palette.surface,
         radiusPx = dp(context, cornerDp).toFloat(),
-        strokeWidthPx = maxOf(1, dp(context, 1)),
+        strokeWidthPx = maxOf(UiTokens.BORDER_DP, dp(context, UiTokens.BORDER_DP)),
         strokeColor = palette.border,
     )
     editText.backgroundTintList = null
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
         editText.textCursorDrawable = GradientDrawable().apply {
-            setSize(maxOf(2, dp(context, 2)), -1)
+            setSize(maxOf(UiTokens.CURSOR_WIDTH_DP, dp(context, UiTokens.CURSOR_WIDTH_DP)), -1)
             setColor(palette.teal)
         }
     }
@@ -306,13 +307,13 @@ fun styleEditText(
 fun styleDialogContainer(
     context: Context,
     palette: UiPalette,
-    paddingDp: Int = 20,
+    paddingDp: Int = UiTokens.SPACING_20_DP,
 ): LinearLayout = LinearLayout(context).apply {
     orientation = LinearLayout.VERTICAL
     background = roundedShape(
         color = palette.surface,
-        radiusPx = dp(context, 20).toFloat(),
-        strokeWidthPx = maxOf(1, dp(context, 1)),
+        radiusPx = dp(context, UiTokens.DIALOG_RADIUS_DP).toFloat(),
+        strokeWidthPx = maxOf(UiTokens.BORDER_DP, dp(context, UiTokens.BORDER_DP)),
         strokeColor = palette.border,
     )
     val pad = dp(context, paddingDp)
@@ -328,8 +329,8 @@ fun showStyledAlertDialog(dialog: AlertDialog, palette: UiPalette) {
     dialog.window?.setBackgroundDrawable(
         roundedShape(
             color = palette.surface,
-            radiusPx = dp(context, 20).toFloat(),
-            strokeWidthPx = maxOf(1, dp(context, 1)),
+            radiusPx = dp(context, UiTokens.DIALOG_RADIUS_DP).toFloat(),
+            strokeWidthPx = maxOf(UiTokens.BORDER_DP, dp(context, UiTokens.BORDER_DP)),
             strokeColor = palette.border,
         )
     )
@@ -374,10 +375,10 @@ fun showBottomSheetDialog(
     palette: UiPalette,
     content: LinearLayout,
 ): AlertDialog {
-    val topRadiusPx = dp(context, 22).toFloat()
-    val hPad = dp(context, 20)
-    val topPad = dp(context, 12)
-    val baseBottomPad = dp(context, 20)
+    val topRadiusPx = dp(context, UiTokens.SHEET_RADIUS_DP).toFloat()
+    val hPad = dp(context, UiTokens.SPACING_20_DP)
+    val topPad = dp(context, UiTokens.SPACING_12_DP)
+    val baseBottomPad = dp(context, UiTokens.SPACING_20_DP)
 
     val sheetBackground = GradientDrawable().apply {
         setColor(palette.surface)
@@ -387,14 +388,17 @@ fun showBottomSheetDialog(
             0f, 0f,
             0f, 0f,
         )
-        setStroke(maxOf(1, dp(context, 1)), palette.border)
+        setStroke(maxOf(UiTokens.BORDER_DP, dp(context, UiTokens.BORDER_DP)), palette.border)
     }
 
     val dragHandle = View(context).apply {
-        background = roundedShape(palette.border, dp(context, 2).toFloat())
-        layoutParams = LinearLayout.LayoutParams(dp(context, 36), dp(context, 4)).apply {
+        background = roundedShape(palette.border, dp(context, UiTokens.DRAG_HANDLE_RADIUS_DP).toFloat())
+        layoutParams = LinearLayout.LayoutParams(
+            dp(context, UiTokens.DRAG_HANDLE_WIDTH_DP),
+            dp(context, UiTokens.DRAG_HANDLE_HEIGHT_DP),
+        ).apply {
             gravity = Gravity.CENTER_HORIZONTAL
-            bottomMargin = dp(context, 14)
+            bottomMargin = dp(context, UiTokens.DRAG_HANDLE_BOTTOM_MARGIN_DP)
         }
     }
 
@@ -432,18 +436,29 @@ fun showBottomSheetDialog(
         setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
         setGravity(Gravity.BOTTOM)
         setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-        setDimAmount(0.45f)
+        setDimAmount(UiTokens.SHEET_DIM_ALPHA)
     }
 
     sheetContainer.requestApplyInsets()
-    sheetContainer.translationY = dp(context, 48).toFloat()
-    sheetContainer.alpha = 0f
-    sheetContainer.animate()
-        .translationY(0f)
-        .alpha(1f)
-        .setDuration(220L)
-        .setInterpolator(DecelerateInterpolator())
-        .start()
+    val animatorScale = Settings.Global.getFloat(
+        context.contentResolver,
+        Settings.Global.ANIMATOR_DURATION_SCALE,
+        1f,
+    )
+    val entranceDurationMs = sheetEntranceDurationMs(animatorScale)
+    if (entranceDurationMs == 0L) {
+        sheetContainer.translationY = 0f
+        sheetContainer.alpha = 1f
+    } else {
+        sheetContainer.translationY = dp(context, UiTokens.SHEET_ENTRANCE_OFFSET_DP).toFloat()
+        sheetContainer.alpha = 0f
+        sheetContainer.animate()
+            .translationY(0f)
+            .alpha(1f)
+            .setDuration(entranceDurationMs)
+            .setInterpolator(DecelerateInterpolator())
+            .start()
+    }
 
     return dialog
 }
@@ -493,9 +508,9 @@ private fun createActionPillButton(
     backgroundDrawable: Drawable,
     onClick: () -> Unit,
 ): Button = Button(context).apply {
-    val minTouch = dp(context, 48)
-    val hPad = dp(context, if (compact) 10 else 14)
-    val vPad = dp(context, if (compact) 6 else 8)
+    val minTouch = dp(context, UiTokens.TOUCH_TARGET_DP)
+    val hPad = dp(context, if (compact) UiTokens.SPACING_10_DP else UiTokens.SPACING_14_DP)
+    val vPad = dp(context, if (compact) UiTokens.SPACING_6_DP else UiTokens.SPACING_8_DP)
     text = label
     contentDescription = accessibilityLabel
     setAllCaps(false)

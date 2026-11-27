@@ -79,6 +79,45 @@ data class UiPalette(
 )
 
 /**
+ * Semantic size and motion tokens consumed by [UiComponents]. Values map to the
+ * Warm Editorial + Swiss spacing rhythm documented in `design-system/pocketagent/MASTER.md`.
+ */
+object UiTokens {
+    const val TOUCH_TARGET_DP = 48
+    const val ICON_CANVAS_DP = 24
+    const val ICON_GLYPH_DP = 20
+    const val PILL_RADIUS_DP = 30
+    const val INPUT_RADIUS_DP = 14
+    const val CARD_RADIUS_DP = 16
+    const val DIALOG_RADIUS_DP = 20
+    const val SHEET_RADIUS_DP = 22
+    const val BORDER_DP = 1
+    const val ELEVATION_DP = 2
+    const val CURSOR_WIDTH_DP = 2
+    const val SPACING_2_DP = 2
+    const val SPACING_4_DP = 4
+    const val SPACING_6_DP = 6
+    const val SPACING_8_DP = 8
+    const val SPACING_10_DP = 10
+    const val SPACING_12_DP = 12
+    const val SPACING_14_DP = 14
+    const val SPACING_20_DP = 20
+    const val DRAG_HANDLE_WIDTH_DP = 36
+    const val DRAG_HANDLE_HEIGHT_DP = 4
+    const val DRAG_HANDLE_RADIUS_DP = 2
+    const val DRAG_HANDLE_BOTTOM_MARGIN_DP = 14
+    const val SHEET_ENTRANCE_OFFSET_DP = 48
+    const val SHEET_ENTRANCE_DURATION_MS = 220L
+    const val SHEET_DIM_ALPHA = 0.45f
+}
+
+/** Returns the bottom-sheet entrance duration for the system animator duration scale. */
+fun sheetEntranceDurationMs(animatorScale: Float): Long {
+    if (animatorScale <= 0f) return 0L
+    return maxOf(1L, (UiTokens.SHEET_ENTRANCE_DURATION_MS * animatorScale).toLong())
+}
+
+/**
  * Resolves the active [UiPalette] from [ThemeMode] and system night configuration.
  */
 object UiThemeResolver {

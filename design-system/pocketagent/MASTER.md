@@ -139,3 +139,37 @@ All colors are resolved via `UiThemeResolver.paletteFor(mode, systemNightActive)
 - **Micro-Interactions:** `150ms–180ms` state transitions; system `RippleDrawable` feedback on all touchable surfaces.
 - **Haptics:** `performSubtleHaptic(view, isConfirm)` triggers `KEYBOARD_TAP` on standard actions and `CONFIRM` (API 30+) on completions.
 - **Safe Insets:** Bottom sheets apply `WindowInsets` (`navigationBars()` on API 30+, `systemWindowInsetBottom` on API 28–29) to bottom padding and display a `36dp × 4dp` centered drag handle pill.
+- **Reduced Motion:** When `Settings.Global.ANIMATOR_DURATION_SCALE == 0f`, `sheetEntranceDurationMs` returns `0L`; sheets render their final static state without slide/fade.
+
+---
+
+## 8. Page Overrides
+
+Generated with `ui-ux-pro-max` and curated so the Warm Editorial + Swiss direction is never replaced:
+
+- `pages/chat.md` — streaming response, status, and composer rules.
+- `pages/vault.md` — document/artifact/note/model card grid rules.
+- `pages/settings.md` — privacy copy, theme switching, model manager, and z-order scale.
+
+Page files override this MASTER only for their named screen; every unlisted rule still comes from here.
+
+---
+
+## 9. Semantic Token Layers
+
+| Layer | Source | Examples |
+| :--- | :--- | :--- |
+| Primitive anchors | `UiTheme.kt` palette literals | `#FAF9F6`, `#1C1917`, `#0F6B5E`, `#E5F0EC` |
+| Semantic color | `UiPalette` fields | `bg`, `surface`, `ink`, `muted`, `teal`, `dangerInk` |
+| Semantic size/motion | `UiTokens` in `UiTheme.kt` | `TOUCH_TARGET_DP`, `PILL_RADIUS_DP`, `SHEET_ENTRANCE_DURATION_MS` |
+| Component | `UiComponents.kt` | `pillButton`, `iconTouchButton`, `cardContainer`, `showBottomSheetDialog` |
+
+Component code consumes semantic tokens only; no new hardcoded color or `dp` literals should be added.
+
+---
+
+## 10. Verification
+
+- Automated contrast assertions: `app/src/test/java/com/example/pocketagent/UiThemeTest.kt`.
+- Device and screenshot evidence: `design-system/pocketagent/ACCESSIBILITY_CHECKLIST.md`.
+- Evidence links remain pending until Task 10 produces them; no pass is claimed from documentation alone.

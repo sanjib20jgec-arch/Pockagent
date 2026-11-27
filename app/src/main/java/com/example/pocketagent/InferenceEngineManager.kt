@@ -37,6 +37,7 @@ class InferenceEngineManager<T : AutoCloseable>(
     var preference: BackendPreference = BackendPreference.GPU_PREFERRED,
     private val engineFactory: ((isGpu: Boolean, modelFile: File, cacheDir: File) -> T)? = null,
     private val conversationFactory: ((T, String) -> ConversationHandle)? = null,
+    private val nativeLibraryDir: String? = null,
 ) : AutoCloseable {
 
     companion object {
@@ -133,7 +134,7 @@ class InferenceEngineManager<T : AutoCloseable>(
         val current = engine
         if (current != null) {
             val modelChanged = activeModelPath != null && activeModelPath != modelFile.absolutePath
-            if (modelChanged || (preferredBackend == BackendPreference.CPU_ONLY && activeBackend == ActiveBackend.GPU)) {
+            if (modelChanged || (preferredBackend == BackendPreference.CPU_ONLY && activeBackend != ActiveBackend.CPU)) {
                 close()
             } else {
                 return current
@@ -143,7 +144,22 @@ class InferenceEngineManager<T : AutoCloseable>(
         preference = preferredBackend
         lastFallbackReason = null
 
-        if (preferredBackend == BackendPreference.GPU_PREFERRED) {
+        if (preferredBackend == BackendPreference.NPU_PREFERRED && nativeLibraryDir != null) {
+            try {
+                val newEngine = invokeEngineFactory(isGpu = false, modelFile = modelFile, cacheDir = cacheDir, useNpu = true)
+                engine = newEngine
+                activeBackend = ActiveBackend.NPU
+                activeModelPath = modelFile.absolutePath
+                return newEngine
+            } catch (npuError: Throwable) {
+                val reason = npuError.message ?: npuError.javaClass.simpleName
+                val fallbackNote = "NPU initialization failed ($reason); falling back to GPU."
+                lastFallbackReason = fallbackNote
+                onFallback?.invoke(fallbackNote)
+            }
+        }
+
+        if (preferredBackend == BackendPreference.GPU_PREFERRED || preferredBackend == BackendPreference.NPU_PREFERRED) {
             try {
                 val newEngine = invokeEngineFactory(true, modelFile, cacheDir)
                 engine = newEngine
@@ -165,14 +181,27 @@ class InferenceEngineManager<T : AutoCloseable>(
         return cpuEngine
     }
 
-    private fun invokeEngineFactory(isGpu: Boolean, modelFile: File, cacheDir: File): T {
+    private fun invokeEngineFactory(
+        isGpu: Boolean,
+        modelFile: File,
+        cacheDir: File,
+        useNpu: Boolean = false,
+    ): T {
         val custom = engineFactory
         if (custom != null) return custom(isGpu, modelFile, cacheDir)
+
+        val resolvedBackend = when {
+            useNpu && nativeLibraryDir != null ->
+                com.google.ai.edge.litertlm.Backend.NPU(nativeLibraryDir = nativeLibraryDir)
+            isGpu -> com.google.ai.edge.litertlm.Backend.GPU()
+            else -> com.google.ai.edge.litertlm.Backend.CPU()
+        }
+        val isCpu = !useNpu && !isGpu
 
         fun createAndInit(maxTokens: Int?, withVision: Boolean): com.google.ai.edge.litertlm.Engine {
             val config = com.google.ai.edge.litertlm.EngineConfig(
                 modelPath = modelFile.absolutePath,
-                backend = if (isGpu) com.google.ai.edge.litertlm.Backend.GPU() else com.google.ai.edge.litertlm.Backend.CPU(),
+                backend = resolvedBackend,
                 visionBackend = if (withVision) com.google.ai.edge.litertlm.Backend.CPU() else null,
                 maxNumTokens = maxTokens,
                 cacheDir = cacheDir.absolutePath,
@@ -196,7 +225,7 @@ class InferenceEngineManager<T : AutoCloseable>(
                 } catch (fallbackCapError: Throwable) {
                     if (visionEnabled) {
                         createAndInit(defaultContext, false)
-                    } else if (!isGpu) {
+                    } else if (isCpu) {
                         createAndInit(null, false)
                     } else {
                         throw fallbackCapError
@@ -206,9 +235,9 @@ class InferenceEngineManager<T : AutoCloseable>(
                 try {
                     createAndInit(targetContext, false)
                 } catch (explicitCapError: Throwable) {
-                    if (!isGpu) createAndInit(null, false) else throw explicitCapError
+                    if (isCpu) createAndInit(null, false) else throw explicitCapError
                 }
-            } else if (!isGpu) {
+            } else if (isCpu) {
                 createAndInit(null, false)
             } else {
                 throw primaryError
@@ -279,8 +308,11 @@ class InferenceEngineManager<T : AutoCloseable>(
     fun switchBackend(newPreference: BackendPreference) {
         preference = newPreference
         val currentBackend = activeBackend
-        val shouldTearDown = (newPreference == BackendPreference.CPU_ONLY && currentBackend == ActiveBackend.GPU) ||
-            (newPreference == BackendPreference.GPU_PREFERRED && currentBackend == ActiveBackend.CPU)
+        val shouldTearDown = when (newPreference) {
+            BackendPreference.CPU_ONLY -> currentBackend != null && currentBackend != ActiveBackend.CPU
+            BackendPreference.GPU_PREFERRED -> currentBackend != null && currentBackend != ActiveBackend.GPU
+            BackendPreference.NPU_PREFERRED -> currentBackend != null && currentBackend != ActiveBackend.NPU
+        }
         if (shouldTearDown) {
             close()
         }

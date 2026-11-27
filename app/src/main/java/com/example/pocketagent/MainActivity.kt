@@ -125,7 +125,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         }
     }
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val engineManager = InferenceEngineManager<Engine>()
+    private val engineManager by lazy { InferenceEngineManager<Engine>(nativeLibraryDir = applicationInfo.nativeLibraryDir) }
     private val promptContext = AnswerPromptComposer()
     private val inAppAudioRecorder = InAppAudioRecorder()
     @Volatile private var whisperContext: Long = 0L
@@ -189,7 +189,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     private var generationTimerRunnable: Runnable? = null
     private var idleUnloadRunnable: Runnable? = null
     private var pendingAnswerToSave: String? = null
-    private val sessionStore by lazy { SessionStore(SessionStore.defaultDir(filesDir)) }
+    private val sessionStore by lazy { SessionStore(SessionStore.defaultDir(filesDir), vaultCipher = HardwareVaultCipher) }
     private val userMemoryStore by lazy { UserMemoryStore(UserMemoryStore.defaultDir(filesDir)) }
     private val notesStore by lazy { PersonalNotesStore(PersonalNotesStore.defaultDir(filesDir)) }
     private val projectStore by lazy { ProjectStore(ProjectStore.defaultDir(filesDir)) }
@@ -636,7 +636,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         }
         val trustBadge = styledText(
             context = this,
-            text = "v1.8 · 100% Offline",
+            text = "v1.9 · 100% Offline",
             sizeSp = 11.5f,
             color = palette.teal,
             bold = true,
@@ -1754,7 +1754,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 artifactCount = artCount,
                 activeModelLabel = modelLabel,
                 activeBackendLabel = backendLabel,
-                appVersionLabel = "v1.8 · Offline",
+                appVersionLabel = "v1.9 · Offline",
             ),
             palette = palette,
             callbacks = DrawerCallbacks(
@@ -2890,12 +2890,14 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         latestAssistantText = result
         answerIsComplete = !stoppedByUser
         val backendTag = when (engineManager.activeBackend) {
+            ActiveBackend.NPU -> "NPU"
             ActiveBackend.GPU -> "GPU"
             ActiveBackend.CPU -> "CPU"
             null -> "Local"
         }
         val dotColor = when {
             stoppedByUser -> palette.statusStandby
+            engineManager.activeBackend == ActiveBackend.NPU -> palette.statusLoadedGpu
             engineManager.activeBackend == ActiveBackend.GPU -> palette.statusLoadedGpu
             engineManager.activeBackend == ActiveBackend.CPU -> palette.statusLoadedCpu
             else -> palette.teal
@@ -3096,6 +3098,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 }
                 val elapsedMs = SystemClock.elapsedRealtime() - generationStartElapsedMs
                 mainHandler.post {
+                    InferenceForegroundService.stop(this@MainActivity)
                     exitGeneratingState()
                     refreshModelStatus()
                     if (isGeneratingCancelled.get()) {
@@ -3125,6 +3128,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 }
             } catch (e: Exception) {
                 mainHandler.post {
+                    InferenceForegroundService.stop(this@MainActivity)
                     exitGeneratingState()
                     stopGenerationIndicators()
                     refreshModelStatus()
@@ -3349,10 +3353,21 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
 
         val attachmentSnapshot = attachedContext
         val imageSnapshot = attachedImagePath
+        InferenceForegroundService.onStopRequested = {
+            mainHandler.post { if (!isDestroyed) cancelGeneration() }
+        }
+        InferenceForegroundService.startOrUpdate(this, "Generating offline response…")
         inferenceExecutor.execute {
             var localCitations = emptyList<LocalDocumentRetriever.DocumentCitation>()
             val traceChips = mutableListOf<Pair<String, String>>()
             try {
+                val govPolicy = DeviceResourceGovernor.snapshot(this@MainActivity, currentMaxOutputTokens)
+                if (govPolicy.shouldWarnThermal) {
+                    traceChips += "Thermal Guard" to govPolicy.summary
+                }
+                if (govPolicy.shouldTrimIdleWeights && engineManager.activeBackend == null) {
+                    engineManager.invalidateConversation("low memory trim")
+                }
                 if (!imageSnapshot.isNullOrBlank()) {
                     traceChips += "Vision" to (attachedImageName ?: "Image")
                 }
@@ -3623,6 +3638,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                     }
                 }
                 mainHandler.post {
+                    InferenceForegroundService.stop(this@MainActivity)
                     exitGeneratingState()
                     refreshModelStatus()
                     updateWorkspaceSubtitle()
@@ -3679,6 +3695,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 }
             } catch (e: Exception) {
                 mainHandler.post {
+                    InferenceForegroundService.stop(this@MainActivity)
                     exitGeneratingState()
                     stopGenerationIndicators()
                     refreshModelStatus()

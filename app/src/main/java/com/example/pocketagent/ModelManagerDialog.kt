@@ -109,7 +109,9 @@ object ModelManagerDialog {
             ?: model.name
         val sizeStr = if (model.exists()) formatStorageSize(model.length()) else "0 B"
         val isCpuOnly = engineManager.preference == BackendPreference.CPU_ONLY
+        val isNpuPreferred = engineManager.preference == BackendPreference.NPU_PREFERRED
         val runtimeState = when (engineManager.activeBackend) {
+            ActiveBackend.NPU -> "Loaded in RAM (NPU)"
             ActiveBackend.GPU -> "Loaded in RAM (GPU)"
             ActiveBackend.CPU -> "Loaded in RAM (CPU)"
             null -> "Stored on disk (standby · 0 RAM)"
@@ -611,16 +613,17 @@ object ModelManagerDialog {
                 .putBoolean(PREF_GPU_LOADING_GUARD, false)
                 .apply()
             dialog.dismiss()
-            onUpdateStatus(
-                "Switching backend to ${if (next == BackendPreference.CPU_ONLY) "CPU Only" else "GPU (auto fallback)"}…",
-            )
+            val targetLabel = when (next) {
+                BackendPreference.NPU_PREFERRED -> "NPU (auto fallback)"
+                BackendPreference.GPU_PREFERRED -> "GPU (auto fallback)"
+                BackendPreference.CPU_ONLY -> "CPU Only"
+            }
+            onUpdateStatus("Switching backend to $targetLabel…")
             inferenceExecutor.execute {
                 engineManager.switchBackend(next)
                 mainHandler.post {
                     onRefreshStatus()
-                    onUpdateStatus(
-                        "Backend set to ${if (next == BackendPreference.CPU_ONLY) "CPU Only" else "GPU (auto fallback)"}. Ready for your next question.",
-                    )
+                    onUpdateStatus("Backend set to $targetLabel. Ready for your next question.")
                 }
             }
         }
@@ -669,16 +672,24 @@ object ModelManagerDialog {
         }
         backendRow.addView(
             buildBackendCard(
-                title = "GPU + Auto Fallback",
-                subtitle = "Fastest when supported",
-                selected = !isCpuOnly,
+                title = "NPU",
+                subtitle = "Auto fallback",
+                selected = isNpuPreferred,
+            ) { switchBackendPreference(BackendPreference.NPU_PREFERRED) },
+            LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(activity, 6) },
+        )
+        backendRow.addView(
+            buildBackendCard(
+                title = "GPU",
+                subtitle = "Fastest fallback",
+                selected = !isCpuOnly && !isNpuPreferred,
             ) { switchBackendPreference(BackendPreference.GPU_PREFERRED) },
-            LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(activity, 8) },
+            LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(activity, 6) },
         )
         backendRow.addView(
             buildBackendCard(
                 title = "CPU Only",
-                subtitle = "Maximum compatibility",
+                subtitle = "Max stability",
                 selected = isCpuOnly,
             ) { switchBackendPreference(BackendPreference.CPU_ONLY) },
             LinearLayout.LayoutParams(0, -2, 1f),

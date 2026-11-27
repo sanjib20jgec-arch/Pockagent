@@ -35,6 +35,7 @@ class SessionStore(
     val directory: File,
     private val maxSessionBytes: Long = DEFAULT_MAX_SESSION_BYTES,
     private val maxSessions: Int = DEFAULT_MAX_SESSIONS,
+    private val vaultCipher: VaultCipher? = null,
 ) {
     init {
         require(maxSessionBytes > 0) { "maxSessionBytes must be positive." }
@@ -86,9 +87,10 @@ class SessionStore(
         }
 
         val jsonString = SessionJsonCodec.serialize(session)
-        val jsonBytes = jsonString.toByteArray(Charsets.UTF_8)
-        if (jsonBytes.size > maxSessionBytes) {
-            throw IOException("Session size (${jsonBytes.size} bytes) exceeds maximum limit of $maxSessionBytes bytes.")
+        val payloadString = vaultCipher?.encrypt(jsonString) ?: jsonString
+        val payloadBytes = payloadString.toByteArray(Charsets.UTF_8)
+        if (payloadBytes.size > maxSessionBytes) {
+            throw IOException("Session size (${payloadBytes.size} bytes) exceeds maximum limit of $maxSessionBytes bytes.")
         }
 
         val temporary = File(directory, "${session.id}$TMP_EXT")
@@ -99,7 +101,7 @@ class SessionStore(
         var committed = false
         try {
             FileOutputStream(temporary).use { stream ->
-                stream.write(jsonBytes)
+                stream.write(payloadBytes)
                 stream.fd.sync()
             }
             commitAtomic(temporary, target)
@@ -253,8 +255,9 @@ class SessionStore(
         if (file.length() > maxSessionBytes) {
             throw IOException("Session file ${file.name} exceeds max size bound.")
         }
-        val text = file.readText(Charsets.UTF_8)
-        return SessionJsonCodec.deserialize(text)
+        val rawText = file.readText(Charsets.UTF_8)
+        val jsonText = vaultCipher?.decrypt(rawText) ?: rawText
+        return SessionJsonCodec.deserialize(jsonText)
     }
 
     private fun commitAtomic(temporary: File, target: File) {

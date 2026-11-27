@@ -105,11 +105,17 @@ object ComposerChromeHelper {
         val sizeTrimmed = formattedSize.trim()
         val sizePart = if (sizeTrimmed.isNotEmpty()) " ($sizeTrimmed)" else ""
         val prefLabel = when (preference) {
+            BackendPreference.NPU_PREFERRED -> "NPU preferred"
             BackendPreference.GPU_PREFERRED -> "GPU preferred"
             BackendPreference.CPU_ONLY -> "CPU only"
         }
 
         return when (activeBackend) {
+            ActiveBackend.NPU -> ModelBadgeState(
+                label = "$shortName · NPU",
+                contentDescription = "Model $cleanName$sizePart loaded on NPU, preference $prefLabel. Tap to manage model",
+                tone = ModelStatusTone.LOADED_GPU,
+            )
             ActiveBackend.GPU -> ModelBadgeState(
                 label = "$shortName · GPU",
                 contentDescription = "Model $cleanName$sizePart loaded on GPU, preference $prefLabel. Tap to manage model",

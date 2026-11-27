@@ -37,3 +37,6 @@
 
 # Keep Quick Settings TileService entry point
 -keep class com.example.pocketagent.PocketAgentTileService { *; }
+
+# Keep InferenceForegroundService entry point
+-keep class com.example.pocketagent.InferenceForegroundService { *; }

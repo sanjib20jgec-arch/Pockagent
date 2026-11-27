@@ -134,9 +134,15 @@ object ContextContinuityHelper {
             ?.takeIf { it.isNotEmpty() }
 
         val isCpuFallback = activeBackend == ActiveBackend.CPU &&
-            preference == BackendPreference.GPU_PREFERRED
+            (preference == BackendPreference.GPU_PREFERRED || preference == BackendPreference.NPU_PREFERRED)
 
         return when (activeBackend) {
+            ActiveBackend.NPU -> BackendDiagnostic(
+                isCpuFallback = false,
+                headline = "Running on NPU",
+                tip = "Hardware NPU acceleration is active for ultra-fast, power-efficient inference.",
+            )
+
             ActiveBackend.GPU -> BackendDiagnostic(
                 isCpuFallback = false,
                 headline = "Running on GPU",
@@ -175,6 +181,8 @@ object ContextContinuityHelper {
                 val tip = when {
                     cleanReason != null ->
                         "Previous GPU initialization fell back ($cleanReason). The engine will load on your next message."
+                    preference == BackendPreference.NPU_PREFERRED ->
+                        "Engine on standby. Ready to initialize with NPU acceleration (auto fallback) on your next message."
                     preference == BackendPreference.GPU_PREFERRED ->
                         "Engine on standby. Ready to initialize with GPU acceleration on your next message."
                     else ->

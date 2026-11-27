@@ -8,10 +8,16 @@ import java.io.File
  */
 internal object JsonArrayFileStore {
 
-    fun writeAtomic(targetFile: File, tempFile: File, json: String): Boolean {
+    fun writeAtomic(
+        targetFile: File,
+        tempFile: File,
+        json: String,
+        vaultCipher: VaultCipher? = null,
+    ): Boolean {
+        val payload = vaultCipher?.encrypt(json) ?: json
         targetFile.parentFile?.mkdirs()
         return try {
-            tempFile.writeText(json, Charsets.UTF_8)
+            tempFile.writeText(payload, Charsets.UTF_8)
             if (!tempFile.renameTo(targetFile)) {
                 targetFile.delete()
                 if (!tempFile.renameTo(targetFile)) {
@@ -26,15 +32,21 @@ internal object JsonArrayFileStore {
         }
     }
 
-    fun splitObjects(json: String): List<String> {
+    fun readText(file: File, vaultCipher: VaultCipher? = null): String {
+        val raw = file.readText(Charsets.UTF_8)
+        return vaultCipher?.decrypt(raw) ?: raw
+    }
+
+    fun splitObjects(json: String, vaultCipher: VaultCipher? = null): List<String> {
+        val plain = vaultCipher?.decrypt(json) ?: json
         val result = mutableListOf<String>()
         var i = 0
-        while (i < json.length) {
-            val start = json.indexOf('{', i)
+        while (i < plain.length) {
+            val start = plain.indexOf('{', i)
             if (start < 0) break
-            val end = findMatchingBrace(json, start)
+            val end = findMatchingBrace(plain, start)
             if (end < 0) break
-            result.add(json.substring(start, end + 1))
+            result.add(plain.substring(start, end + 1))
             i = end + 1
         }
         return result

@@ -41,6 +41,12 @@ jobs:
           set -o pipefail
           ./gradlew --no-daemon --stacktrace --console=plain testDebugUnitTest assembleDebug 2>&1 | tee gradle-build.log
 
+      - name: Verify screenshot baselines
+        shell: bash
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon --console=plain verifyRoborazziDebug 2>&1 | tee screenshot-verify.log
+
       - name: Summarize Gradle failure
         if: failure()
         shell: bash
@@ -89,7 +95,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: PocketAgent-gradle-failure-log
-          path: gradle-build.log
+          path: |
+            gradle-build.log
+            screenshot-verify.log
           if-no-files-found: ignore
           retention-days: 7
 
@@ -99,4 +107,94 @@ jobs:
           name: PocketAgent-debug-apk
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload screenshot reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: PocketAgent-screenshot-reports
+          path: |
+            app/build/reports/roborazzi
+            app/build/test-results
+          if-no-files-found: ignore
+          retention-days: 14
+
+  record-screenshots:
+    name: Record screenshot baselines
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Record screenshots
+        shell: bash
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon --console=plain recordRoborazziDebug 2>&1 | tee screenshot-record.log
+
+      - name: Upload recorded baselines
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: PocketAgent-screenshot-baselines
+          path: |
+            app/src/screenshots
+            app/build/reports/roborazzi
+          if-no-files-found: error
+          retention-days: 30
+
+  device-smoke:
+    name: Device smoke (API ${{ matrix.api-level }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        api-level: [28, 35]
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Generate offline fixtures
+        run: python3 scripts/generate_smoke_fixtures.py
+
+      - name: Run connected Android tests
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api-level }}
+          target: google_apis
+          arch: x86_64
+          profile: pixel_xl
+          disable-animations: true
+          script: ./gradlew --no-daemon --stacktrace --console=plain connectedDebugAndroidTest
+
+      - name: Upload device reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: PocketAgent-device-reports-api-${{ matrix.api-level }}
+          path: |
+            app/build/reports
+            app/build/test-results
+          if-no-files-found: ignore
           retention-days: 14

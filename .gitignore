@@ -10,3 +10,4 @@ __pycache__/
 .cxx/
 captures/
 *.hprof
+app/src/androidTest/assets/smoke/

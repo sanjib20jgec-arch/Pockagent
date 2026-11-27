@@ -56,7 +56,15 @@ kotlin {
     }
 }
 configurations.configureEach {
-    if (!name.contains("test", ignoreCase = true)) {
+    if (
+        name in setOf(
+            "implementation",
+            "debugCompileClasspath",
+            "debugRuntimeClasspath",
+            "releaseCompileClasspath",
+            "releaseRuntimeClasspath",
+        )
+    ) {
         exclude(group = "org.jetbrains.kotlin", module = "kotlin-reflect")
         exclude(group = "com.google.code.gson", module = "gson")
         exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-coroutines-debug")

@@ -1477,7 +1477,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             }
         } else "Normal"
         val batteryStr = if (batteryPct >= 0) "$batteryPct% (${if (isCharging) "Charging" else "Battery"})" else "Unknown"
-        return "Battery: $batteryStr | Free Storage: ${freeMb} MB | Thermal: $thermal | Backend: ${engineManager.activeBackendLabel()}"
+        return "Battery: $batteryStr | Free Storage: ${freeMb} MB | Thermal: $thermal | Backend: ${engineManager.activeBackend?.name ?: "Unloaded"}"
     }
 
     private fun showVisionSourceSheet() {
@@ -1492,8 +1492,17 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
+                minimumHeight = dp(48)
                 setPadding(dp(12), dp(12), dp(12), dp(12))
-                background = roundedDrawable(palette.surfaceAlt, dp(12), strokeColor = palette.border, strokeWidthPx = 1)
+                background = rippleDrawable(
+                    roundedShape(
+                        color = palette.surfaceElevated,
+                        radiusPx = dp(12).toFloat(),
+                        strokeWidthPx = maxOf(1, dp(1)),
+                        strokeColor = palette.border,
+                    ),
+                    palette.rippleOnSurface,
+                )
                 isClickable = true
                 isFocusable = true
                 setOnClickListener {

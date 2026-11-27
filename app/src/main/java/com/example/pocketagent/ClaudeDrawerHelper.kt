@@ -313,7 +313,7 @@ class ClaudeSlideDrawer(
 
         panelView.addView(buildHeaderSection(data, palette, callbacks))
         panelView.addView(buildSearchBar(palette))
-        panelView.addView(buildRecentChatsSection())
+        panelView.addView(buildRecentChatsSection(palette))
         panelView.addView(buildWorkspaceSection(data, palette, callbacks))
         panelView.addView(buildFooterCard(data, palette, callbacks))
 
@@ -490,7 +490,7 @@ class ClaudeSlideDrawer(
         return wrapper
     }
 
-    private fun buildRecentChatsSection(): LinearLayout {
+    private fun buildRecentChatsSection(palette: UiPalette): LinearLayout {
         val section = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             layoutParams = LinearLayout.LayoutParams(

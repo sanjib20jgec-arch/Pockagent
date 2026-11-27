@@ -47,17 +47,14 @@ jobs:
           set -o pipefail
           ./gradlew --no-daemon --console=plain verifyRoborazziDebug 2>&1 | tee screenshot-verify.log
 
-      # Discovery pass: findings are collected from the artifacts, fixed in source,
-      # then continue-on-error is removed so both gates become required.
-      - name: Android lint (discovery)
-        continue-on-error: true
+      # Required quality gates. Findings are fixed in source, not baselined or ignored.
+      - name: Android lint
         shell: bash
         run: |
           set -o pipefail
           ./gradlew --no-daemon --console=plain lintDebug 2>&1 | tee lint-debug.log
 
-      - name: Detekt (discovery)
-        continue-on-error: true
+      - name: Detekt
         shell: bash
         run: |
           set -o pipefail

@@ -304,7 +304,7 @@ internal fun MainActivity.runGuardedGeneration(
                 guard.cancel()
                 conversation.cancel()
                 engineManager.invalidateConversation("generation timed out")
-                throw IllegalStateException(
+                error(
                     "Generation timed out after ${GENERATION_TIMEOUT_SECONDS}s. Try a shorter request."
                 )
             }
@@ -336,11 +336,11 @@ internal fun MainActivity.runGuardedGeneration(
                 // Runaway guard stopped the turn mid-stream; never reuse a cancelled KV context.
                 engineManager.invalidateConversation("runaway guard stopped")
             }
+        } catch (t: IllegalStateException) {
+            throw t
         } catch (t: Throwable) {
-            if (t !is IllegalStateException) {
-                conversation.cancel()
-                engineManager.invalidateConversation("generation failed")
-            }
+            conversation.cancel()
+            engineManager.invalidateConversation("generation failed")
             throw t
         } finally {
             activeStreamLatch = null
@@ -907,7 +907,6 @@ internal fun MainActivity.suggestSteps() {
                     }
                     val baseAtt = if (retrieval.promptContext.isNotBlank()) retrieval.promptContext else attachmentSnapshot
                     if (vaultExcerpts.isNotEmpty() && baseAtt.length < MAX_ATTACHMENT_CHARS - 200) {
-                        val remaining = MAX_ATTACHMENT_CHARS - baseAtt.length
                         (baseAtt + "\n\nKnowledge Vault:\n" + vaultExcerpts.joinToString("\n\n")).take(MAX_ATTACHMENT_CHARS)
                     } else {
                         baseAtt

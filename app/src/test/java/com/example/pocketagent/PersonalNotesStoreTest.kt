@@ -63,7 +63,7 @@ class PersonalNotesStoreTest {
     fun `pinning notes prioritizes them in list order`() {
         val n1 = store.createNote("Note A", "Content A", isPinned = false)
         val n2 = store.createNote("Note B", "Content B", isPinned = true)
-        val n3 = store.createNote("Note C", "Content C", isPinned = false)
+        store.createNote("Note C", "Content C", isPinned = false)
 
         val list = store.listNotes()
         assertEquals(n2.id, list[0].id) // Pinned note is first

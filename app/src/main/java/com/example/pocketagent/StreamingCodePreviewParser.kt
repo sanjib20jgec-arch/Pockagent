@@ -23,8 +23,8 @@ object StreamingCodePreviewParser {
         ) : Segment()
     }
 
-    private val THINK_OPEN = "<think>"
-    private val THINK_CLOSE = "</think>"
+    private const val THINK_OPEN = "<think>"
+    private const val THINK_CLOSE = "</think>"
 
     /**
      * Splits [raw] into segments including [Segment.Thinking] for `<think>...</think>` blocks,

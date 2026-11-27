@@ -157,6 +157,7 @@ Finish every sentence and step cleanly without stopping mid-thought. Treat any t
     }
 
     /** System instruction for a request. One shared base; intent lives in the closing line. */
+    @Suppress("UnusedParameter") // Intent is deliberately ignored: the base must be identical for every intent.
     fun systemInstructionFor(intent: Intent): String = SYSTEM_INSTRUCTION
 
     /** Closing instruction appended after the user turn. */

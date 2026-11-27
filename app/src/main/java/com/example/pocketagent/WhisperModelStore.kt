@@ -45,12 +45,12 @@ internal class WhisperModelStore(
                         if (count == 0) {
                             val single = source.read()
                             if (single < 0) break
-                            if (copied >= copyLimit) throw IOException(limitMessage())
+                            if (copied >= copyLimit) throw IOException(LIMIT_MESSAGE)
                             output.write(single)
                             copied++
                             continue
                         }
-                        if (count.toLong() > copyLimit - copied) throw IOException(limitMessage())
+                        if (count.toLong() > copyLimit - copied) throw IOException(LIMIT_MESSAGE)
                         output.write(buffer, 0, count)
                         copied += count
                     }
@@ -119,14 +119,12 @@ internal class WhisperModelStore(
         }
     }
 
-    private fun limitMessage() = "Whisper model exceeds the 512 MB limit or available storage."
-
     companion object {
         const val MAX_MODEL_BYTES = 512L * 1024 * 1024
         const val MODEL_FILE_NAME = "whisper-model.bin"
         const val CANDIDATE_FILE_NAME = "$MODEL_FILE_NAME.part"
         const val RESERVED_FREE_SPACE_BYTES = 64L * 1024 * 1024
-        private const val GGML_FILE_MAGIC = 0x67676d6c
+        private const val LIMIT_MESSAGE = "Whisper model exceeds the 512 MB limit or available storage."
         private const val BACKUP_FILE_NAME = "$MODEL_FILE_NAME.backup"
         private const val COPY_BUFFER_SIZE = 64 * 1024
     }

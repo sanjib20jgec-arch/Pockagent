@@ -50,7 +50,7 @@ class MainViewModelTest {
         ): String {
             lastPrompt = prompt
             lastSystemInstruction = systemInstruction
-            if (shouldThrow) throw IllegalStateException("Simulated LLM engine failure")
+            if (shouldThrow) error("Simulated LLM engine failure")
             val override = responseToReturn
             if (override != null) {
                 onChunk(override)

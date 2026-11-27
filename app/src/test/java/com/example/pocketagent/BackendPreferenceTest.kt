@@ -1,6 +1,7 @@
 package com.example.pocketagent
 
 import java.io.File
+import java.io.IOException
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -90,7 +91,7 @@ class BackendPreferenceTest {
             engineFactory = { isGpu, _, _ ->
                 if (isGpu) {
                     attemptedBackends.add("GPU")
-                    throw IllegalStateException("libOpenCL.so not found on device")
+                    error("libOpenCL.so not found on device")
                 } else {
                     attemptedBackends.add("CPU")
                     mockEngine
@@ -144,10 +145,10 @@ class BackendPreferenceTest {
 
         val manager = InferenceEngineManager<MockEngine>(
             preference = BackendPreference.CPU_ONLY,
-            engineFactory = { _, _, _ -> throw RuntimeException("Corrupted model file") }
+            engineFactory = { _, _, _ -> throw IOException("Corrupted model file") }
         )
 
-        val error = assertThrows(RuntimeException::class.java) {
+        val error = assertThrows(IOException::class.java) {
             manager.getOrInitializeEngine(model, cacheDir)
         }
         assertEquals("Corrupted model file", error.message)

@@ -54,9 +54,9 @@ object LocalCalculatorTool {
         """(?i)^(?:(?:hey[,:\s]+)?(?:please\s+|can\s+you\s+|could\s+you\s+)*(?:please\s+)?)?(?:what\s+is|what's|whats|calculate|compute|evaluate|solve|find)\s+(.+?)[?!.\s]*$"""
     )
     private val FUNCTION_CALL_PATTERN = Regex("""(?i)\b(?:sqrt|abs|round|sin|cos|tan|log|ln)\s*\(""")
-    private val MATH_TOKEN_PIECE =
+    private const val MATH_TOKEN_PIECE =
         """(?:(?i:sqrt|abs|round|sin|cos|tan|log|ln)\s*\(|(?i:\bpi\b)|π|\be\b|\d+(?:\.\d+)?|[+\-*/×÷%^()])"""
-    private val MATH_TERM_END = """(?:(?i:\bpi\b)|π|\be\b|\d+(?:\.\d+)?|\))"""
+    private const val MATH_TERM_END = """(?:(?i:\bpi\b)|π|\be\b|\d+(?:\.\d+)?|\))"""
     private val MATH_SEGMENT_PATTERN = Regex(
         """(?<![A-Za-z0-9_./])(?:$MATH_TOKEN_PIECE\s*)+$MATH_TERM_END(?![A-Za-z0-9_/]|\.\d)"""
     )

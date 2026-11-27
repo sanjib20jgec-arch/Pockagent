@@ -152,7 +152,7 @@ class DefaultLlmInferenceRunner(
             val finished = streamFinished.await(timeoutSeconds, TimeUnit.SECONDS)
             if (!finished) {
                 conversation.cancel()
-                throw IllegalStateException(
+                error(
                     "Voice inference timed out after ${timeoutSeconds}s. Try a shorter request."
                 )
             }
@@ -284,7 +284,7 @@ class MainViewModel internal constructor(
             ttsSpeaker = ttsSpeaker,
             workerExecutor = workerExecutor,
             mainDispatcher = mainDispatcher,
-            instructionFor = { spokenPrompt, base -> instructionForSpokenTurn(spokenPrompt, base) },
+            instructionFor = { spokenPrompt, _ -> instructionForSpokenTurn(spokenPrompt) },
         )
     }
 
@@ -293,7 +293,7 @@ class MainViewModel internal constructor(
      * intent-aware directive (enriched with memory) so the assistant answers instead of pointing
      * the user at another app.
      */
-    private fun instructionForSpokenTurn(spokenPrompt: String, base: String): String {
+    private fun instructionForSpokenTurn(spokenPrompt: String): String {
         val intent = AnswerDirective.classify(spokenPrompt)
         val directive = AnswerDirective.systemInstructionFor(intent)
         if (!uiState.value.isMemoryEnabled) return directive
@@ -589,7 +589,7 @@ class MainViewModel internal constructor(
                 val newNames = _uiState.value.attachedNames + "$displayName (local transcript)"
 
                 updateState {
-                    it.withTranscriptReady(displayName, newContext, newNames)
+                    it.withTranscriptReady(newContext, newNames)
                 }
             } catch (e: Exception) {
                 updateState {

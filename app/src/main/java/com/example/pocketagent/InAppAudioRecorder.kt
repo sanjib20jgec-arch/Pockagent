@@ -1,6 +1,7 @@
 package com.example.pocketagent
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
 import android.media.AudioFormat
@@ -33,6 +34,9 @@ class DefaultAudioRecordSource(
 
     private var audioRecord: AudioRecord? = null
 
+    // The Activity checks RECORD_AUDIO before starting a voice session; a revoked permission is
+    // delivered to AudioRecorderListener.onError rather than crashing the recording thread.
+    @SuppressLint("MissingPermission")
     override fun startRecording() {
         val minBufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
         require(minBufferSize > 0) { "Audio hardware format unsupported for 16kHz 16-bit mono recording." }
@@ -160,17 +164,15 @@ class InAppAudioRecorder(
                     val samples = buffer.toNormalizedFloats()
                     listener.onRecordingComplete(samples)
                 }
-            } catch (error: Throwable) {
-                if (error is InterruptedException) {
-                    if (!isCancelled.get()) {
-                        val samples = buffer.toNormalizedFloats()
-                        listener.onRecordingComplete(samples)
-                    }
-                } else {
-                    isRecording.set(false)
-                    buffer.wipe()
-                    listener.onError(error)
+            } catch (error: InterruptedException) {
+                if (!isCancelled.get()) {
+                    val samples = buffer.toNormalizedFloats()
+                    listener.onRecordingComplete(samples)
                 }
+            } catch (error: Throwable) {
+                isRecording.set(false)
+                buffer.wipe()
+                listener.onError(error)
             } finally {
                 try {
                     source?.stop()

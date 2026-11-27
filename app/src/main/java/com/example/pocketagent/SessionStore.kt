@@ -8,6 +8,7 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption.ATOMIC_MOVE
 import java.nio.file.StandardCopyOption.REPLACE_EXISTING
 import java.time.Instant
+import java.util.Locale
 
 /**
  * Lightweight metadata summary of a persisted conversation session.
@@ -410,7 +411,7 @@ internal object SessionJsonCodec {
                 '\t' -> sb.append("\\t")
                 else -> {
                     if (ch.code in 0x00..0x1F) {
-                        sb.append(String.format("\\u%04x", ch.code))
+                        sb.append(String.format(Locale.US, "\\u%04x", ch.code))
                     } else {
                         sb.append(ch)
                     }

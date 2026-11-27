@@ -155,7 +155,6 @@ class MainUiStateTest {
     fun managesTranscriptReviewConfirmationVisibility() {
         // Short transcript (<= 400 chars): button visible immediately
         val shortTranscript = MainUiState().withTranscriptReady(
-            displayName = "audio.wav",
             updatedContext = "Short transcript",
             newNames = listOf("audio.wav (local transcript)"),
         )
@@ -163,7 +162,6 @@ class MainUiStateTest {
 
         // Long transcript (> 400 chars) requires expanding preview first
         val longTranscript = MainUiState().withTranscriptReady(
-            displayName = "long_audio.wav",
             updatedContext = "x".repeat(500),
             newNames = listOf("long_audio.wav (local transcript)"),
         )

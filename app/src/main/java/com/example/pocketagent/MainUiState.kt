@@ -215,7 +215,6 @@ data class MainUiState(
     )
 
     fun withTranscriptReady(
-        displayName: String,
         updatedContext: String,
         newNames: List<String>,
     ): MainUiState = copy(

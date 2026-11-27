@@ -2,13 +2,11 @@
 <data-extraction-rules>
     <cloud-backup>
         <exclude domain="file" path="." />
-        <exclude domain="cache" path="." />
         <exclude domain="sharedpref" path="pocketagent_security.xml" />
         <exclude domain="sharedpref" path="pocketagent_settings.xml" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="file" path="." />
-        <exclude domain="cache" path="." />
         <exclude domain="sharedpref" path="pocketagent_security.xml" />
         <exclude domain="sharedpref" path="pocketagent_settings.xml" />
     </device-transfer>

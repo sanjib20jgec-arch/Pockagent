@@ -9,6 +9,11 @@ plugins {
 }
 
 val robolectricInstrumentedVersion = "15-robolectric-14663667-2-i7"
+val releaseStoreFile = System.getenv("POCKETAGENT_RELEASE_STORE_FILE")
+val releaseStorePassword = System.getenv("POCKETAGENT_RELEASE_STORE_PASSWORD")
+val releaseKeyAlias = System.getenv("POCKETAGENT_RELEASE_KEY_ALIAS")
+val releaseKeyPassword = System.getenv("POCKETAGENT_RELEASE_KEY_PASSWORD")
+val hasReleaseSigning = !releaseStoreFile.isNullOrBlank()
 val robolectricSdk by configurations.creating {
     isCanBeResolved = true
     isCanBeConsumed = false
@@ -33,6 +38,16 @@ android {
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
     }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(releaseStoreFile!!)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
     buildTypes {
         release {
             isMinifyEnabled = false
@@ -40,6 +55,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
     externalNativeBuild {

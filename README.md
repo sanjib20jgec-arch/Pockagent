@@ -2,7 +2,7 @@
 
 PocketAgent is an **offline-first, on-device Android assistant**. It runs local `.litertlm` models through LiteRT-LM, keeps conversations/notes/memory on device, and is designed around a privacy-first "answer the request yourself" UX.
 
-> Status: **CI-verified at [run 45911625131](https://github.com/sanjib20jgec-arch/Pockagent/actions/runs/45911625131) on `7bbfe70`** (branch `hardening/9of10`). `main` HEAD `090537c` is still the failing pre-hardening baseline; owner merge steps are in [docs/ci-handoff.md](docs/ci-handoff.md). Android SDK/Gradle runtime validation is performed in CI or a local Android dev environment.
+> Status: **CI-verified at [run 45930126324](https://github.com/sanjib20jgec-arch/Pockagent/actions/runs/45930126324) on `dbaecfc`** (branch `hardening/9of10`). `main` currently resolves to `cf17544`; owner merge steps are in [docs/handoff-checklist.md](docs/handoff-checklist.md). Android SDK/Gradle runtime validation is performed in CI or a local Android dev environment.
 
 ## What it does today
 
@@ -48,7 +48,7 @@ python3 scripts/package_source.py
 
 ## CI
 
-GitHub Actions workflow `.github/workflows/build.yml` runs on push/PR/manual dispatch: verifies the source bundle (`python3 scripts/package_source.py --check`), runs `testDebugUnitTest`, assembles the debug APK, and uploads APK/failure-log artifacts. It has `contents: read` only and never commits to the source tree. See [docs/EVIDENCE.md](docs/EVIDENCE.md) for the current mark-by-mark evidence ledger and green run link.
+GitHub Actions workflow `.github/workflows/build.yml` runs on push/PR/manual dispatch: verifies the source bundle (`python3 scripts/package_source.py --check`), runs `testDebugUnitTest`, assembles the debug APK, verifies Roborazzi baselines, runs required `lintDebug` and `detekt`, and executes API 28/35 emulator smoke tests with a zero-test guard. It has `contents: read` only and never commits to the source tree. See [docs/EVIDENCE.md](docs/EVIDENCE.md) for the current evidence ledger and green run link.
 
 ## Privacy & security notes
 
@@ -61,9 +61,11 @@ GitHub Actions workflow `.github/workflows/build.yml` runs on push/PR/manual dis
 ## Development docs
 
 - [docs/EVIDENCE.md](docs/EVIDENCE.md) - mark-by-mark evidence ledger with verified commits.
-- [PROJECT_AUDIT.md](PROJECT_AUDIT.md) - current audit snapshot, verified gaps, and priorities.
+- [PROJECT_AUDIT.md](PROJECT_AUDIT.md) - final evidence-backed scorecard and verified gaps.
 - [DEVELOPMENT_ROADMAP.md](DEVELOPMENT_ROADMAP.md) - phased execution roadmap.
+- [docs/handoff-checklist.md](docs/handoff-checklist.md) - exact owner-only merge, gate, tag, and cleanup steps.
 - [docs/ci-handoff.md](docs/ci-handoff.md) - owner-only branch-protection steps.
+- [docs/release.md](docs/release.md) - signing template and R8 decision.
 
 ## License
 

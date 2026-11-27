@@ -10,4 +10,7 @@ __pycache__/
 .cxx/
 captures/
 *.hprof
+*.jks
+*.keystore
+signing.properties
 app/src/androidTest/assets/smoke/

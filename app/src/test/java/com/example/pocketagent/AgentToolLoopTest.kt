@@ -1,6 +1,6 @@
 package com.example.pocketagent
 
-import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -93,7 +93,7 @@ class AgentToolLoopTest {
         assertTrue(result.contains("boom"))
     }
 
-    @Test fun `executeToolCallSafe bounds hanging tool with timeout`() = runTest {
+    @Test fun `executeToolCallSafe bounds hanging tool with timeout`() = runBlocking {
         val hangingLoop = object : AgentToolLoop(toolTimeoutMs = 50L) {
             override fun executeToolCallInternal(toolName: String, input: String): String {
                 Thread.sleep(2_000L)
@@ -104,7 +104,7 @@ class AgentToolLoopTest {
         assertTrue(result.contains("timed out"))
     }
 
-    @Test fun `processOutputSafe isolates throwing and succeeding tool calls`() = runTest {
+    @Test fun `processOutputSafe isolates throwing and succeeding tool calls`() = runBlocking {
         val mixedLoop = object : AgentToolLoop(toolTimeoutMs = 5_000L) {
             override fun executeToolCallInternal(toolName: String, input: String): String {
                 if (toolName == "search_notes") throw RuntimeException("disk error")

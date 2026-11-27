@@ -94,7 +94,7 @@ import com.example.pocketagent.MainActivity.Companion.SYSTEM_INSTRUCTION
 import com.example.pocketagent.MainActivity.Companion.WHITE
 
 
-fun MainActivity.showVaultChooserDialog() {
+internal fun MainActivity.showVaultChooserDialog() {
         dismissComposerOverlays(hideIme = true)
         val docsCount = runCatching { documentVault.loadAll().size }.getOrDefault(0)
         val artCount = runCatching { artifactStore.loadAll().size }.getOrDefault(0)
@@ -156,7 +156,7 @@ fun MainActivity.showVaultChooserDialog() {
         sheet = showBottomSheetDialog(this, palette, root)
     }
 
-fun MainActivity.showHistoryDialog() {
+internal fun MainActivity.showHistoryDialog() {
         WorkspaceDialogs.showHistoryDialog(
             activity = this,
             palette = palette,
@@ -168,11 +168,11 @@ fun MainActivity.showHistoryDialog() {
         )
     }
 
-fun MainActivity.exportSessionToShare(id: String, asMarkdown: Boolean) {
+internal fun MainActivity.exportSessionToShare(id: String, asMarkdown: Boolean) {
         WorkspaceDialogs.exportSessionToShare(this, sessionStore, id, asMarkdown)
     }
 
-fun MainActivity.exportCurrentAsMarkdown() {
+internal fun MainActivity.exportCurrentAsMarkdown() {
         val sess = currentSession
         if (sess != null && sess.messages.isNotEmpty()) {
             exportSessionToShare(sess.id, asMarkdown = true)
@@ -191,7 +191,7 @@ fun MainActivity.exportCurrentAsMarkdown() {
         }
     }
 
-fun MainActivity.showMemoryCenterDialog() {
+internal fun MainActivity.showMemoryCenterDialog() {
         viewModel.refreshMemories()
         WorkspaceDialogs.showMemoryCenterDialog(
             activity = this,
@@ -202,18 +202,18 @@ fun MainActivity.showMemoryCenterDialog() {
         )
     }
 
-fun MainActivity.showNotesManagerDialog() {
+internal fun MainActivity.showNotesManagerDialog() {
         viewModel.refreshNotes()
         WorkspaceDialogs.showNotesManagerDialog(this, palette, notesStore)
     }
 
-fun MainActivity.showSaveToNotesDialog(answerText: String) {
+internal fun MainActivity.showSaveToNotesDialog(answerText: String) {
         WorkspaceDialogs.showSaveToNotesDialog(this, palette, notesStore, answerText, lastPrompt) {
             updateStatus(it)
         }
     }
 
-fun MainActivity.showSaveArtifactDialog(code: String, language: String) {
+internal fun MainActivity.showSaveArtifactDialog(code: String, language: String) {
         WorkspaceDialogs.showSaveArtifactDialog(
             activity = this,
             palette = palette,
@@ -226,7 +226,7 @@ fun MainActivity.showSaveArtifactDialog(code: String, language: String) {
         )
     }
 
-fun MainActivity.showProjectsDialog() {
+internal fun MainActivity.showProjectsDialog() {
         WorkspaceDialogs.showProjectsDialog(
             activity = this,
             palette = palette,
@@ -244,7 +244,7 @@ fun MainActivity.showProjectsDialog() {
         )
     }
 
-fun MainActivity.showDocumentVaultDialog() {
+internal fun MainActivity.showDocumentVaultDialog() {
         WorkspaceDialogs.showDocumentVaultDialog(
             activity = this,
             palette = palette,
@@ -255,7 +255,7 @@ fun MainActivity.showDocumentVaultDialog() {
         )
     }
 
-fun MainActivity.showArtifactVaultDialog() {
+internal fun MainActivity.showArtifactVaultDialog() {
         WorkspaceDialogs.showArtifactVaultDialog(
             activity = this,
             palette = palette,
@@ -277,7 +277,7 @@ fun MainActivity.showArtifactVaultDialog() {
         )
     }
 
-fun MainActivity.showDuplexVoiceDialog() {
+internal fun MainActivity.showDuplexVoiceDialog() {
         VoiceAndPrivacyDialogs.showDuplexVoiceDialog(
             activity = this,
             palette = palette,
@@ -300,7 +300,7 @@ fun MainActivity.showDuplexVoiceDialog() {
         )
     }
 
-fun MainActivity.showPrivacyCenterDialog() {
+internal fun MainActivity.showPrivacyCenterDialog() {
         VoiceAndPrivacyDialogs.showPrivacyCenterDialog(
             activity = this,
             palette = palette,
@@ -319,7 +319,7 @@ fun MainActivity.showPrivacyCenterDialog() {
         )
     }
 
-fun MainActivity.buildLockOverlay(): LinearLayout {
+internal fun MainActivity.buildLockOverlay(): LinearLayout {
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
@@ -350,12 +350,12 @@ fun MainActivity.buildLockOverlay(): LinearLayout {
         }
     }
 
-fun MainActivity.updateLockOverlay() {
+internal fun MainActivity.updateLockOverlay() {
         if (!isLockOverlayInitialized()) return
         lockOverlay.visibility = if (biometricLockManager.isAppLocked) View.VISIBLE else View.GONE
     }
 
-fun MainActivity.promptBiometricUnlock() {
+internal fun MainActivity.promptBiometricUnlock() {
         if (!isLockOverlayInitialized()) return
         if (!biometricLockManager.isLockEnabled) {
             biometricLockManager.unlock()
@@ -392,7 +392,7 @@ fun MainActivity.promptBiometricUnlock() {
         )
     }
 
-fun MainActivity.showActionReviewDialog(reviewUi: SystemActionTools.ActionReviewUi) {
+internal fun MainActivity.showActionReviewDialog(reviewUi: SystemActionTools.ActionReviewUi) {
         val dialog = AlertDialog.Builder(this)
             .setTitle(reviewUi.dialogTitle)
             .setMessage(reviewUi.dialogMessage)
@@ -409,7 +409,7 @@ fun MainActivity.showActionReviewDialog(reviewUi: SystemActionTools.ActionReview
         showStyledAlertDialog(dialog, palette)
     }
 
-fun MainActivity.saveAnswerToFile() {
+internal fun MainActivity.saveAnswerToFile() {
         if (!answerIsComplete) {
             updateStatus("Wait until a complete answer is available before saving it.")
             return
@@ -437,7 +437,7 @@ fun MainActivity.saveAnswerToFile() {
         }
     }
 
-fun MainActivity.saveAnswerToUri(uri: Uri, answer: String) {
+internal fun MainActivity.saveAnswerToUri(uri: Uri, answer: String) {
         updateStatus("Saving the answer to your selected location…")
         ioExecutor.execute {
             try {
@@ -456,14 +456,14 @@ fun MainActivity.saveAnswerToUri(uri: Uri, answer: String) {
         }
     }
 
-fun MainActivity.copyAnswerText(text: String) {
+internal fun MainActivity.copyAnswerText(text: String) {
         if (text.isBlank()) return
         (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
             .setPrimaryClip(ClipData.newPlainText("PocketAgent answer", text))
         Toast.makeText(this, "Answer copied", Toast.LENGTH_SHORT).show()
     }
 
-fun MainActivity.shareAnswerText(text: String) {
+internal fun MainActivity.shareAnswerText(text: String) {
         if (text.isBlank()) return
         startActivity(
             Intent.createChooser(
@@ -473,7 +473,7 @@ fun MainActivity.shareAnswerText(text: String) {
         )
     }
 
-fun MainActivity.speakAnswerText(raw: String) {
+internal fun MainActivity.speakAnswerText(raw: String) {
         val text = MarkdownFormatter.stripToPlainText(raw)
         if (!ttsReady || text.isBlank()) {
             Toast.makeText(this, "Speech is not ready yet", Toast.LENGTH_SHORT).show()

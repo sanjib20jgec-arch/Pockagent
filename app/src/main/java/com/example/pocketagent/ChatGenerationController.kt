@@ -94,12 +94,12 @@ import com.example.pocketagent.MainActivity.Companion.SYSTEM_INSTRUCTION
 import com.example.pocketagent.MainActivity.Companion.WHITE
 
 
-fun MainActivity.conversationHistoryFor(task: String): List<ChatMessage> =
+internal fun MainActivity.conversationHistoryFor(task: String): List<ChatMessage> =
         promptContext.historyFor(currentSession?.messages.orEmpty(), task)
 
     /** Composes prompt + token/truncation metadata for one attempt; see [AnswerPromptComposer]. */
 
-fun MainActivity.composePrompt(
+internal fun MainActivity.composePrompt(
         task: String,
         attachment: String,
         intent: AnswerDirective.Intent,
@@ -128,7 +128,7 @@ fun MainActivity.composePrompt(
      * engine's context is in an unknown state, and reusing it would corrupt the next answer.
      */
 
-fun MainActivity.buildCallbacksForAnswer(answerProvider: () -> String): AssistantTurnCallbacks =
+internal fun MainActivity.buildCallbacksForAnswer(answerProvider: () -> String): AssistantTurnCallbacks =
         AssistantTurnCallbacks(
             onCopyCode = { code, language ->
                 performSubtleHaptic(chatThreadContainer, isConfirm = true)
@@ -181,7 +181,7 @@ fun MainActivity.buildCallbacksForAnswer(answerProvider: () -> String): Assistan
             },
         )
 
-fun MainActivity.startGenerationIndicators(handle: ActiveAssistantCardHandle, initialStage: String) {
+internal fun MainActivity.startGenerationIndicators(handle: ActiveAssistantCardHandle, initialStage: String) {
         stopGenerationIndicators()
         currentGenerationStageLabel = initialStage
         firstTokenElapsedMs = null
@@ -209,13 +209,13 @@ fun MainActivity.startGenerationIndicators(handle: ActiveAssistantCardHandle, in
         mainHandler.postDelayed(ticker, 250L)
     }
 
-fun MainActivity.stopGenerationIndicators() {
+internal fun MainActivity.stopGenerationIndicators() {
         thinkingPulseAnimator.stop()
         generationTimerRunnable?.let { mainHandler.removeCallbacks(it) }
         generationTimerRunnable = null
     }
 
-fun MainActivity.runGuardedGeneration(
+internal fun MainActivity.runGuardedGeneration(
         convKey: String,
         prompt: String,
         systemInstruction: String,
@@ -360,7 +360,7 @@ fun MainActivity.runGuardedGeneration(
      * bold spans, and syntax-highlighted fenced code blocks render cleanly.
      */
 
-fun MainActivity.renderFinalAnswer(
+internal fun MainActivity.renderFinalAnswer(
         handle: ActiveAssistantCardHandle,
         result: String,
         stoppedByUser: Boolean,
@@ -423,7 +423,7 @@ fun MainActivity.renderFinalAnswer(
 
     /** Switches the primary composer action from Ask to Stop while a generation is running. */
 
-fun MainActivity.enterGeneratingState() {
+internal fun MainActivity.enterGeneratingState() {
         idleUnloadRunnable?.let { mainHandler.removeCallbacks(it) }
         idleUnloadRunnable = null
         isGeneratingUi = true
@@ -442,7 +442,7 @@ fun MainActivity.enterGeneratingState() {
 
     /** Restores the primary composer action to Ask. */
 
-fun MainActivity.exitGeneratingState() {
+internal fun MainActivity.exitGeneratingState() {
         if (!isGeneratingUi) return
         isGeneratingUi = false
         isStoppingUi = false
@@ -463,7 +463,7 @@ fun MainActivity.exitGeneratingState() {
         scheduleIdleEngineUnload()
     }
 
-fun MainActivity.scheduleIdleEngineUnload() {
+internal fun MainActivity.scheduleIdleEngineUnload() {
         idleUnloadRunnable?.let { mainHandler.removeCallbacks(it) }
         val runnable = Runnable {
             if (!isGeneratingUi && !engineManager.isGenerationActive && engineManager.engine != null) {
@@ -491,7 +491,7 @@ fun MainActivity.scheduleIdleEngineUnload() {
      * completion so a subsequent tap cannot race the closing native conversation.
      */
 
-fun MainActivity.stopActiveGeneration() {
+internal fun MainActivity.stopActiveGeneration() {
         if (!isGeneratingUi) return
         isGeneratingCancelled.set(true)
         isStoppingUi = true
@@ -510,7 +510,7 @@ fun MainActivity.stopActiveGeneration() {
 
     /** Follows streaming output only when the reader has not scrolled up to read earlier text. */
 
-fun MainActivity.maybeFollowStreamingOutput() {
+internal fun MainActivity.maybeFollowStreamingOutput() {
         if (isUserReadingUpwards) return
         scrollChatToBottom()
     }
@@ -522,7 +522,7 @@ fun MainActivity.maybeFollowStreamingOutput() {
      * generation is worth it, instead of every vague answer costing two full runs.
      */
 
-fun MainActivity.updateRefineAffordance(handle: ActiveAssistantCardHandle? = activeAssistantHandle) {
+internal fun MainActivity.updateRefineAffordance(handle: ActiveAssistantCardHandle? = activeAssistantHandle) {
         val btn = handle?.refineButton ?: return
         btn.visibility = if (maybeShowRefineAffordance && lastPrompt.isNotBlank()) {
             View.VISIBLE
@@ -538,7 +538,7 @@ fun MainActivity.updateRefineAffordance(handle: ActiveAssistantCardHandle? = act
      * same intent and calculation context as the original attempt.
      */
 
-fun MainActivity.refineLastAnswer() {
+internal fun MainActivity.refineLastAnswer() {
         val task = lastPrompt
         val handle = activeAssistantHandle ?: return
         if (task.isBlank() || isGeneratingUi || engineManager.isGenerationActive) return
@@ -644,7 +644,7 @@ fun MainActivity.refineLastAnswer() {
         }
     }
 
-fun MainActivity.conversationKeyFor(
+internal fun MainActivity.conversationKeyFor(
         sessionId: String?,
         modelFile: File,
         systemInstruction: String,
@@ -656,7 +656,7 @@ fun MainActivity.conversationKeyFor(
         attachmentHash = attachmentContext.hashCode(),
     )
 
-fun MainActivity.buildEffectiveInstructionWithTrace(
+internal fun MainActivity.buildEffectiveInstructionWithTrace(
         task: String,
         intent: AnswerDirective.Intent,
         slashCommand: SlashCommandDetector.SlashCommand? = null,
@@ -703,10 +703,10 @@ fun MainActivity.buildEffectiveInstructionWithTrace(
         return enriched to traces
     }
 
-fun MainActivity.effectiveSystemInstruction(task: String, intent: AnswerDirective.Intent): String =
+internal fun MainActivity.effectiveSystemInstruction(task: String, intent: AnswerDirective.Intent): String =
         buildEffectiveInstructionWithTrace(task, intent).first
 
-fun MainActivity.executeWithGpuFallback(
+internal fun MainActivity.executeWithGpuFallback(
         modelFile: File,
         onBeforeCpuRetry: (() -> Unit)? = null,
         attempt: () -> String,
@@ -733,7 +733,7 @@ fun MainActivity.executeWithGpuFallback(
         }
     }
 
-fun MainActivity.suggestSteps() {
+internal fun MainActivity.suggestSteps() {
         if (isWhisperTranscribing) {
             updateStatus("Wait for transcription to finish before asking.")
             return
@@ -1167,7 +1167,7 @@ fun MainActivity.suggestSteps() {
         }
     }
 
-fun MainActivity.regenerateAnswer() {
+internal fun MainActivity.regenerateAnswer() {
         val toRegenerate = lastRawPrompt.ifBlank { lastPrompt }
         if (toRegenerate.isNotBlank() && !isGeneratingUi && !engineManager.isGenerationActive) {
             taskInput.setText(toRegenerate)
@@ -1175,7 +1175,7 @@ fun MainActivity.regenerateAnswer() {
         }
     }
 
-fun MainActivity.renderCitations(
+internal fun MainActivity.renderCitations(
         citations: List<LocalDocumentRetriever.DocumentCitation>,
         container: LinearLayout,
     ) {
@@ -1209,7 +1209,7 @@ fun MainActivity.renderCitations(
         container.addView(hScroll)
     }
 
-fun MainActivity.showCitationDialog(citation: LocalDocumentRetriever.DocumentCitation) {
+internal fun MainActivity.showCitationDialog(citation: LocalDocumentRetriever.DocumentCitation) {
         val dialogView = styleDialogContainer(this, palette, paddingDp = 16).apply {
             addView(text(citation.citationLabel, 16f, palette.ink, true))
             val snippetText = citation.excerptSnippet.ifBlank { "No excerpt snippet available." }

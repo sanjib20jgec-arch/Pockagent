@@ -94,7 +94,7 @@ import com.example.pocketagent.MainActivity.Companion.SYSTEM_INSTRUCTION
 import com.example.pocketagent.MainActivity.Companion.WHITE
 
 
-fun MainActivity.updateRecordingBanner() {
+internal fun MainActivity.updateRecordingBanner() {
         if (!isRecordingBannerInitialized()) return
         val isRec = inAppAudioRecorder.isRecordingActive
         val targetVisibility = if (isRec || isDictating) View.VISIBLE else View.GONE
@@ -119,7 +119,7 @@ fun MainActivity.updateRecordingBanner() {
 
     /** Hides the soft keyboard and optionally clears focus from [taskInput]. */
 
-fun MainActivity.toggleInAppRecording() {
+internal fun MainActivity.toggleInAppRecording() {
         if (whisperContext == 0L) {
             updateStatus("Choose a local whisper.cpp ggml .bin model first.")
             return
@@ -138,7 +138,7 @@ fun MainActivity.toggleInAppRecording() {
         startInAppRecording()
     }
 
-fun MainActivity.startInAppRecording() {
+internal fun MainActivity.startInAppRecording() {
         dismissComposerOverlays(hideIme = true)
         val generationAtStart = attachmentGeneration
         suggestButton.isEnabled = false
@@ -190,7 +190,7 @@ fun MainActivity.startInAppRecording() {
         })
     }
 
-fun MainActivity.transcribeRecordedAudio(samples: FloatArray, generationAtStart: Long) {
+internal fun MainActivity.transcribeRecordedAudio(samples: FloatArray, generationAtStart: Long) {
         isWhisperTranscribing = true
         try {
             val availableChars = MAX_ATTACHMENT_CHARS - attachedContext.length
@@ -233,18 +233,18 @@ fun MainActivity.transcribeRecordedAudio(samples: FloatArray, generationAtStart:
         }
     }
 
-fun MainActivity.resetRecordButton() {
+internal fun MainActivity.resetRecordButton() {
         recordAudioButton.text = "Record audio"
         recordAudioButton.contentDescription = "Record audio for local Whisper transcription"
         updateWhisperActionButtons(whisperContext != 0L)
     }
 
-fun MainActivity.updateWhisperActionButtons(enabled: Boolean) {
+internal fun MainActivity.updateWhisperActionButtons(enabled: Boolean) {
         if (isTranscribeWavButtonInitialized()) transcribeWavButton.isEnabled = enabled
         if (isRecordAudioButtonInitialized()) recordAudioButton.isEnabled = enabled
     }
 
-fun MainActivity.startDictation() {
+internal fun MainActivity.startDictation() {
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_MIC)
             updateStatus("Allow microphone access, then tap Dictate again.")

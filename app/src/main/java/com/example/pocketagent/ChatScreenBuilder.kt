@@ -94,7 +94,7 @@ import com.example.pocketagent.MainActivity.Companion.SYSTEM_INSTRUCTION
 import com.example.pocketagent.MainActivity.Companion.WHITE
 
 
-fun MainActivity.buildInterface() {
+internal fun MainActivity.buildInterface() {
         // Three zones stacked in a full-height column: a slim pinned header, a scrolling chat
         // canvas, and a sticky bottom composer that never scrolls away from the thumb.
         val rootLayout = LinearLayout(this).apply {
@@ -768,7 +768,7 @@ fun MainActivity.buildInterface() {
      * turned into bottom padding, so the composer is never pushed up twice.
      */
 
-fun MainActivity.applyImeInsets(rootLayout: LinearLayout) {
+internal fun MainActivity.applyImeInsets(rootLayout: LinearLayout) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
         rootLayout.setOnApplyWindowInsetsListener(
             ComposerInputGuard.applySafeComposerInsets(
@@ -788,7 +788,7 @@ fun MainActivity.applyImeInsets(rootLayout: LinearLayout) {
 
     /** Opens or closes the `+` tools tray. */
 
-fun MainActivity.toggleToolsTray(force: Boolean) {
+internal fun MainActivity.toggleToolsTray(force: Boolean) {
         val open = if (force) true else !isToolsTrayOpen
         if (isComposerCardInitialized() && isToolsTrayOpen != open) {
             TransitionManager.beginDelayedTransition(composerCard)
@@ -822,7 +822,7 @@ fun MainActivity.toggleToolsTray(force: Boolean) {
      * attachment pill, and busy state can never drift out of sync with each other.
      */
 
-fun MainActivity.syncComposerState() {
+internal fun MainActivity.syncComposerState() {
         if (!isHeroCardInitialized()) return
         val hasThreadViews = isChatThreadContainerInitialized() && chatThreadContainer.childCount > 0
         val hasImage = !attachedImagePath.isNullOrBlank()
@@ -906,7 +906,7 @@ fun MainActivity.syncComposerState() {
 
     /** Updates the floating Jump-to-Bottom button based on scroll position and thread content. */
 
-fun MainActivity.updateJumpToBottomVisibility() {
+internal fun MainActivity.updateJumpToBottomVisibility() {
         if (!isJumpToBottomButtonInitialized() || !isChatScrollInitialized()) return
         val hasContent = isChatThreadContainerInitialized() && chatThreadContainer.childCount > 0
         val show = hasContent && isUserReadingUpwards && chatScroll.canScrollVertically(1)
@@ -944,7 +944,7 @@ fun MainActivity.updateJumpToBottomVisibility() {
 
     /** Animates a newly added chat card into view with a subtle fade and upward slide. */
 
-fun MainActivity.animateCardEntrance(view: View) {
+internal fun MainActivity.animateCardEntrance(view: View) {
         view.alpha = 0f
         view.translationY = dp(12).toFloat()
         view.animate()
@@ -957,7 +957,7 @@ fun MainActivity.animateCardEntrance(view: View) {
 
     /** Updates the visible recording banner and pulsing indicator inside the composer card. */
 
-fun MainActivity.hideKeyboard(clearInputFocus: Boolean = true) {
+internal fun MainActivity.hideKeyboard(clearInputFocus: Boolean = true) {
         if (isTaskInputInitialized() && clearInputFocus) {
             taskInput.clearFocus()
         }
@@ -970,7 +970,7 @@ fun MainActivity.hideKeyboard(clearInputFocus: Boolean = true) {
 
     /** Dismisses open composer popups (slash menu, tools tray) and optionally hides the keyboard. */
 
-fun MainActivity.dismissComposerOverlays(hideIme: Boolean = false) {
+internal fun MainActivity.dismissComposerOverlays(hideIme: Boolean = false) {
         if (isSlashPopupContainerInitialized() && slashPopupContainer.visibility == View.VISIBLE) {
             slashPopupContainer.visibility = View.GONE
         }
@@ -984,7 +984,7 @@ fun MainActivity.dismissComposerOverlays(hideIme: Boolean = false) {
 
     /** Scrolls the chat canvas to the newest content unless the reader scrolled up, without stealing focus. */
 
-fun MainActivity.scrollChatToBottom(force: Boolean = false) {
+internal fun MainActivity.scrollChatToBottom(force: Boolean = false) {
         if (!isChatScrollInitialized() || !isChatCanvasInitialized()) return
         if (!force && isUserReadingUpwards) return
         chatScroll.post {
@@ -1000,7 +1000,7 @@ fun MainActivity.scrollChatToBottom(force: Boolean = false) {
         }
     }
 
-fun MainActivity.updateSlashSuggestions(currentText: String) {
+internal fun MainActivity.updateSlashSuggestions(currentText: String) {
         if (!isSlashPopupContainerInitialized()) return
         val trimmed = currentText.trimStart()
         val exactMatch = SlashCommandDetector.detectCommand(trimmed)
@@ -1066,7 +1066,7 @@ fun MainActivity.updateSlashSuggestions(currentText: String) {
         slashPopupContainer.visibility = View.VISIBLE
     }
 
-fun MainActivity.updateWorkspaceSubtitle() {
+internal fun MainActivity.updateWorkspaceSubtitle() {
         val proj = activeProjectId?.let { projectStore.getProject(it) }
         val ctxUsed = engineManager.cachedConversationTokens
         val ctxMax = currentMaxContextTokens
@@ -1130,7 +1130,7 @@ fun MainActivity.updateWorkspaceSubtitle() {
         }
     }
 
-fun MainActivity.openClaudeDrawer() {
+internal fun MainActivity.openClaudeDrawer() {
         dismissComposerOverlays(hideIme = true)
         val model = activeModelFile()
         val hasModel = model.exists() && model.length() > 0L
@@ -1184,7 +1184,7 @@ fun MainActivity.openClaudeDrawer() {
         )
     }
 
-fun MainActivity.toggleAgentMode(showToast: Boolean) {
+internal fun MainActivity.toggleAgentMode(showToast: Boolean) {
         isAgentModeEnabled = !isAgentModeEnabled
         settingsPrefs.edit().putBoolean(PREF_AGENT_MODE, isAgentModeEnabled).apply()
         updateWorkspaceSubtitle()
@@ -1198,7 +1198,7 @@ fun MainActivity.toggleAgentMode(showToast: Boolean) {
         }
     }
 
-fun MainActivity.toggleDeepThinkMode() {
+internal fun MainActivity.toggleDeepThinkMode() {
         isDeepThinkEnabled = !isDeepThinkEnabled
         settingsPrefs.edit().putBoolean(PREF_DEEP_THINK, isDeepThinkEnabled).apply()
         updateWorkspaceSubtitle()
@@ -1210,7 +1210,7 @@ fun MainActivity.toggleDeepThinkMode() {
         ).show()
     }
 
-fun MainActivity.showModeQuickSheet() {
+internal fun MainActivity.showModeQuickSheet() {
         dismissComposerOverlays(hideIme = true)
         val root = column().apply { setPadding(dp(18), dp(4), dp(18), dp(12)) }
         root.addView(text("Assistant Mode & Capabilities", 17f, palette.ink, true))
@@ -1311,7 +1311,7 @@ fun MainActivity.showModeQuickSheet() {
         sheet = showBottomSheetDialog(this, palette, root)
     }
 
-fun MainActivity.openSlashCommandPicker() {
+internal fun MainActivity.openSlashCommandPicker() {
         if (!isSlashPopupContainerInitialized()) return
         if (slashPopupContainer.visibility == View.VISIBLE) {
             slashPopupContainer.visibility = View.GONE
@@ -1327,7 +1327,7 @@ fun MainActivity.openSlashCommandPicker() {
         updateSlashSuggestions(taskInput.text.toString())
     }
 
-fun MainActivity.showAttachmentPreview(value: String) {
+internal fun MainActivity.showAttachmentPreview(value: String) {
         attachmentPreview.text = value
         attachmentPreviewExpanded = false
         attachmentPreview.maxLines = 8
@@ -1339,7 +1339,7 @@ fun MainActivity.showAttachmentPreview(value: String) {
             if (transcriptReviewPending && value.length <= 400) View.VISIBLE else View.GONE
     }
 
-fun MainActivity.toggleAttachmentPreview() {
+internal fun MainActivity.toggleAttachmentPreview() {
         attachmentPreviewExpanded = !attachmentPreviewExpanded
         if (attachmentPreviewExpanded) {
             attachmentPreview.maxLines = Int.MAX_VALUE
@@ -1363,20 +1363,20 @@ fun MainActivity.toggleAttachmentPreview() {
      */
     /** Recent turns for the active session, minus the turn currently being generated. */
 
-fun MainActivity.formatBytes(bytes: Long): String = if (bytes >= 1024L * 1024) "${bytes / (1024 * 1024)} MB" else "${bytes / 1024} KB"
+internal fun MainActivity.formatBytes(bytes: Long): String = if (bytes >= 1024L * 1024) "${bytes / (1024 * 1024)} MB" else "${bytes / 1024} KB"
 
-fun MainActivity.formatStorageSize(bytes: Long): String = PrivacyAuditCenter.StorageAudit.formatBytes(bytes)
+internal fun MainActivity.formatStorageSize(bytes: Long): String = PrivacyAuditCenter.StorageAudit.formatBytes(bytes)
 
-fun MainActivity.dp(value: Int): Int = com.example.pocketagent.dp(this, value)
+internal fun MainActivity.dp(value: Int): Int = com.example.pocketagent.dp(this, value)
 
-fun MainActivity.column() = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+internal fun MainActivity.column() = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
 
-fun MainActivity.marginBottom(value: Int) = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(value) }
+internal fun MainActivity.marginBottom(value: Int) = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(value) }
 
-fun MainActivity.text(value: String, size: Float, color: Int, bold: Boolean = false) =
+internal fun MainActivity.text(value: String, size: Float, color: Int, bold: Boolean = false) =
         styledText(this, value, size, color, bold)
 
-fun MainActivity.shape(color: Int, radius: Int, stroke: Int? = null) =
+internal fun MainActivity.shape(color: Int, radius: Int, stroke: Int? = null) =
         roundedShape(
             color = color,
             radiusPx = dp(radius).toFloat(),
@@ -1384,12 +1384,12 @@ fun MainActivity.shape(color: Int, radius: Int, stroke: Int? = null) =
             strokeColor = stroke,
         )
 
-fun MainActivity.sectionHeading(title: String, subtitle: String): LinearLayout = column().apply {
+internal fun MainActivity.sectionHeading(title: String, subtitle: String): LinearLayout = column().apply {
         addView(text(title, 18f, palette.ink, true))
         addView(text(subtitle, 12f, palette.muted).apply { setPadding(0, dp(3), 0, 0) })
     }
 
-fun MainActivity.pillButton(
+internal fun MainActivity.pillButton(
         label: String,
         accessibilityLabel: String = label,
         compact: Boolean = false,
@@ -1403,7 +1403,7 @@ fun MainActivity.pillButton(
         onClick = onClick,
     )
 
-fun MainActivity.textButton(
+internal fun MainActivity.textButton(
         label: String,
         accessibilityLabel: String = label,
         onClick: () -> Unit,
@@ -1427,7 +1427,7 @@ fun MainActivity.textButton(
         setOnClickListener { onClick() }
     }
 
-fun MainActivity.actionButton(
+internal fun MainActivity.actionButton(
         label: String,
         accessibilityLabel: String = label,
         onClick: () -> Unit,
@@ -1457,5 +1457,5 @@ fun MainActivity.actionButton(
         setOnClickListener { onClick() }
     }
 
-fun MainActivity.ripple(content: GradientDrawable, color: Int) =
+internal fun MainActivity.ripple(content: GradientDrawable, color: Int) =
         rippleDrawable(content, color)

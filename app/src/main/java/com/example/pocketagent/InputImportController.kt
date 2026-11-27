@@ -94,7 +94,7 @@ import com.example.pocketagent.MainActivity.Companion.SYSTEM_INSTRUCTION
 import com.example.pocketagent.MainActivity.Companion.WHITE
 
 
-fun MainActivity.handleWidgetLaunchIntent(launchIntent: Intent?) {
+internal fun MainActivity.handleWidgetLaunchIntent(launchIntent: Intent?) {
         if (launchIntent?.getBooleanExtra(PocketAgentWidget.EXTRA_WIDGET_VOICE, false) == true) {
             launchIntent.removeExtra(PocketAgentWidget.EXTRA_WIDGET_VOICE)
             mainHandler.postDelayed({
@@ -103,7 +103,7 @@ fun MainActivity.handleWidgetLaunchIntent(launchIntent: Intent?) {
         }
     }
 
-fun MainActivity.handleSharedIntent(shareIntent: Intent?) {
+internal fun MainActivity.handleSharedIntent(shareIntent: Intent?) {
         if (shareIntent == null || shareIntent.action != Intent.ACTION_SEND) return
         val mime = shareIntent.type.orEmpty().lowercase(Locale.ROOT)
         val sharedText = shareIntent.getStringExtra(Intent.EXTRA_TEXT)
@@ -144,7 +144,7 @@ fun MainActivity.handleSharedIntent(shareIntent: Intent?) {
         }
     }
 
-fun MainActivity.activeModelFile(): File {
+internal fun MainActivity.activeModelFile(): File {
         val activeEntry = modelLibraryStore.getActive()
         if (activeEntry != null) {
             val candidate = File(activeEntry.filePath)
@@ -155,7 +155,7 @@ fun MainActivity.activeModelFile(): File {
         return File(filesDir, "model.litertlm")
     }
 
-fun MainActivity.ensureLegacyModelRegistered() {
+internal fun MainActivity.ensureLegacyModelRegistered() {
         val legacy = File(filesDir, "model.litertlm")
         if (legacy.exists() && legacy.length() > 0L) {
             val existing = modelLibraryStore.loadAll()
@@ -171,7 +171,7 @@ fun MainActivity.ensureLegacyModelRegistered() {
         }
     }
 
-fun MainActivity.isDeviceLowMemory(): Boolean {
+internal fun MainActivity.isDeviceLowMemory(): Boolean {
         val am = getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager ?: return false
         val info = ActivityManager.MemoryInfo()
         am.getMemoryInfo(info)
@@ -180,7 +180,7 @@ fun MainActivity.isDeviceLowMemory(): Boolean {
 
     /** Initializes the LiteRT-LM engine with a persistent crash-loop guard around GPU loads. */
 
-fun MainActivity.ensureEngineInitialized(modelFile: File): Engine {
+internal fun MainActivity.ensureEngineInitialized(modelFile: File): Engine {
         val tryingGpu = engineManager.preference == BackendPreference.GPU_PREFERRED &&
             engineManager.engine == null
         if (tryingGpu) {
@@ -202,7 +202,7 @@ fun MainActivity.ensureEngineInitialized(modelFile: File): Engine {
      * idle startup RAM pressure or OOM when the user only wants History, Notes, or Privacy tools.
      */
 
-fun MainActivity.warmUpModelAfterFirstFrame() {
+internal fun MainActivity.warmUpModelAfterFirstFrame() {
         val modelFile = activeModelFile()
         if (!modelFile.exists() || modelFile.length() <= 0) return
         if (modelFile.length() > EAGER_WARMUP_MAX_BYTES || isDeviceLowMemory()) {
@@ -223,14 +223,14 @@ fun MainActivity.warmUpModelAfterFirstFrame() {
         }
     }
 
-fun MainActivity.chooseModel() {
+internal fun MainActivity.chooseModel() {
         val picker = Intent(Intent.ACTION_OPEN_DOCUMENT)
             .addCategory(Intent.CATEGORY_OPENABLE)
             .setType("*/*")
         startActivityForResult(picker, PICK_MODEL)
     }
 
-fun MainActivity.chooseTextFiles() {
+internal fun MainActivity.chooseTextFiles() {
         val picker = Intent(Intent.ACTION_OPEN_DOCUMENT)
             .addCategory(Intent.CATEGORY_OPENABLE)
             .setType("text/*")
@@ -239,14 +239,14 @@ fun MainActivity.chooseTextFiles() {
         startActivityForResult(picker, PICK_TEXT_FILES)
     }
 
-fun MainActivity.choosePdf() {
+internal fun MainActivity.choosePdf() {
         val picker = Intent(Intent.ACTION_OPEN_DOCUMENT)
             .addCategory(Intent.CATEGORY_OPENABLE)
             .setType("application/pdf")
         startActivityForResult(picker, PICK_PDF)
     }
 
-fun MainActivity.chooseWhisperModel() {
+internal fun MainActivity.chooseWhisperModel() {
         val picker = Intent(Intent.ACTION_OPEN_DOCUMENT)
             .addCategory(Intent.CATEGORY_OPENABLE)
             .setType("application/octet-stream")
@@ -254,7 +254,7 @@ fun MainActivity.chooseWhisperModel() {
         startActivityForResult(picker, PICK_WHISPER_MODEL)
     }
 
-fun MainActivity.chooseWav() {
+internal fun MainActivity.chooseWav() {
         if (whisperContext == 0L) {
             updateStatus("Choose a local whisper.cpp ggml .bin model first.")
             return
@@ -266,14 +266,14 @@ fun MainActivity.chooseWav() {
         startActivityForResult(picker, PICK_WAV)
     }
 
-fun MainActivity.chooseVisionImage() {
+internal fun MainActivity.chooseVisionImage() {
         val picker = Intent(Intent.ACTION_OPEN_DOCUMENT)
             .addCategory(Intent.CATEGORY_OPENABLE)
             .setType("image/*")
         startActivityForResult(picker, PICK_IMAGE_OCR)
     }
 
-fun MainActivity.importModel(uri: Uri) {
+internal fun MainActivity.importModel(uri: Uri) {
         if (engineManager.isGenerationActive || isGeneratingUi) {
             updateStatus("Stop the current generation before switching models.")
             return
@@ -371,7 +371,7 @@ fun MainActivity.importModel(uri: Uri) {
         }
     }
 
-fun MainActivity.importTextFiles(uris: List<Uri>) {
+internal fun MainActivity.importTextFiles(uris: List<Uri>) {
         updateStatus("Reading selected text file${if (uris.size > 1) "s" else ""}…")
         ioExecutor.execute {
             try {
@@ -408,7 +408,7 @@ fun MainActivity.importTextFiles(uris: List<Uri>) {
         }
     }
 
-fun MainActivity.importPdf(uri: Uri) {
+internal fun MainActivity.importPdf(uri: Uri) {
         updateStatus("Reading selected PDF on this device…")
         ioExecutor.execute {
             try {
@@ -455,7 +455,7 @@ fun MainActivity.importPdf(uri: Uri) {
         }
     }
 
-fun MainActivity.importWhisperModel(uri: Uri) {
+internal fun MainActivity.importWhisperModel(uri: Uri) {
         val rawName = queryDisplayName(uri) ?: "Selected model"
         if (!rawName.endsWith(".bin", ignoreCase = true)) {
             updateStatus("Choose a whisper.cpp ggml model file ending in .bin. No model is bundled with PocketAgent.")
@@ -511,7 +511,7 @@ fun MainActivity.importWhisperModel(uri: Uri) {
         }
     }
 
-fun MainActivity.transcribeWav(uri: Uri) {
+internal fun MainActivity.transcribeWav(uri: Uri) {
         if (whisperContext == 0L) {
             updateStatus("Choose a local whisper.cpp ggml .bin model first.")
             return
@@ -569,7 +569,7 @@ fun MainActivity.transcribeWav(uri: Uri) {
         }
     }
 
-fun MainActivity.removeWhisperModel() {
+internal fun MainActivity.removeWhisperModel() {
         updateWhisperActionButtons(false)
         updateStatus("Removing the local Whisper model…")
         ioExecutor.execute {
@@ -592,13 +592,13 @@ fun MainActivity.removeWhisperModel() {
         }
     }
 
-fun MainActivity.queryDisplayName(uri: Uri): String? = try {
+internal fun MainActivity.queryDisplayName(uri: Uri): String? = try {
         contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
             if (cursor.moveToFirst()) cursor.getString(0) else null
         }
     } catch (_: Exception) { null }
 
-fun MainActivity.queryFileSize(uri: Uri): Long? = try {
+internal fun MainActivity.queryFileSize(uri: Uri): Long? = try {
         contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.SIZE), null, null, null)?.use { cursor ->
             if (cursor.moveToFirst() && !cursor.isNull(0)) {
                 cursor.getLong(0).takeIf { it > 0L }
@@ -608,7 +608,7 @@ fun MainActivity.queryFileSize(uri: Uri): Long? = try {
         }
     } catch (_: Exception) { null }
 
-fun MainActivity.clearAttachments() {
+internal fun MainActivity.clearAttachments() {
         attachmentGeneration++
         attachedContext = ""
         attachedNames.clear()
@@ -628,7 +628,7 @@ fun MainActivity.clearAttachments() {
         updateStatus("Attachment removed.")
     }
 
-fun MainActivity.stageImageUri(uri: Uri) {
+internal fun MainActivity.stageImageUri(uri: Uri) {
         updateStatus("Staging image locally for Omni vision…")
         ioExecutor.execute {
             try {
@@ -666,7 +666,7 @@ fun MainActivity.stageImageUri(uri: Uri) {
         }
     }
 
-fun MainActivity.cleanupStagedInputFiles() {
+internal fun MainActivity.cleanupStagedInputFiles() {
         cacheDir.listFiles()?.forEach { file ->
             if (file.name.startsWith("pocketagent-pdf-") ||
                 file.name.startsWith("pocketagent-audio-") ||
@@ -678,7 +678,7 @@ fun MainActivity.cleanupStagedInputFiles() {
         }
     }
 
-fun MainActivity.restoreWhisperModel() {
+internal fun MainActivity.restoreWhisperModel() {
         val store = WhisperModelStore(filesDir)
         val model = store.modelFile
         if (!model.isFile) return
@@ -711,7 +711,7 @@ fun MainActivity.restoreWhisperModel() {
 
     /** Mirrors only the composer text owned by the ViewModel; generation UI remains local until Task 8. */
 
-fun MainActivity.refreshModelStatus() {
+internal fun MainActivity.refreshModelStatus() {
         if (!isModelStatusPillInitialized()) return
         val model = activeModelFile()
         val hasModel = model.exists() && model.length() > 0L
@@ -735,7 +735,7 @@ fun MainActivity.refreshModelStatus() {
         updateWorkspaceSubtitle()
     }
 
-fun MainActivity.showModelManagerDialog() {
+internal fun MainActivity.showModelManagerDialog() {
         dismissComposerOverlays(hideIme = true)
         ModelManagerDialog.show(
             activity = this,

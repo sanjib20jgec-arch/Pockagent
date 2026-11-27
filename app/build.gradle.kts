@@ -6,6 +6,18 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization")
     id("io.github.takahirom.roborazzi")
 }
+
+val robolectricInstrumentedVersion = "15-robolectric-14663667-2-i7"
+val robolectricSdk by configurations.creating {
+    isCanBeResolved = true
+    isCanBeConsumed = false
+}
+val prepareRobolectricSdk by tasks.registering(Copy::class) {
+    from(robolectricSdk)
+    into(layout.buildDirectory.dir("robolectric-sdk"))
+    rename { "android-all-instrumented-$robolectricInstrumentedVersion.jar" }
+}
+
 android {
     namespace = "com.example.pocketagent"
     compileSdk = 35
@@ -36,6 +48,11 @@ android {
         unitTests {
             isIncludeAndroidResources = true
             all {
+                it.dependsOn(prepareRobolectricSdk)
+                it.systemProperty(
+                    "robolectric.dependency.dir",
+                    layout.buildDirectory.dir("robolectric-sdk").get().asFile.absolutePath,
+                )
                 it.jvmArgs(
                     "--add-opens=java.base/java.lang=ALL-UNNAMED",
                     "--add-opens=java.base/java.util=ALL-UNNAMED",
@@ -68,6 +85,7 @@ dependencies {
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
     testImplementation("org.robolectric:robolectric:4.18")
     testImplementation("io.github.takahirom.roborazzi:roborazzi:1.79.0")
+    robolectricSdk("org.robolectric:android-all-instrumented:$robolectricInstrumentedVersion")
     androidTestImplementation("androidx.test:core:1.6.1")
     androidTestImplementation("androidx.test:rules:1.6.1")
     androidTestImplementation("androidx.test:runner:1.6.2")

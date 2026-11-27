@@ -198,13 +198,7 @@ jobs:
           disable-linux-hw-accel: false
           script: |
             mkdir -p app/build/reports
-            if ./gradlew --no-daemon --stacktrace --console=plain connectedDebugAndroidTest > app/build/reports/connected-test.log 2>&1; then
-              cat app/build/reports/connected-test.log
-            else
-              cat app/build/reports/connected-test.log
-              adb logcat -d > app/build/reports/logcat.txt || true
-              exit 1
-            fi
+            ./gradlew --no-daemon --stacktrace --console=plain connectedDebugAndroidTest > app/build/reports/connected-test.log 2>&1; STATUS=$?; cat app/build/reports/connected-test.log; adb logcat -d > app/build/reports/logcat.txt || true; exit "$STATUS"
 
       - name: Upload device reports
         if: always()

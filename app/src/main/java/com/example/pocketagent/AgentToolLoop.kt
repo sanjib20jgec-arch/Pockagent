@@ -1,5 +1,11 @@
 package com.example.pocketagent
 
+import java.time.Instant
+import java.time.ZoneId
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
+import java.time.format.TextStyle
+import java.util.Locale
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
@@ -14,9 +20,20 @@ import kotlinx.coroutines.withTimeout
  *
  * Supported tools:
  *   TOOL_CALL: calc(<expression>)
+ *   TOOL_CALL: get_datetime()
  *   TOOL_CALL: search_notes(<query>)
+ *   TOOL_CALL: list_notes()
  *   TOOL_CALL: save_note(<title>|<content>)
+ *   TOOL_CALL: update_note(<title>|<content>)
  *   TOOL_CALL: search_docs(<query>)
+ *   TOOL_CALL: list_docs()
+ *   TOOL_CALL: search_memory(<query>)
+ *   TOOL_CALL: search_history(<query>)
+ *   TOOL_CALL: save_artifact(<title>|<language>|<code>)
+ *   TOOL_CALL: read_artifact(<title_or_language>)
+ *   TOOL_CALL: device_status()
+ *   TOOL_CALL: run_js(<script>)
+ *   TOOL_CALL: trigger_system_action(<type>|<details>)
  *
  * 100% offline, zero network calls, zero telemetry.
  */
@@ -25,6 +42,12 @@ open class AgentToolLoop(
     private val documentVault: DocumentVault? = null,
     private val maxIterations: Int = 3,
     private val toolTimeoutMs: Long = TOOL_EXECUTION_TIMEOUT_MS,
+    private val userMemoryStore: UserMemoryStore? = null,
+    private val sessionStore: SessionStore? = null,
+    private val artifactStore: ArtifactStore? = null,
+    private val deviceStatusProvider: (() -> String)? = null,
+    private val jsEvaluator: ((String) -> String)? = null,
+    private val systemActionBridge: ((String, String) -> String)? = null,
 ) {
 
     companion object {
@@ -32,10 +55,21 @@ open class AgentToolLoop(
         const val AGENT_MODE_INSTRUCTION =
             "Agent Mode is active. You have access to offline on-device tools:\n" +
                 "- TOOL_CALL: calc(<math_or_conversion_expression>)\n" +
+                "- TOOL_CALL: get_datetime()\n" +
                 "- TOOL_CALL: search_notes(<keywords>)\n" +
+                "- TOOL_CALL: list_notes()\n" +
                 "- TOOL_CALL: save_note(<title>|<content>)\n" +
+                "- TOOL_CALL: update_note(<title>|<content>)\n" +
                 "- TOOL_CALL: search_docs(<keywords>)\n" +
-                "If a calculation, stored note, or indexed document lookup helps answer accurately, " +
+                "- TOOL_CALL: list_docs()\n" +
+                "- TOOL_CALL: search_memory(<keywords_or_all>)\n" +
+                "- TOOL_CALL: search_history(<keywords>)\n" +
+                "- TOOL_CALL: save_artifact(<title>|<language>|<code>)\n" +
+                "- TOOL_CALL: read_artifact(<title_or_language>)\n" +
+                "- TOOL_CALL: device_status()\n" +
+                "- TOOL_CALL: run_js(<javascript_code>)\n" +
+                "- TOOL_CALL: trigger_system_action(<type>|<details>)\n" +
+                "If a calculation, local lookup, artifact operation, or offline tool helps answer accurately, " +
                 "emit one or more exact TOOL_CALL lines cleanly and wait for [TOOL_RESULT: ...]. " +
                 "Once you have what you need, write the final answer without TOOL_CALL lines."
 
@@ -209,6 +243,121 @@ open class AgentToolLoop(
                 val hits = vault.search(input, topK = 3)
                 if (hits.isEmpty()) "No matching excerpts in Document Vault for: $input"
                 else hits.joinToString("\n---\n")
+            }
+            "get_datetime" -> {
+                val now = ZonedDateTime.now()
+                val date = now.format(DateTimeFormatter.ISO_LOCAL_DATE)
+                val day = now.dayOfWeek.getDisplayName(TextStyle.FULL, Locale.getDefault())
+                val time = now.format(DateTimeFormatter.ofPattern("HH:mm:ss"))
+                "$date ($day) $time [${now.zone.id}]"
+            }
+            "list_notes" -> {
+                val store = notesStore ?: return "No notes store available."
+                val notes = store.listNotes().take(10)
+                if (notes.isEmpty()) "No notes saved."
+                else notes.joinToString("\n") { "- ${it.title}" }
+            }
+            "update_note" -> {
+                val store = notesStore ?: return "No notes store available."
+                val parts = input.split("|", limit = 2)
+                val title = parts.getOrElse(0) { "" }.trim()
+                val content = parts.getOrElse(1) { "" }.trim()
+                if (title.isBlank()) return "Title cannot be blank."
+                val existing = store.listNotes().firstOrNull { it.title.equals(title, ignoreCase = true) }
+                if (existing != null) {
+                    store.saveNote(existing.withUpdatedContent(newContent = content))
+                    "Updated note: '${existing.title}'"
+                } else {
+                    store.createNote(title, content)
+                    "Saved note: '$title'"
+                }
+            }
+            "list_docs" -> {
+                val vault = documentVault ?: return "No documents indexed. Please attach or index a document first."
+                val docs = vault.loadAll().take(10)
+                if (docs.isEmpty()) "No documents indexed in Document Vault."
+                else docs.joinToString("\n") { "- ${it.name} (${it.extractedText.length} chars)" }
+            }
+            "search_memory" -> {
+                val store = userMemoryStore ?: return "No memory store available."
+                val memories = store.listMemories()
+                if (memories.isEmpty()) return "No memories stored."
+                val trimmed = input.trim()
+                val matches = if (trimmed.isBlank() || trimmed.equals("all", ignoreCase = true)) {
+                    memories.take(5)
+                } else {
+                    val tokens = trimmed.lowercase(Locale.ROOT)
+                        .split(Regex("""\s+"""))
+                        .filter { it.isNotBlank() }
+                    memories.filter { memory ->
+                        val haystack = "${memory.displayLabel} ${memory.content}".lowercase(Locale.ROOT)
+                        tokens.any { token -> haystack.contains(token) }
+                    }.take(5)
+                }
+                if (matches.isEmpty()) "No memories found for: $input"
+                else matches.joinToString("\n") { "- [${it.displayLabel}] ${it.content}" }
+            }
+            "search_history" -> {
+                val store = sessionStore ?: return "No session history available."
+                val matches = store.searchSessions(input).take(3)
+                if (matches.isEmpty()) "No matching conversations found for: $input"
+                else matches.joinToString("\n") { session ->
+                    val date = Instant.ofEpochMilli(session.updatedAt)
+                        .atZone(ZoneId.systemDefault())
+                        .format(DateTimeFormatter.ISO_LOCAL_DATE)
+                    val queryLower = input.trim().lowercase(Locale.ROOT)
+                    val snippetSource = if (queryLower.isNotEmpty()) {
+                        session.messages.firstOrNull { it.content.lowercase(Locale.ROOT).contains(queryLower) }?.content
+                            ?: session.lastMessage?.content
+                            ?: ""
+                    } else {
+                        session.lastMessage?.content ?: ""
+                    }
+                    val snippet = snippetSource.replace('\n', ' ').trim().take(120)
+                    "- ${session.title} ($date): $snippet"
+                }
+            }
+            "save_artifact" -> {
+                val store = artifactStore ?: return "No artifact store available."
+                val parts = input.split("|", limit = 3)
+                if (parts.size < 3) return "Invalid format. Expected: <title>|<language>|<code>"
+                val title = parts[0].trim()
+                val language = parts[1].trim().ifBlank { "text" }
+                val code = parts[2]
+                if (title.isBlank()) return "Artifact title cannot be blank."
+                val saved = store.save(ArtifactStore.Artifact(title = title, language = language, code = code))
+                if (saved) "Saved artifact: '$title' ($language)" else "Could not save artifact."
+            }
+            "read_artifact" -> {
+                val store = artifactStore ?: return "No artifact store available."
+                val all = store.loadAll()
+                if (all.isEmpty()) return "No artifacts saved."
+                val query = input.trim()
+                val match = if (query.isBlank()) {
+                    all.first()
+                } else {
+                    all.firstOrNull { it.title.equals(query, ignoreCase = true) }
+                        ?: all.firstOrNull {
+                            it.title.contains(query, ignoreCase = true) ||
+                                it.language.equals(query, ignoreCase = true)
+                        }
+                }
+                if (match == null) "No artifact found for: $input"
+                else "[${match.title} (${match.language})]\n${match.code.take(1_200)}"
+            }
+            "device_status" -> {
+                deviceStatusProvider?.invoke() ?: "Device status unavailable."
+            }
+            "run_js" -> {
+                jsEvaluator?.invoke(input) ?: "JavaScript sandbox unavailable."
+            }
+            "trigger_system_action" -> {
+                val bridge = systemActionBridge ?: return "System action bridge unavailable."
+                val parts = input.split("|", limit = 2)
+                val type = parts.getOrElse(0) { "" }.trim()
+                val details = parts.getOrElse(1) { "" }.trim()
+                if (type.isBlank()) return "System action type cannot be blank."
+                bridge.invoke(type, details)
             }
             else -> "Unknown tool: $toolName"
         }

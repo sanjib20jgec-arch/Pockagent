@@ -119,4 +119,95 @@ class AgentToolLoopTest {
         assertTrue(loopResult.toolResults[0].output.contains("disk error"))
         assertEquals("ok:2 + 3", loopResult.toolResults[1].output)
     }
+
+    @Test fun `get_datetime returns formatted local date time and zone`() {
+        val result = loop().executeToolCall("get_datetime", "")
+        assertTrue(Regex("""\d{4}-\d{2}-\d{2} \(.+\) \d{2}:\d{2}:\d{2} \[.+\]""").containsMatchIn(result))
+    }
+
+    @Test fun `list_notes returns up to 10 note titles`() {
+        val notes = PersonalNotesStore(tmp.newFolder("notes_list"))
+        for (i in 1..12) {
+            notes.createNote("Note $i", "Body $i")
+        }
+        val result = AgentToolLoop(notesStore = notes).executeToolCall("list_notes", "")
+        val lines = result.lines().filter { it.isNotBlank() }
+        assertEquals(10, lines.size)
+        assertTrue(lines.all { it.startsWith("- Note ") })
+    }
+
+    @Test fun `update_note updates existing note case-insensitively and creates missing note`() {
+        val notes = PersonalNotesStore(tmp.newFolder("notes_update"))
+        notes.createNote("Shopping List", "Milk")
+        val loopWithNotes = AgentToolLoop(notesStore = notes)
+
+        val updateRes = loopWithNotes.executeToolCall("update_note", "shopping list|Milk, Eggs, Bread")
+        assertTrue(updateRes.contains("Updated note"))
+        val updated = notes.listNotes().first { it.title.equals("Shopping List", ignoreCase = true) }
+        assertEquals("Milk, Eggs, Bread", updated.content)
+
+        val createRes = loopWithNotes.executeToolCall("update_note", "New Idea|Build offline tool")
+        assertTrue(createRes.contains("Saved note"))
+        assertEquals(2, notes.listNotes().size)
+    }
+
+    @Test fun `list_docs lists indexed document names and lengths`() {
+        val vault = DocumentVault(tmp.newFolder("vault_list"))
+        vault.addDocument("d1", "Manual.txt", "Hello world")
+        val result = AgentToolLoop(documentVault = vault).executeToolCall("list_docs", "")
+        assertTrue(result.contains("Manual.txt"))
+        assertTrue(result.contains("11 chars"))
+    }
+
+    @Test fun `search_memory filters by query tokens and supports all`() {
+        val memoryStore = UserMemoryStore(tmp.newFolder("memories"))
+        memoryStore.addFact("Prefers dark mode in IDE", UserMemoryStore.MemoryCategory.PREFERENCE)
+        memoryStore.addFact("Lives in Seattle", UserMemoryStore.MemoryCategory.PROFILE)
+        val loopWithMemory = AgentToolLoop(userMemoryStore = memoryStore)
+
+        val filtered = loopWithMemory.executeToolCall("search_memory", "dark ide")
+        assertTrue(filtered.contains("Prefers dark mode"))
+        assertFalse(filtered.contains("Seattle"))
+
+        val all = loopWithMemory.executeToolCall("search_memory", "all")
+        assertTrue(all.contains("Prefers dark mode"))
+        assertTrue(all.contains("Seattle"))
+    }
+
+    @Test fun `search_history returns matching session titles dates and snippets`() {
+        val sessionStore = SessionStore(tmp.newFolder("sessions"))
+        val session = ConversationSession(
+            id = "sess-1",
+            title = "Kotlin Coroutines",
+            messages = listOf(ChatMessage.user("How do structured concurrency scopes work?")),
+        )
+        sessionStore.saveSession(session)
+
+        val result = AgentToolLoop(sessionStore = sessionStore).executeToolCall("search_history", "concurrency")
+        assertTrue(result.contains("Kotlin Coroutines"))
+        assertTrue(result.contains("structured concurrency"))
+    }
+
+    @Test fun `save_artifact and read_artifact persist and retrieve code`() {
+        val artifactStore = ArtifactStore(tmp.newFolder("artifacts"))
+        val loopWithArtifacts = AgentToolLoop(artifactStore = artifactStore)
+
+        val saveRes = loopWithArtifacts.executeToolCall("save_artifact", "Fib|python|def fib(n): return n")
+        assertTrue(saveRes.contains("Saved artifact"))
+
+        val readRes = loopWithArtifacts.executeToolCall("read_artifact", "Fib")
+        assertTrue(readRes.contains("Fib (python)"))
+        assertTrue(readRes.contains("def fib(n): return n"))
+    }
+
+    @Test fun `device_status invokes provider`() {
+        val loopWithStatus = AgentToolLoop(deviceStatusProvider = { "Battery: 85%, RAM: 4GB free" })
+        assertEquals("Battery: 85%, RAM: 4GB free", loopWithStatus.executeToolCall("device_status", ""))
+    }
+
+    @Test fun `run_js invokes evaluator and handles null evaluator`() {
+        assertEquals("JavaScript sandbox unavailable.", loop().executeToolCall("run_js", "1 + 1"))
+        val loopWithJs = AgentToolLoop(jsEvaluator = { script -> "eval:$script" })
+        assertEquals("eval:2 + 2", loopWithJs.executeToolCall("run_js", "2 + 2"))
+    }
 }

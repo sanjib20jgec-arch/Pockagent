@@ -31,3 +31,6 @@
 -dontwarn org.bouncycastle.**
 -dontwarn java.awt.**
 -dontwarn javax.imageio.**
+
+# Keep FileProvider for camera capture URI sharing under R8 Full Mode
+-keep class androidx.core.content.FileProvider { *; }

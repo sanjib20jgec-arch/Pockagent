@@ -73,6 +73,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         private const val REQUEST_RECORD_MIC = 8
         private const val PICK_IMAGE_OCR = 9
         private const val CREATE_ARTIFACT_HTML = 10
+        private const val CAPTURE_CAMERA_IMAGE = 11
         private const val STATE_PENDING_ANSWER_SAVE = "pending_answer_to_save"
         private const val STATE_ACTIVE_SESSION_ID = "active_session_id"
         private const val PREFS_SETTINGS = "pocketagent_settings"
@@ -205,6 +206,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     private var currentMaxContextTokens: Int = ContextBudgetManager.TokenBudget.DEFAULT_MAX_CONTEXT_TOKENS
     @Volatile private var attachedImagePath: String? = null
     private var attachedImageName: String? = null
+    private var pendingCameraCaptureUri: Uri? = null
     private var pendingHtmlToExport: String? = null
     private lateinit var workspaceSubtitleView: TextView
     private lateinit var slashPopupContainer: LinearLayout
@@ -601,7 +603,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         }
         val trustBadge = styledText(
             context = this,
-            text = "v1.6 · 100% Offline",
+            text = "v1.7 · 100% Offline",
             sizeSp = 11.5f,
             color = palette.teal,
             bold = true,
@@ -897,11 +899,11 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         agentToolsRow.addView(agentModeButton, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(5) })
 
         attachImageButton = pillButton(
-            label = "+ Image (Omni)",
-            accessibilityLabel = "Attach an image for local Omni vision inference",
+            label = "+ Camera / Image",
+            accessibilityLabel = "Snap a photo or attach an image for local Omni vision inference",
             compact = true,
         ) {
-            chooseVisionImage()
+            showVisionSourceSheet()
         }.apply {
             visibility = if (isVisionModeEnabled) View.VISIBLE else View.GONE
         }
@@ -1457,6 +1459,93 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         startActivityForResult(picker, PICK_WAV)
     }
 
+    private fun buildOfflineDeviceStatus(): String {
+        val bm = getSystemService(BATTERY_SERVICE) as? android.os.BatteryManager
+        val batteryPct = bm?.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: -1
+        val isCharging = bm?.isCharging ?: false
+        val stat = android.os.StatFs(filesDir.absolutePath)
+        val freeMb = stat.availableBytes / (1024L * 1024L)
+        val pm = getSystemService(POWER_SERVICE) as? android.os.PowerManager
+        val thermal = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && pm != null) {
+            when (pm.currentThermalStatus) {
+                android.os.PowerManager.THERMAL_STATUS_NONE -> "Normal"
+                android.os.PowerManager.THERMAL_STATUS_LIGHT -> "Light"
+                android.os.PowerManager.THERMAL_STATUS_MODERATE -> "Moderate"
+                android.os.PowerManager.THERMAL_STATUS_SEVERE -> "Severe"
+                android.os.PowerManager.THERMAL_STATUS_CRITICAL -> "Critical"
+                else -> "Elevated"
+            }
+        } else "Normal"
+        val batteryStr = if (batteryPct >= 0) "$batteryPct% (${if (isCharging) "Charging" else "Battery"})" else "Unknown"
+        return "Battery: $batteryStr | Free Storage: ${freeMb} MB | Thermal: $thermal | Backend: ${engineManager.activeBackendLabel()}"
+    }
+
+    private fun showVisionSourceSheet() {
+        val sheetContent = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        sheetContent.addView(text("Visual Input (Offline Omni)", 15f, palette.ink, bold = true).apply {
+            setPadding(dp(4), 0, dp(4), dp(10))
+        })
+        var dialogRef: AlertDialog? = null
+        fun addOptionRow(iconRes: Int, title: String, subtitle: String, onTap: () -> Unit) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(12), dp(12), dp(12), dp(12))
+                background = roundedDrawable(palette.surfaceAlt, dp(12), strokeColor = palette.border, strokeWidthPx = 1)
+                isClickable = true
+                isFocusable = true
+                setOnClickListener {
+                    dialogRef?.dismiss()
+                    onTap()
+                }
+            }
+            val icon = ImageView(this).apply {
+                setImageDrawable(tintedVectorDrawable(this@MainActivity, iconRes, palette.teal))
+            }
+            row.addView(icon, LinearLayout.LayoutParams(dp(22), dp(22)).apply { marginEnd = dp(12) })
+            val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            col.addView(text(title, 14f, palette.ink, bold = true))
+            col.addView(text(subtitle, 12f, palette.muted))
+            row.addView(col, LinearLayout.LayoutParams(0, -2, 1f))
+            sheetContent.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
+        }
+        addOptionRow(
+            R.drawable.ic_camera,
+            "Take Photo (Camera)",
+            "Snap notes, equations, documents, or objects",
+        ) { captureCameraImage() }
+        addOptionRow(
+            R.drawable.ic_folder,
+            "Choose from Gallery",
+            "Pick an existing image from your device",
+        ) { chooseVisionImage() }
+        dialogRef = showBottomSheetDialog(this, palette, sheetContent)
+    }
+
+    private fun captureCameraImage() {
+        try {
+            val captureDir = File(cacheDir, "camera_captures").apply { mkdirs() }
+            val photoFile = File(captureDir, "snap_${System.currentTimeMillis()}.jpg")
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                this,
+                "${packageName}.fileprovider",
+                photoFile,
+            )
+            val intent = Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE).apply {
+                putExtra(android.provider.MediaStore.EXTRA_OUTPUT, uri)
+                addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            pendingCameraCaptureUri = uri
+            startActivityForResult(intent, CAPTURE_CAMERA_IMAGE)
+        } catch (_: Exception) {
+            pendingCameraCaptureUri = null
+            updateStatus("No camera app available; opening image picker.")
+            chooseVisionImage()
+        }
+    }
+
     private fun chooseVisionImage() {
         val picker = Intent(Intent.ACTION_OPEN_DOCUMENT)
             .addCategory(Intent.CATEGORY_OPENABLE)
@@ -1624,7 +1713,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 artifactCount = artCount,
                 activeModelLabel = modelLabel,
                 activeBackendLabel = backendLabel,
-                appVersionLabel = "v1.6 · Offline",
+                appVersionLabel = "v1.7 · Offline",
             ),
             palette = palette,
             callbacks = DrawerCallbacks(
@@ -1880,6 +1969,14 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             val destination = if (resultCode == RESULT_OK) data?.data else null
             if (destination != null && !html.isNullOrBlank()) {
                 saveAnswerToUri(destination, html)
+            }
+            return
+        }
+        if (requestCode == CAPTURE_CAMERA_IMAGE) {
+            val captured = pendingCameraCaptureUri
+            pendingCameraCaptureUri = null
+            if (resultCode == RESULT_OK && captured != null) {
+                stageImageUri(captured)
             }
             return
         }
@@ -3367,6 +3464,14 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                     val agentLoop = AgentToolLoop(
                         notesStore = notesStore,
                         documentVault = documentVault,
+                        userMemoryStore = userMemoryStore,
+                        sessionStore = sessionStore,
+                        artifactStore = artifactStore,
+                        deviceStatusProvider = { buildOfflineDeviceStatus() },
+                        jsEvaluator = { script -> OfflineJsSandbox.evaluate(this@MainActivity, script) },
+                        systemActionBridge = { type, details ->
+                            "Action prepared [$type]: $details (user confirmation card will appear if actionable)"
+                        },
                         maxIterations = 3,
                     )
                     var loopPrompt = activeBuild.prompt

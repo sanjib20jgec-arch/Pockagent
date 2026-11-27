@@ -60,14 +60,44 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
-import com.example.pocketagent.MainActivity.Companion.*
+import com.example.pocketagent.MainActivity.Companion.PICK_MODEL
+import com.example.pocketagent.MainActivity.Companion.PICK_TEXT_FILES
+import com.example.pocketagent.MainActivity.Companion.REQUEST_MIC
+import com.example.pocketagent.MainActivity.Companion.PICK_PDF
+import com.example.pocketagent.MainActivity.Companion.PICK_WHISPER_MODEL
+import com.example.pocketagent.MainActivity.Companion.PICK_WAV
+import com.example.pocketagent.MainActivity.Companion.CREATE_ANSWER_FILE
+import com.example.pocketagent.MainActivity.Companion.REQUEST_RECORD_MIC
+import com.example.pocketagent.MainActivity.Companion.PICK_IMAGE_OCR
+import com.example.pocketagent.MainActivity.Companion.CREATE_ARTIFACT_HTML
+import com.example.pocketagent.MainActivity.Companion.STATE_PENDING_ANSWER_SAVE
+import com.example.pocketagent.MainActivity.Companion.STATE_ACTIVE_SESSION_ID
+import com.example.pocketagent.MainActivity.Companion.PREFS_SETTINGS
+import com.example.pocketagent.MainActivity.Companion.PREF_BACKEND_MODE
+import com.example.pocketagent.MainActivity.Companion.PREF_MODEL_DISPLAY_NAME
+import com.example.pocketagent.MainActivity.Companion.PREF_GPU_LOADING_GUARD
+import com.example.pocketagent.MainActivity.Companion.PREF_ACTIVE_PROJECT_ID
+import com.example.pocketagent.MainActivity.Companion.PREF_TEMPERATURE_BITS
+import com.example.pocketagent.MainActivity.Companion.PREF_MAX_OUTPUT_TOKENS
+import com.example.pocketagent.MainActivity.Companion.PREF_MAX_CONTEXT_TOKENS
+import com.example.pocketagent.MainActivity.Companion.PREF_AGENT_MODE
+import com.example.pocketagent.MainActivity.Companion.PREF_DEEP_THINK
+import com.example.pocketagent.MainActivity.Companion.PREF_VISION_ENABLED
+import com.example.pocketagent.MainActivity.Companion.MAX_ATTACHMENT_CHARS
+import com.example.pocketagent.MainActivity.Companion.MAX_RESPONSE_TOKENS
+import com.example.pocketagent.MainActivity.Companion.GENERATION_TIMEOUT_SECONDS
+import com.example.pocketagent.MainActivity.Companion.EAGER_WARMUP_MAX_BYTES
+import com.example.pocketagent.MainActivity.Companion.WARM_CONTEXT_RESET_THRESHOLD
+import com.example.pocketagent.MainActivity.Companion.IDLE_ENGINE_UNLOAD_MS
+import com.example.pocketagent.MainActivity.Companion.SYSTEM_INSTRUCTION
+import com.example.pocketagent.MainActivity.Companion.WHITE
 
 
 fun MainActivity.updateRecordingBanner() {
-        if (!::recordingBanner.isInitialized) return
+        if (!this@updateRecordingBanner::recordingBanner.isInitialized) return
         val isRec = inAppAudioRecorder.isRecordingActive
         val targetVisibility = if (isRec || isDictating) View.VISIBLE else View.GONE
-        if (recordingBanner.visibility != targetVisibility && ::composerCard.isInitialized) {
+        if (recordingBanner.visibility != targetVisibility && this@updateRecordingBanner::composerCard.isInitialized) {
             TransitionManager.beginDelayedTransition(composerCard)
         }
         if (isRec || isDictating) {
@@ -209,8 +239,8 @@ fun MainActivity.resetRecordButton() {
     }
 
 fun MainActivity.updateWhisperActionButtons(enabled: Boolean) {
-        if (::transcribeWavButton.isInitialized) transcribeWavButton.isEnabled = enabled
-        if (::recordAudioButton.isInitialized) recordAudioButton.isEnabled = enabled
+        if (this@updateWhisperActionButtons::transcribeWavButton.isInitialized) transcribeWavButton.isEnabled = enabled
+        if (this@updateWhisperActionButtons::recordAudioButton.isInitialized) recordAudioButton.isEnabled = enabled
     }
 
 fun MainActivity.startDictation() {
@@ -268,7 +298,7 @@ fun MainActivity.startDictation() {
             }
             override fun onPartialResults(partialResults: Bundle?) {
                 val partial = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
-                if (partial.isNotBlank() && ::recordingBannerText.isInitialized) {
+                if (partial.isNotBlank() && this@startDictation::recordingBannerText.isInitialized) {
                     recordingBannerText.text = ComposerChromeHelper.formatDictationLivePreview(partial)
                 }
             }

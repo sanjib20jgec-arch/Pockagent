@@ -60,7 +60,37 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
-import com.example.pocketagent.MainActivity.Companion.*
+import com.example.pocketagent.MainActivity.Companion.PICK_MODEL
+import com.example.pocketagent.MainActivity.Companion.PICK_TEXT_FILES
+import com.example.pocketagent.MainActivity.Companion.REQUEST_MIC
+import com.example.pocketagent.MainActivity.Companion.PICK_PDF
+import com.example.pocketagent.MainActivity.Companion.PICK_WHISPER_MODEL
+import com.example.pocketagent.MainActivity.Companion.PICK_WAV
+import com.example.pocketagent.MainActivity.Companion.CREATE_ANSWER_FILE
+import com.example.pocketagent.MainActivity.Companion.REQUEST_RECORD_MIC
+import com.example.pocketagent.MainActivity.Companion.PICK_IMAGE_OCR
+import com.example.pocketagent.MainActivity.Companion.CREATE_ARTIFACT_HTML
+import com.example.pocketagent.MainActivity.Companion.STATE_PENDING_ANSWER_SAVE
+import com.example.pocketagent.MainActivity.Companion.STATE_ACTIVE_SESSION_ID
+import com.example.pocketagent.MainActivity.Companion.PREFS_SETTINGS
+import com.example.pocketagent.MainActivity.Companion.PREF_BACKEND_MODE
+import com.example.pocketagent.MainActivity.Companion.PREF_MODEL_DISPLAY_NAME
+import com.example.pocketagent.MainActivity.Companion.PREF_GPU_LOADING_GUARD
+import com.example.pocketagent.MainActivity.Companion.PREF_ACTIVE_PROJECT_ID
+import com.example.pocketagent.MainActivity.Companion.PREF_TEMPERATURE_BITS
+import com.example.pocketagent.MainActivity.Companion.PREF_MAX_OUTPUT_TOKENS
+import com.example.pocketagent.MainActivity.Companion.PREF_MAX_CONTEXT_TOKENS
+import com.example.pocketagent.MainActivity.Companion.PREF_AGENT_MODE
+import com.example.pocketagent.MainActivity.Companion.PREF_DEEP_THINK
+import com.example.pocketagent.MainActivity.Companion.PREF_VISION_ENABLED
+import com.example.pocketagent.MainActivity.Companion.MAX_ATTACHMENT_CHARS
+import com.example.pocketagent.MainActivity.Companion.MAX_RESPONSE_TOKENS
+import com.example.pocketagent.MainActivity.Companion.GENERATION_TIMEOUT_SECONDS
+import com.example.pocketagent.MainActivity.Companion.EAGER_WARMUP_MAX_BYTES
+import com.example.pocketagent.MainActivity.Companion.WARM_CONTEXT_RESET_THRESHOLD
+import com.example.pocketagent.MainActivity.Companion.IDLE_ENGINE_UNLOAD_MS
+import com.example.pocketagent.MainActivity.Companion.SYSTEM_INSTRUCTION
+import com.example.pocketagent.MainActivity.Companion.WHITE
 
 
 fun MainActivity.showVaultChooserDialog() {
@@ -108,7 +138,7 @@ fun MainActivity.showVaultChooserDialog() {
                 }
             }
             val iconView = ImageView(this).apply {
-                setImageDrawable(tintedVectorDrawable(this@MainActivity, iconRes, palette.teal))
+                setImageDrawable(tintedVectorDrawable(this@showVaultChooserDialog, iconRes, palette.teal))
                 scaleType = ImageView.ScaleType.CENTER_INSIDE
                 importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             }
@@ -320,12 +350,12 @@ fun MainActivity.buildLockOverlay(): LinearLayout {
     }
 
 fun MainActivity.updateLockOverlay() {
-        if (!::lockOverlay.isInitialized) return
+        if (!this@updateLockOverlay::lockOverlay.isInitialized) return
         lockOverlay.visibility = if (biometricLockManager.isAppLocked) View.VISIBLE else View.GONE
     }
 
 fun MainActivity.promptBiometricUnlock() {
-        if (!::lockOverlay.isInitialized) return
+        if (!this@promptBiometricUnlock::lockOverlay.isInitialized) return
         if (!biometricLockManager.isLockEnabled) {
             biometricLockManager.unlock()
             updateLockOverlay()
@@ -427,7 +457,7 @@ fun MainActivity.saveAnswerToUri(uri: Uri, answer: String) {
 
 fun MainActivity.copyAnswerText(text: String) {
         if (text.isBlank()) return
-        (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager)
+        (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
             .setPrimaryClip(ClipData.newPlainText("PocketAgent answer", text))
         Toast.makeText(this, "Answer copied", Toast.LENGTH_SHORT).show()
     }

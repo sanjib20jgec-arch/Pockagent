@@ -60,7 +60,37 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
-import com.example.pocketagent.MainActivity.Companion.*
+import com.example.pocketagent.MainActivity.Companion.PICK_MODEL
+import com.example.pocketagent.MainActivity.Companion.PICK_TEXT_FILES
+import com.example.pocketagent.MainActivity.Companion.REQUEST_MIC
+import com.example.pocketagent.MainActivity.Companion.PICK_PDF
+import com.example.pocketagent.MainActivity.Companion.PICK_WHISPER_MODEL
+import com.example.pocketagent.MainActivity.Companion.PICK_WAV
+import com.example.pocketagent.MainActivity.Companion.CREATE_ANSWER_FILE
+import com.example.pocketagent.MainActivity.Companion.REQUEST_RECORD_MIC
+import com.example.pocketagent.MainActivity.Companion.PICK_IMAGE_OCR
+import com.example.pocketagent.MainActivity.Companion.CREATE_ARTIFACT_HTML
+import com.example.pocketagent.MainActivity.Companion.STATE_PENDING_ANSWER_SAVE
+import com.example.pocketagent.MainActivity.Companion.STATE_ACTIVE_SESSION_ID
+import com.example.pocketagent.MainActivity.Companion.PREFS_SETTINGS
+import com.example.pocketagent.MainActivity.Companion.PREF_BACKEND_MODE
+import com.example.pocketagent.MainActivity.Companion.PREF_MODEL_DISPLAY_NAME
+import com.example.pocketagent.MainActivity.Companion.PREF_GPU_LOADING_GUARD
+import com.example.pocketagent.MainActivity.Companion.PREF_ACTIVE_PROJECT_ID
+import com.example.pocketagent.MainActivity.Companion.PREF_TEMPERATURE_BITS
+import com.example.pocketagent.MainActivity.Companion.PREF_MAX_OUTPUT_TOKENS
+import com.example.pocketagent.MainActivity.Companion.PREF_MAX_CONTEXT_TOKENS
+import com.example.pocketagent.MainActivity.Companion.PREF_AGENT_MODE
+import com.example.pocketagent.MainActivity.Companion.PREF_DEEP_THINK
+import com.example.pocketagent.MainActivity.Companion.PREF_VISION_ENABLED
+import com.example.pocketagent.MainActivity.Companion.MAX_ATTACHMENT_CHARS
+import com.example.pocketagent.MainActivity.Companion.MAX_RESPONSE_TOKENS
+import com.example.pocketagent.MainActivity.Companion.GENERATION_TIMEOUT_SECONDS
+import com.example.pocketagent.MainActivity.Companion.EAGER_WARMUP_MAX_BYTES
+import com.example.pocketagent.MainActivity.Companion.WARM_CONTEXT_RESET_THRESHOLD
+import com.example.pocketagent.MainActivity.Companion.IDLE_ENGINE_UNLOAD_MS
+import com.example.pocketagent.MainActivity.Companion.SYSTEM_INSTRUCTION
+import com.example.pocketagent.MainActivity.Companion.WHITE
 
 
 fun MainActivity.buildInterface() {
@@ -268,9 +298,9 @@ fun MainActivity.buildInterface() {
             }
             setOnTouchListener { _, event ->
                 if (event.actionMasked == MotionEvent.ACTION_DOWN || event.actionMasked == MotionEvent.ACTION_MOVE) {
-                    val hasOpenControls = (::taskInput.isInitialized && taskInput.hasFocus()) ||
+                    val hasOpenControls = (this@buildInterface::taskInput.isInitialized && taskInput.hasFocus()) ||
                         isToolsTrayOpen ||
-                        (::slashPopupContainer.isInitialized && slashPopupContainer.visibility == View.VISIBLE)
+                        (this@buildInterface::slashPopupContainer.isInitialized && slashPopupContainer.visibility == View.VISIBLE)
                     if (hasOpenControls) {
                         dismissComposerOverlays(hideIme = true)
                     }
@@ -643,7 +673,7 @@ fun MainActivity.buildInterface() {
             setOnFocusChangeListener { _, hasFocus ->
                 if (hasFocus && isToolsTrayOpen) {
                     toggleToolsTray(force = false)
-                } else if (!hasFocus && ::slashPopupContainer.isInitialized && slashPopupContainer.visibility == View.VISIBLE) {
+                } else if (!hasFocus && this@buildInterface::slashPopupContainer.isInitialized && slashPopupContainer.visibility == View.VISIBLE) {
                     slashPopupContainer.visibility = View.GONE
                 }
             }
@@ -759,12 +789,12 @@ fun MainActivity.applyImeInsets(rootLayout: LinearLayout) {
 
 fun MainActivity.toggleToolsTray(force: Boolean) {
         val open = if (force) true else !isToolsTrayOpen
-        if (::composerCard.isInitialized && isToolsTrayOpen != open) {
+        if (this@toggleToolsTray::composerCard.isInitialized && isToolsTrayOpen != open) {
             TransitionManager.beginDelayedTransition(composerCard)
         }
         isToolsTrayOpen = open
         if (open) {
-            if (::slashPopupContainer.isInitialized) slashPopupContainer.visibility = View.GONE
+            if (this@toggleToolsTray::slashPopupContainer.isInitialized) slashPopupContainer.visibility = View.GONE
             hideKeyboard(clearInputFocus = true)
         }
         toolsTray.visibility = if (open) View.VISIBLE else View.GONE
@@ -792,24 +822,24 @@ fun MainActivity.toggleToolsTray(force: Boolean) {
      */
 
 fun MainActivity.syncComposerState() {
-        if (!::heroCard.isInitialized) return
-        val hasThreadViews = ::chatThreadContainer.isInitialized && chatThreadContainer.childCount > 0
+        if (!this@syncComposerState::heroCard.isInitialized) return
+        val hasThreadViews = this@syncComposerState::chatThreadContainer.isInitialized && chatThreadContainer.childCount > 0
         val hasImage = !attachedImagePath.isNullOrBlank()
         val hasConversation = hasThreadViews ||
             taskInput.text.isNotBlank() || attachedContext.isNotBlank() || hasImage ||
             lastPrompt.isNotBlank() || currentSession?.messages?.isNotEmpty() == true
         val welcomeVisibility = if (hasConversation) View.GONE else View.VISIBLE
-        if (heroCard.visibility != welcomeVisibility && ::chatCanvas.isInitialized) {
+        if (heroCard.visibility != welcomeVisibility && this@syncComposerState::chatCanvas.isInitialized) {
             TransitionManager.beginDelayedTransition(chatCanvas)
         }
         heroCard.visibility = welcomeVisibility
         quickChips.visibility = welcomeVisibility
 
-        if (::heroModelCtaButton.isInitialized) {
+        if (this@syncComposerState::heroModelCtaButton.isInitialized) {
             val hasModel = activeModelFile().let { it.exists() && it.length() > 0L }
             heroModelCtaButton.visibility = if (hasModel) View.GONE else View.VISIBLE
         }
-        if (::attachImageButton.isInitialized) {
+        if (this@syncComposerState::attachImageButton.isInitialized) {
             attachImageButton.visibility = if (isVisionModeEnabled) View.VISIBLE else View.GONE
         }
 
@@ -818,9 +848,9 @@ fun MainActivity.syncComposerState() {
             attachedImageName?.let { add("Image: $it") }
         }
         val hasAttachment = attachedContext.isNotBlank() || hasImage
-        if (::attachmentChipContainer.isInitialized) {
+        if (this@syncComposerState::attachmentChipContainer.isInitialized) {
             val nextChipVisibility = if (hasAttachment) View.VISIBLE else View.GONE
-            if (attachmentChipContainer.visibility != nextChipVisibility && ::composerCard.isInitialized) {
+            if (attachmentChipContainer.visibility != nextChipVisibility && this@syncComposerState::composerCard.isInitialized) {
                 TransitionManager.beginDelayedTransition(composerCard)
             }
             if (hasAttachment) {
@@ -847,7 +877,7 @@ fun MainActivity.syncComposerState() {
                 attachmentChipContainer.visibility = View.GONE
             }
         }
-        if (!hasAttachment && ::attachmentCard.isInitialized) {
+        if (!hasAttachment && this@syncComposerState::attachmentCard.isInitialized) {
             attachmentCard.visibility = View.GONE
         }
 
@@ -857,13 +887,13 @@ fun MainActivity.syncComposerState() {
             hasAttachment -> "Show attachment and audio tools (attachment active)"
             else -> "Show attachment and audio tools"
         }
-        if (::recordAudioButton.isInitialized) {
+        if (this@syncComposerState::recordAudioButton.isInitialized) {
             recordAudioButton.isEnabled = whisperContext != 0L && !isWhisperTranscribing
         }
-        if (::transcribeWavButton.isInitialized) {
+        if (this@syncComposerState::transcribeWavButton.isInitialized) {
             transcribeWavButton.isEnabled = whisperContext != 0L && !isWhisperTranscribing
         }
-        if (::suggestButton.isInitialized) {
+        if (this@syncComposerState::suggestButton.isInitialized) {
             val canSend = (taskInput.text.isNotBlank() || attachedContext.isNotBlank() || !attachedImagePath.isNullOrBlank()) &&
                 !isWhisperTranscribing && !transcriptReviewPending
             suggestButton.isEnabled = (isGeneratingUi && !isStoppingUi) || (!isGeneratingUi && canSend)
@@ -876,8 +906,8 @@ fun MainActivity.syncComposerState() {
     /** Updates the floating Jump-to-Bottom button based on scroll position and thread content. */
 
 fun MainActivity.updateJumpToBottomVisibility() {
-        if (!::jumpToBottomButton.isInitialized || !::chatScroll.isInitialized) return
-        val hasContent = ::chatThreadContainer.isInitialized && chatThreadContainer.childCount > 0
+        if (!this@updateJumpToBottomVisibility::jumpToBottomButton.isInitialized || !this@updateJumpToBottomVisibility::chatScroll.isInitialized) return
+        val hasContent = this@updateJumpToBottomVisibility::chatThreadContainer.isInitialized && chatThreadContainer.childCount > 0
         val show = hasContent && isUserReadingUpwards && chatScroll.canScrollVertically(1)
         if (show == isJumpToBottomVisible) return
         isJumpToBottomVisible = show
@@ -927,10 +957,10 @@ fun MainActivity.animateCardEntrance(view: View) {
     /** Updates the visible recording banner and pulsing indicator inside the composer card. */
 
 fun MainActivity.hideKeyboard(clearInputFocus: Boolean = true) {
-        if (::taskInput.isInitialized && clearInputFocus) {
+        if (this@hideKeyboard::taskInput.isInitialized && clearInputFocus) {
             taskInput.clearFocus()
         }
-        val target = currentFocus ?: if (::taskInput.isInitialized) taskInput else window?.decorView
+        val target = currentFocus ?: if (this@hideKeyboard::taskInput.isInitialized) taskInput else window?.decorView
         val imm = getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager
         if (target != null) {
             imm?.hideSoftInputFromWindow(target.windowToken, 0)
@@ -940,7 +970,7 @@ fun MainActivity.hideKeyboard(clearInputFocus: Boolean = true) {
     /** Dismisses open composer popups (slash menu, tools tray) and optionally hides the keyboard. */
 
 fun MainActivity.dismissComposerOverlays(hideIme: Boolean = false) {
-        if (::slashPopupContainer.isInitialized && slashPopupContainer.visibility == View.VISIBLE) {
+        if (this@dismissComposerOverlays::slashPopupContainer.isInitialized && slashPopupContainer.visibility == View.VISIBLE) {
             slashPopupContainer.visibility = View.GONE
         }
         if (isToolsTrayOpen) {
@@ -954,7 +984,7 @@ fun MainActivity.dismissComposerOverlays(hideIme: Boolean = false) {
     /** Scrolls the chat canvas to the newest content unless the reader scrolled up, without stealing focus. */
 
 fun MainActivity.scrollChatToBottom(force: Boolean = false) {
-        if (!::chatScroll.isInitialized || !::chatCanvas.isInitialized) return
+        if (!this@scrollChatToBottom::chatScroll.isInitialized || !this@scrollChatToBottom::chatCanvas.isInitialized) return
         if (!force && isUserReadingUpwards) return
         chatScroll.post {
             if (!force && isUserReadingUpwards) return@post
@@ -970,7 +1000,7 @@ fun MainActivity.scrollChatToBottom(force: Boolean = false) {
     }
 
 fun MainActivity.updateSlashSuggestions(currentText: String) {
-        if (!::slashPopupContainer.isInitialized) return
+        if (!this@updateSlashSuggestions::slashPopupContainer.isInitialized) return
         val trimmed = currentText.trimStart()
         val exactMatch = SlashCommandDetector.detectCommand(trimmed)
         val hasTrailingArgs = exactMatch != null && trimmed.length > exactMatch.trigger.length
@@ -1042,7 +1072,7 @@ fun MainActivity.updateWorkspaceSubtitle() {
         val docCount = runCatching { documentVault.loadAll().size }.getOrDefault(0)
         val artifactCount = runCatching { artifactStore.loadAll().size }.getOrDefault(0)
 
-        if (::workspaceSubtitleView.isInitialized) {
+        if (this@updateWorkspaceSubtitle::workspaceSubtitleView.isInitialized) {
             val parts = buildList {
                 proj?.let { add(it.name) }
                 if (isAgentModeEnabled) add("Agent")
@@ -1059,10 +1089,10 @@ fun MainActivity.updateWorkspaceSubtitle() {
                 workspaceSubtitleView.visibility = View.VISIBLE
             }
         }
-        if (::agentModeButton.isInitialized) {
+        if (this@updateWorkspaceSubtitle::agentModeButton.isInitialized) {
             agentModeButton.text = if (isAgentModeEnabled) "Agent Tools: ON" else "Agent Tools: OFF"
         }
-        if (::quickModeSummaryChip.isInitialized) {
+        if (this@updateWorkspaceSubtitle::quickModeSummaryChip.isInitialized) {
             val labels = ComposerChromeHelper.formatQuickModeLabels(
                 projectName = proj?.name,
                 isAgentEnabled = isAgentModeEnabled,
@@ -1089,7 +1119,7 @@ fun MainActivity.updateWorkspaceSubtitle() {
             quickTuningChip.text = labels.tuningChipLabel
             ComposerChromeViews.styleQuickModePill(quickTuningChip, palette, isVisionModeEnabled)
         }
-        if (::contextContinuityBanner.isInitialized) {
+        if (this@updateWorkspaceSubtitle::contextContinuityBanner.isInitialized) {
             if (ContextContinuityHelper.shouldSuggestContinue(ctxUsed, ctxMax)) {
                 contextContinuityText.text = ContextContinuityHelper.formatContextAlert(ctxUsed, ctxMax)
                 contextContinuityBanner.visibility = View.VISIBLE
@@ -1245,8 +1275,8 @@ fun MainActivity.showModeQuickSheet() {
                 )
                 isClickable = true
                 isFocusable = true
-                val iconView = ImageView(this@MainActivity).apply {
-                    setImageDrawable(tintedVectorDrawable(this@MainActivity, opt.iconRes, if (opt.active) palette.teal else palette.muted))
+                val iconView = ImageView(this@showModeQuickSheet).apply {
+                    setImageDrawable(tintedVectorDrawable(this@showModeQuickSheet, opt.iconRes, if (opt.active) palette.teal else palette.muted))
                     scaleType = ImageView.ScaleType.CENTER_INSIDE
                     importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
                 }
@@ -1257,8 +1287,8 @@ fun MainActivity.showModeQuickSheet() {
                 }
                 addView(col, LinearLayout.LayoutParams(0, -2, 1f))
                 if (opt.active) {
-                    val checkView = ImageView(this@MainActivity).apply {
-                        setImageDrawable(tintedVectorDrawable(this@MainActivity, R.drawable.ic_check, palette.teal))
+                    val checkView = ImageView(this@showModeQuickSheet).apply {
+                        setImageDrawable(tintedVectorDrawable(this@showModeQuickSheet, R.drawable.ic_check, palette.teal))
                         scaleType = ImageView.ScaleType.CENTER_INSIDE
                         importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
                     }
@@ -1281,7 +1311,7 @@ fun MainActivity.showModeQuickSheet() {
     }
 
 fun MainActivity.openSlashCommandPicker() {
-        if (!::slashPopupContainer.isInitialized) return
+        if (!this@openSlashCommandPicker::slashPopupContainer.isInitialized) return
         if (slashPopupContainer.visibility == View.VISIBLE) {
             slashPopupContainer.visibility = View.GONE
             return

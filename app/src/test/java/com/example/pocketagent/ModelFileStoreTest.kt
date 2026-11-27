@@ -31,6 +31,24 @@ class ModelFileStoreTest {
     }
 
     @Test
+    fun checksumWriteFailurePreservesExistingModelAndSidecar() {
+        val store = ModelFileStore(temporaryFolder.root, maxBytes = 100, reservedFreeSpaceBytes = 0, minBytes = 1L)
+        val oldBytes = byteArrayOf(1, 2, 3)
+        store.modelFile.writeBytes(oldBytes)
+        val oldHash = ModelIntegrity.sha256Hex(oldBytes)
+        ModelIntegrity.sidecarFor(store.modelFile).writeText("$oldHash\n")
+        // A directory at the pending-sidecar path forces the checksum write to fail.
+        java.io.File(temporaryFolder.root, "model.litertlm.sha256.part").mkdirs()
+
+        assertThrows(IOException::class.java) {
+            store.importModel(ByteArrayInputStream(byteArrayOf(0x50, 0x4B, 0x03, 0x04)))
+        }
+
+        assertArrayEquals(oldBytes, store.modelFile.readBytes())
+        assertEquals(oldHash, store.storedSha256())
+    }
+
+    @Test
     fun emptyInputDoesNotReplaceExistingModel() {
         val store = ModelFileStore(temporaryFolder.root, maxBytes = 100, reservedFreeSpaceBytes = 0, minBytes = 1L)
         store.modelFile.writeBytes(byteArrayOf(1, 2, 3))

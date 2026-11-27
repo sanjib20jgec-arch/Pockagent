@@ -239,9 +239,9 @@ class MainViewModel internal constructor(
     private val cacheDir: File,
     private val modelFileStore: ModelFileStore = ModelFileStore(filesDir),
     private val whisperModelStore: WhisperModelStore = WhisperModelStore(filesDir),
-    private val sessionStore: SessionStore = SessionStore(SessionStore.defaultDir(filesDir)),
-    private val userMemoryStore: UserMemoryStore = UserMemoryStore(UserMemoryStore.defaultDir(filesDir)),
-    private val notesStore: PersonalNotesStore = PersonalNotesStore(PersonalNotesStore.defaultDir(filesDir)),
+    val sessionStore: SessionStore = SessionStore(SessionStore.defaultDir(filesDir)),
+    val userMemoryStore: UserMemoryStore = UserMemoryStore(UserMemoryStore.defaultDir(filesDir)),
+    val notesStore: PersonalNotesStore = PersonalNotesStore(PersonalNotesStore.defaultDir(filesDir)),
     private val llmRunner: LlmInferenceRunner = DefaultLlmInferenceRunner(filesDir, cacheDir),
     private val whisperTranscriber: WhisperTranscriber = DefaultWhisperTranscriber(),
     private val ttsSpeaker: TtsSpeaker = AndroidTtsSpeaker({ null }, { false }),
@@ -326,7 +326,7 @@ class MainViewModel internal constructor(
     /**
      * Checks for already stored models on startup and restores ready states.
      */
-    fun initModels() {
+    fun initModels(restoreWhisper: Boolean = true) {
         refreshSessions()
         refreshMemories()
         refreshNotes()
@@ -343,7 +343,7 @@ class MainViewModel internal constructor(
         }
 
         val whisperFile = whisperModelStore.modelFile
-        if (whisperFile.isFile) {
+        if (restoreWhisper && whisperFile.isFile) {
             updateState { it.withWhisperLoading("Loading saved local Whisper model…") }
             workerExecutor.execute {
                 try {

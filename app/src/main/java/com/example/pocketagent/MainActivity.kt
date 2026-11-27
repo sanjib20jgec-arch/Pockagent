@@ -188,9 +188,12 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     private var generationTimerRunnable: Runnable? = null
     private var idleUnloadRunnable: Runnable? = null
     private var pendingAnswerToSave: String? = null
-    private val sessionStore by lazy { SessionStore(SessionStore.defaultDir(filesDir)) }
-    private val userMemoryStore by lazy { UserMemoryStore(UserMemoryStore.defaultDir(filesDir)) }
-    private val notesStore by lazy { PersonalNotesStore(PersonalNotesStore.defaultDir(filesDir)) }
+    private val viewModel by lazy {
+        MainViewModel(filesDir, cacheDir, mainDispatcher = { mainHandler.post(it) })
+    }
+    private val sessionStore get() = viewModel.sessionStore
+    private val userMemoryStore get() = viewModel.userMemoryStore
+    private val notesStore get() = viewModel.notesStore
     private val projectStore by lazy { ProjectStore(ProjectStore.defaultDir(filesDir)) }
     private val modelLibraryStore by lazy { ModelLibraryStore(ModelLibraryStore.defaultDir(filesDir)) }
     private val artifactStore by lazy { ArtifactStore(ArtifactStore.defaultDir(filesDir)) }
@@ -324,6 +327,8 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
 
         cleanupStagedInputFiles()
         buildInterface()
+        viewModel.addObserver { state -> applyViewModelState(state) }
+        viewModel.initModels(restoreWhisper = false)
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 when {
@@ -1083,7 +1088,9 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
                 override fun afterTextChanged(s: android.text.Editable?) {
                     isUserReadingUpwards = false
-                    updateSlashSuggestions(s?.toString().orEmpty())
+                    val input = s?.toString().orEmpty()
+                    viewModel.onTaskInputChanged(input)
+                    updateSlashSuggestions(input)
                     syncComposerState()
                 }
             })
@@ -1611,6 +1618,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
             else -> if (engineManager.preference == BackendPreference.CPU_ONLY) "Standby · CPU" else "Standby · GPU"
         }
         val activeProjName = activeProjectId?.let { projectStore.getProject(it)?.name } ?: "Default Workspace"
+        viewModel.refreshSessions()
         val sessions = runCatching { sessionStore.listSessions() }.getOrDefault(emptyList())
         val docCount = runCatching { documentVault.loadAll().size }.getOrDefault(0)
         val artCount = runCatching { artifactStore.loadAll().size }.getOrDefault(0)
@@ -2852,6 +2860,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         if (!isGeneratingUi) return
         isGeneratingCancelled.set(true)
         isStoppingUi = true
+        viewModel.stopGeneration()
         streamingRenderer.cancel()
         engineManager.cancelActiveConversation()
         suggestButton.isEnabled = false
@@ -3658,6 +3667,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun showMemoryCenterDialog() {
+        viewModel.refreshMemories()
         WorkspaceDialogs.showMemoryCenterDialog(
             activity = this,
             palette = palette,
@@ -3668,6 +3678,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun showNotesManagerDialog() {
+        viewModel.refreshNotes()
         WorkspaceDialogs.showNotesManagerDialog(this, palette, notesStore)
     }
 
@@ -4156,6 +4167,13 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                     updateStatus("Could not load saved Whisper model: ${e.message ?: "unsupported model"}")
                 }
             }
+        }
+    }
+
+    /** Mirrors only the composer text owned by the ViewModel; generation UI remains local until Task 8. */
+    private fun applyViewModelState(state: MainUiState) {
+        if (::taskInput.isInitialized && taskInput.text.toString() != state.taskInput) {
+            taskInput.setText(state.taskInput)
         }
     }
 

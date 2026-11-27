@@ -40,3 +40,5 @@
 
 # Keep InferenceForegroundService entry point
 -keep class com.example.pocketagent.InferenceForegroundService { *; }
+
+-dontwarn com.google.zxing.**

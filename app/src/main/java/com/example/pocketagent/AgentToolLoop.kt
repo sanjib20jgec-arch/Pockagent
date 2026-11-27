@@ -36,6 +36,9 @@ import kotlinx.coroutines.withTimeout
  *   TOOL_CALL: trigger_system_action(<type>|<details>)
  *   TOOL_CALL: read_clipboard()
  *   TOOL_CALL: write_clipboard(<text>)
+ *   TOOL_CALL: toggle_flashlight(<on|off|toggle|sos>)
+ *   TOOL_CALL: read_sensors(<all|light|pressure|accelerometer|magnetic|proximity>)
+ *   TOOL_CALL: get_location()
  *
  * 100% offline, zero network calls, zero telemetry.
  */
@@ -52,6 +55,9 @@ open class AgentToolLoop(
     private val systemActionBridge: ((String, String) -> String)? = null,
     private val clipboardReader: (() -> String)? = null,
     private val clipboardWriter: ((String) -> String)? = null,
+    private val flashlightController: ((String) -> String)? = null,
+    private val sensorReader: ((String) -> String)? = null,
+    private val locationReader: (() -> String)? = null,
 ) {
 
     companion object {
@@ -75,6 +81,9 @@ open class AgentToolLoop(
                 "- TOOL_CALL: trigger_system_action(<type>|<details>)\n" +
                 "- TOOL_CALL: read_clipboard()\n" +
                 "- TOOL_CALL: write_clipboard(<text>)\n" +
+                "- TOOL_CALL: toggle_flashlight(<on|off|toggle|sos>)\n" +
+                "- TOOL_CALL: read_sensors(<all|light|pressure|accelerometer|magnetic|proximity>)\n" +
+                "- TOOL_CALL: get_location()\n" +
                 "If a calculation, local lookup, artifact operation, or offline tool helps answer accurately, " +
                 "emit one or more exact TOOL_CALL lines cleanly and wait for [TOOL_RESULT: ...]. " +
                 "Once you have what you need, write the final answer without TOOL_CALL lines."
@@ -371,6 +380,17 @@ open class AgentToolLoop(
             "write_clipboard" -> {
                 if (input.isBlank()) "Clipboard text cannot be blank."
                 else clipboardWriter?.invoke(input) ?: "Clipboard write unavailable."
+            }
+            "toggle_flashlight" -> {
+                val mode = input.ifBlank { "toggle" }
+                flashlightController?.invoke(mode) ?: "Flashlight unavailable."
+            }
+            "read_sensors" -> {
+                val mode = input.ifBlank { "all" }
+                sensorReader?.invoke(mode) ?: "Sensors unavailable."
+            }
+            "get_location" -> {
+                locationReader?.invoke() ?: "Location unavailable."
             }
             else -> "Unknown tool: $toolName"
         }

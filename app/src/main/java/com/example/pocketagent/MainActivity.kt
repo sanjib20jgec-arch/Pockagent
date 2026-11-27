@@ -196,6 +196,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     private val modelLibraryStore by lazy { ModelLibraryStore(ModelLibraryStore.defaultDir(filesDir)) }
     private val artifactStore by lazy { ArtifactStore(ArtifactStore.defaultDir(filesDir)) }
     private val documentVault by lazy { DocumentVault(DocumentVault.defaultDir(filesDir)) }
+    private val localFtsIndex by lazy { LocalFtsIndex(this) }
     private val slideDrawer by lazy { ClaudeSlideDrawer(this) }
     private var activeProjectId: String? = null
     private var isAgentModeEnabled: Boolean = false
@@ -376,6 +377,26 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun handleWidgetLaunchIntent(launchIntent: Intent?) {
+        val nfcLaunch = NfcPromptBridge.extractFromIntent(launchIntent)
+        if (nfcLaunch != null) {
+            nfcLaunch.projectId?.let { pid ->
+                activeProjectId = pid
+                settingsPrefs.edit().putString(PREF_ACTIVE_PROJECT_ID, pid).apply()
+                engineManager.invalidateConversation("nfc project launch")
+                updateWorkspaceSubtitle()
+            }
+            nfcLaunch.prompt?.let { prompt ->
+                mainHandler.post {
+                    if (!isDestroyed && ::taskInput.isInitialized) {
+                        taskInput.setText(prompt)
+                        taskInput.setSelection(prompt.length)
+                        syncComposerState()
+                        updateStatus("Loaded prompt from NFC tag.")
+                    }
+                }
+            }
+            launchIntent?.data = null
+        }
         val isAssist = launchIntent?.action == Intent.ACTION_ASSIST
         val isTileVoice = launchIntent?.getStringExtra(PocketAgentTileService.EXTRA_QUICK_ACTION) == PocketAgentTileService.ACTION_VOICE
         val isWidgetVoice = launchIntent?.getBooleanExtra(PocketAgentWidget.EXTRA_WIDGET_VOICE, false) == true
@@ -636,7 +657,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         }
         val trustBadge = styledText(
             context = this,
-            text = "v1.9 · 100% Offline",
+            text = "v2.0 · 100% Offline",
             sizeSp = 11.5f,
             color = palette.teal,
             bold = true,
@@ -1754,7 +1775,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 artifactCount = artCount,
                 activeModelLabel = modelLabel,
                 activeBackendLabel = backendLabel,
-                appVersionLabel = "v1.9 · Offline",
+                appVersionLabel = "v2.0 · Offline",
             ),
             palette = palette,
             callbacks = DrawerCallbacks(
@@ -2551,9 +2572,22 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 attachedImagePath?.let { old -> try { File(old).delete() } catch (_: Exception) {} }
                 attachedImagePath = outFile.absolutePath
                 attachedImageName = displayName
+                val qrPayload = OfflineQrDecoder.decodeFromFile(outFile.absolutePath)
+                if (qrPayload != null) {
+                    val qrLine = "[Decoded QR (${qrPayload.type}): ${qrPayload.summary}]"
+                    attachedContext = if (attachedContext.isBlank()) qrLine else "$attachedContext\n\n$qrLine".take(MAX_ATTACHMENT_CHARS)
+                    attachedNames.add("QR (${qrPayload.type})")
+                }
                 mainHandler.post {
+                    if (qrPayload != null) {
+                        showAttachmentPreview(attachedContext)
+                        attachmentCard.visibility = View.VISIBLE
+                    }
                     syncComposerState()
-                    updateStatus("Image attached ($displayName). Ask your question using an Omni model.")
+                    updateStatus(
+                        if (qrPayload != null) "Image + QR (${qrPayload.type}) attached: ${qrPayload.summary.take(60)}"
+                        else "Image attached ($displayName). Ask your question using an Omni model."
+                    )
                 }
             } catch (e: Exception) {
                 mainHandler.post {
@@ -3568,6 +3602,9 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                             latch.await(1_500L, java.util.concurrent.TimeUnit.MILLISECONDS)
                             writeMsg
                         },
+                        flashlightController = { mode -> PhoneEquipmentTools.toggleFlashlight(this@MainActivity, mode) },
+                        sensorReader = { mode -> PhoneEquipmentTools.readSensors(this@MainActivity, mode) },
+                        locationReader = { PhoneEquipmentTools.getOfflineLocation(this@MainActivity) },
                         maxIterations = 3,
                     )
                     var loopPrompt = activeBuild.prompt

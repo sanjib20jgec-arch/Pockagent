@@ -2306,7 +2306,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                     PcmWavReader.read(staged)
                 } else {
                     mainHandler.post { updateStatus("Decoding audio locally via hardware codec…") }
-                    HardwareAudioDecoder.decodeTo16kMonoFloat(this@MainActivity, uri)
+                    decodeTo16kMonoFloat(this@MainActivity, uri)
                 }
                 val context = whisperContext
                 require(context != 0L) { "Select a Whisper model before transcribing audio." }

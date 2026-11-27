@@ -76,7 +76,7 @@ class SmokeTests {
             scenario.onActivity { activity ->
                 activity.showSaveArtifactDialog(
                     code = "<p>offline draft</p>",
-                    language = null,
+                    language = normalizeArtifactLanguage(null),
                 )
             }
             waitForText("Save to Artifact Vault")

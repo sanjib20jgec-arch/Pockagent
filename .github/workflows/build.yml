@@ -196,7 +196,15 @@ jobs:
           profile: pixel_xl
           disable-animations: true
           disable-linux-hw-accel: false
-          script: ./gradlew --no-daemon --stacktrace --console=plain connectedDebugAndroidTest
+          script: |
+            mkdir -p app/build/reports
+            if ./gradlew --no-daemon --stacktrace --console=plain connectedDebugAndroidTest > app/build/reports/connected-test.log 2>&1; then
+              cat app/build/reports/connected-test.log
+            else
+              cat app/build/reports/connected-test.log
+              adb logcat -d > app/build/reports/logcat.txt || true
+              exit 1
+            fi
 
       - name: Upload device reports
         if: always()

@@ -962,7 +962,7 @@ fun MainActivity.hideKeyboard(clearInputFocus: Boolean = true) {
             taskInput.clearFocus()
         }
         val target = currentFocus ?: if (isTaskInputInitialized()) taskInput else window?.decorView
-        val imm = getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager
+        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
         if (target != null) {
             imm?.hideSoftInputFromWindow(target.windowToken, 0)
         }

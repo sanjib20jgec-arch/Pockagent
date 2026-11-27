@@ -207,6 +207,24 @@ jobs:
             mkdir -p app/build/reports
             ./gradlew --no-daemon --stacktrace --console=plain connectedDebugAndroidTest > app/build/reports/connected-test.log 2>&1; STATUS=$?; cat app/build/reports/connected-test.log; adb logcat -d > app/build/reports/logcat.txt || true; exit "$STATUS"
 
+      - name: Reject false-green device runs
+        if: always()
+        run: |
+          log=app/build/reports/connected-test.log
+          if [ ! -f "$log" ]; then
+            echo "::error::connected-test.log missing; cannot prove tests ran"
+            exit 1
+          fi
+          if grep -qE 'Starting 0 tests|Finished 0 tests' "$log"; then
+            echo "::error::emulator discovered zero tests (legacy runner regression)"
+            exit 1
+          fi
+          if ! grep -qE '^Finished [1-9][0-9]* tests' "$log"; then
+            echo "::error::no completed device test run found in connected-test.log"
+            exit 1
+          fi
+          grep -E '^(Starting|Finished) [0-9]+ tests' "$log"
+
       - name: Upload device reports
         if: always()
         uses: actions/upload-artifact@v4

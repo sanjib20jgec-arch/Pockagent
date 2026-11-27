@@ -3354,7 +3354,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         val attachmentSnapshot = attachedContext
         val imageSnapshot = attachedImagePath
         InferenceForegroundService.onStopRequested = {
-            mainHandler.post { if (!isDestroyed) cancelGeneration() }
+            mainHandler.post { if (!isDestroyed) stopActiveGeneration() }
         }
         InferenceForegroundService.startOrUpdate(this, "Generating offline response…")
         inferenceExecutor.execute {

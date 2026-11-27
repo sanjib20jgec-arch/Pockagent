@@ -13,7 +13,6 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
-import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 
 class InferenceForegroundService : Service() {
@@ -37,8 +36,7 @@ class InferenceForegroundService : Service() {
                 ensureNotificationChannel()
                 val notification = buildNotification(statusText)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    ServiceCompat.startForeground(
-                        this,
+                    startForeground(
                         NOTIFICATION_ID,
                         notification,
                         ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,

@@ -1,0 +1,4 @@
+# PocketAgent detekt configuration.
+# app/build.gradle.kts sets buildUponDefaultConfig = true, so the standard detekt
+# rule set applies unless a rule is explicitly overridden here. Findings are
+# resolved in source rather than baselined away.

@@ -5,6 +5,7 @@ plugins {
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.serialization")
     id("io.github.takahirom.roborazzi")
+    id("io.gitlab.arturbosch.detekt")
 }
 
 val robolectricInstrumentedVersion = "15-robolectric-14663667-2-i7"
@@ -75,6 +76,13 @@ kotlin {
 }
 roborazzi {
     outputDir.set(file("src/screenshots"))
+}
+detekt {
+    buildUponDefaultConfig = true
+    config.setFrom(rootProject.file("config/detekt.yml"))
+}
+tasks.withType<io.gitlab.arturbosch.detekt.Detekt>().configureEach {
+    jvmTarget = "17"
 }
 dependencies {
     implementation("androidx.biometric:biometric:1.1.0")

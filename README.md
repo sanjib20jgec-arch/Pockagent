@@ -2,7 +2,7 @@
 
 PocketAgent is an **offline-first, on-device Android assistant**. It runs local `.litertlm` models through LiteRT-LM, keeps conversations/notes/memory on device, and is designed around a privacy-first "answer the request yourself" UX.
 
-> Status: **CI-verified at [run 45930126324](https://github.com/sanjib20jgec-arch/Pockagent/actions/runs/45930126324) on `dbaecfc`** (branch `hardening/9of10`). `main` currently resolves to `cf17544`; owner merge steps are in [docs/handoff-checklist.md](docs/handoff-checklist.md). Android SDK/Gradle runtime validation is performed in CI or a local Android dev environment.
+> Status: **CI-verified at [run 45934369004](https://github.com/sanjib20jgec-arch/Pockagent/actions/runs/45934369004) on `f1f99c2`** (branch `hardening/9of10`, last production-behavior commit). `main` currently resolves to `cf17544`; owner merge steps are in [docs/handoff-checklist.md](docs/handoff-checklist.md). Android SDK/Gradle runtime validation is performed in CI or a local Android dev environment.
 
 ## What it does today
 

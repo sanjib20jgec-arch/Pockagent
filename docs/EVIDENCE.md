@@ -1,6 +1,6 @@
 # Evidence ledger
 
-_Updated: 2026-11-27. Tasks 1–11 are implemented on branch `hardening/9of10` (42 commits from merge-base `090537c`). The latest full gate is green with required lint/detekt steps. Nothing here claims a merged `main` HEAD, a tag, or a release._
+_Updated: 2026-11-27. Tasks 1–11 are implemented on branch `hardening/9of10` as a task commit chain from merge-base `090537c`. The code gate is green with required lint/detekt steps; the final documentation-only closeout is verified by the workflow run on its own commit. Nothing here claims a merged `main` HEAD, a tag, or a release._
 
 ## Verification status
 
@@ -12,13 +12,13 @@ _Updated: 2026-11-27. Tasks 1–11 are implemented on branch `hardening/9of10` (
 | `Blocked` | Test exists but cannot pass without an asset that is deliberately not committed. |
 | `Not yet earned` | Owner action required (merge/tag/release/branch protection) — no agent claim made. |
 
-## Latest full green gate
+## Verification anchor (code)
 
-[CI run 45930126324](https://github.com/sanjib20jgec-arch/Pockagent/actions/runs/45930126324) — commit `dbaecfc`, workflow `Build APK`, conclusion `success`. All four jobs are green:
+[CI run 45934369004](https://github.com/sanjib20jgec-arch/Pockagent/actions/runs/45934369004) — commit `f1f99c2`, workflow `Build APK`, conclusion `success`. This is the last commit that changed production behavior; all four jobs are green:
 
 | Job | Result | Evidence in run |
 |---|---|---|
-| `Build debug APK` | success | Archive check, 490-test JVM suite, `assembleDebug`, required `lintDebug`, required `detekt` all passed |
+| `Build debug APK` | success | Archive check, 491-test JVM suite, `assembleDebug`, required `lintDebug`, required `detekt` all passed |
 | `Record screenshot baselines` | success | `verifyRoborazziDebug` matched six committed baselines |
 | `Device smoke (API 28)` | success | `Starting 12 tests` / `Finished 15 tests`, `(3 skipped) (0 failed)` |
 | `Device smoke (API 35)` | success | `Starting 12 tests` / `Finished 15 tests`, `(3 skipped) (0 failed)` |
@@ -44,6 +44,7 @@ Quality reports from `PocketAgent-quality-reports` on that run: Android lint **0
 | 11 (discovery) | Lint/detekt advisory pass, 1991 detekt findings + 4 lint errors | [45926225562](https://github.com/sanjib20jgec-arch/Pockagent/actions/runs/45926225562) @ `088d8b9` | Advisory only — not a quality-gate pass |
 | 11 (fixes) | Source-level fixes, no baselines/suppressions | [45927365616](https://github.com/sanjib20jgec-arch/Pockagent/actions/runs/45927365616) @ `f0d747e`, [45928116132](https://github.com/sanjib20jgec-arch/Pockagent/actions/runs/45928116132) @ `9efb2f7` | [45929238530](https://github.com/sanjib20jgec-arch/Pockagent/actions/runs/45929238530) @ `b5f15c1` |
 | 11 (required gates) | Remove `continue-on-error` from lint/detekt | — | [45930126324](https://github.com/sanjib20jgec-arch/Pockagent/actions/runs/45930126324) @ `dbaecfc` |
+| 11 (final review) | Sidecar transaction regression | [45933538673](https://github.com/sanjib20jgec-arch/Pockagent/actions/runs/45933538673) @ `d06e9e0` | [45934369004](https://github.com/sanjib20jgec-arch/Pockagent/actions/runs/45934369004) @ `f1f99c2` |
 
 ## False-green investigation (Task 10)
 
@@ -58,10 +59,11 @@ Runs `45920732575` and `45922272748` showed a green API 28 job that was **invali
 ## Task 11 root causes
 
 - Quality gate: 4 Android lint errors and 1991 detekt findings were fixed in source. No baseline, `ignoreFailures`, or blanket suppression was introduced. `config/detekt.yml` only disables noisy style/complexity rules so correctness findings remain actionable.
+- Sidecar transaction: final review found that `ModelFileStore.importModel()` committed the model before writing its checksum sidecar. A sidecar write failure could leave a new model with a stale/absent sidecar, which startup would then trust or falsely reject. RED test `checksumWriteFailurePreservesExistingModelAndSidecar` pinned the old model and hash; the fix prepares the sidecar before model replacement and restores both files from backups on failure (commits `d06e9e0` / `f1f99c2`).
 - JVM race: `DuplexVoiceControllerTest.interrupt halts active TTS and re-arms listening` failed with `expected:<LISTENING> but was:<GENERATING>`. Root cause was one shared cancellation flag: an interrupted recording run could observe the next run's reset flag and deliver stale samples into the voice pipeline. Fix: per-run `AtomicBoolean` in `InAppAudioRecorder` (commit `b5f15c1`).
 - API 35 dialog: `artifactSaveWithNullLanguage` failed with `RootViewWithoutFocusException`. The dialog was shown while the activity window was still losing focus, so every Espresso root was focusless. Fix: wait for the real `hasWindowFocus()` condition, then match the dialog root explicitly (commit `b5f15c1`).
 
-## Device evidence (latest required-gate run 45930126324, commit dbaecfc)
+## Device evidence (verification-anchor run 45934369004, commit f1f99c2)
 
 | Leg | Discovered | Executed events | Skipped/Blocked | Failed | Result |
 |---|---:|---:|---:|---:|---|
@@ -86,24 +88,24 @@ Six Roborazzi baselines are committed under `app/src/screenshots/` and verified 
 
 | Screen | Light | Dark |
 |---|---|---|
-| Chat 375dp | [chat_light_375.png](https://github.com/sanjib20jgec-arch/Pockagent/blob/dbaecfc/app/src/screenshots/chat_light_375.png) | [chat_dark_375.png](https://github.com/sanjib20jgec-arch/Pockagent/blob/dbaecfc/app/src/screenshots/chat_dark_375.png) |
-| Vault 375dp | [vault_light_375.png](https://github.com/sanjib20jgec-arch/Pockagent/blob/dbaecfc/app/src/screenshots/vault_light_375.png) | [vault_dark_375.png](https://github.com/sanjib20jgec-arch/Pockagent/blob/dbaecfc/app/src/screenshots/vault_dark_375.png) |
-| Settings 375dp | [settings_light_375.png](https://github.com/sanjib20jgec-arch/Pockagent/blob/dbaecfc/app/src/screenshots/settings_light_375.png) | [settings_dark_375.png](https://github.com/sanjib20jgec-arch/Pockagent/blob/dbaecfc/app/src/screenshots/settings_dark_375.png) |
+| Chat 375dp | [chat_light_375.png](https://github.com/sanjib20jgec-arch/Pockagent/blob/f1f99c2/app/src/screenshots/chat_light_375.png) | [chat_dark_375.png](https://github.com/sanjib20jgec-arch/Pockagent/blob/f1f99c2/app/src/screenshots/chat_dark_375.png) |
+| Vault 375dp | [vault_light_375.png](https://github.com/sanjib20jgec-arch/Pockagent/blob/f1f99c2/app/src/screenshots/vault_light_375.png) | [vault_dark_375.png](https://github.com/sanjib20jgec-arch/Pockagent/blob/f1f99c2/app/src/screenshots/vault_dark_375.png) |
+| Settings 375dp | [settings_light_375.png](https://github.com/sanjib20jgec-arch/Pockagent/blob/f1f99c2/app/src/screenshots/settings_light_375.png) | [settings_dark_375.png](https://github.com/sanjib20jgec-arch/Pockagent/blob/f1f99c2/app/src/screenshots/settings_dark_375.png) |
 
-Report artifacts on run `45930126324`: `PocketAgent-screenshot-reports`, `PocketAgent-device-reports-api-28`, `PocketAgent-device-reports-api-35`, `PocketAgent-quality-reports`.
+Report artifacts on run `45934369004`: `PocketAgent-screenshot-reports`, `PocketAgent-device-reports-api-28`, `PocketAgent-device-reports-api-35`, `PocketAgent-quality-reports`.
 
 ## Final scorecard (evidence-backed)
 
 | Aspect | Mark | Evidence | Gap |
 |---|---:|---|---|
-| Product/vision | 9/10 | [README capability/constraint matrix](https://github.com/sanjib20jgec-arch/Pockagent/blob/dbaecfc/README.md) | Honest limits documented; no overclaim. |
-| Architecture | 9/10 | [ADR 0001](https://github.com/sanjib20jgec-arch/Pockagent/blob/dbaecfc/docs/adr/0001-mainviewmodel-state-owner.md), `MainActivity` 4409→773 LOC, five controllers, three version-preserving stores | 108 extracted extensions verified `internal`; final fresh reviewer sign-off recorded in handoff. |
+| Product/vision | 9/10 | [README capability/constraint matrix](https://github.com/sanjib20jgec-arch/Pockagent/blob/f1f99c2/README.md) | Honest limits documented; no overclaim. |
+| Architecture | 9/10 | [ADR 0001](https://github.com/sanjib20jgec-arch/Pockagent/blob/f1f99c2/docs/adr/0001-mainviewmodel-state-owner.md), `MainActivity` 4409→773 LOC, five controllers, three version-preserving stores | 108 extracted extensions verified `internal`; final review record in [handoff](https://github.com/sanjib20jgec-arch/Pockagent/blob/f1f99c2/docs/handoff-checklist.md). |
 | Testing | 9/10 | [Green required-gate run](https://github.com/sanjib20jgec-arch/Pockagent/actions/runs/45930126324), six screenshots, two device legs, lint/detekt reports | Three model-dependent tests are `Blocked`, never passed. |
-| CI/CD | 8/10 | [Non-mutating workflow](https://github.com/sanjib20jgec-arch/Pockagent/blob/dbaecfc/.github/workflows/build.yml), zero-test guard, required lint/detekt steps | Fresh ≥19/20 green `main` window and required status check: **Not yet earned**. |
-| Security/privacy | 9/10 | [SHA-256 importer](https://github.com/sanjib20jgec-arch/Pockagent/blob/dbaecfc/app/src/main/java/com/example/pocketagent/ModelIntegrity.kt), device offline assertion, no `INTERNET`, hardened WebView, [license inventory](https://github.com/sanjib20jgec-arch/Pockagent/blob/dbaecfc/THIRD_PARTY_LICENSES.md) | Arbitrary models remain importable by owner decision; no allow-list. |
-| Docs | 9/10 | This ledger, [audit](https://github.com/sanjib20jgec-arch/Pockagent/blob/dbaecfc/PROJECT_AUDIT.md), [release notes](https://github.com/sanjib20jgec-arch/Pockagent/blob/dbaecfc/docs/release.md), [LICENSE](https://github.com/sanjib20jgec-arch/Pockagent/blob/dbaecfc/LICENSE) | Final owner merge/tag docs remain outstanding. |
-| UI/UX | 9/10 | [Accessibility checklist](https://github.com/sanjib20jgec-arch/Pockagent/blob/dbaecfc/design-system/pocketagent/ACCESSIBILITY_CHECKLIST.md), [page overrides](https://github.com/sanjib20jgec-arch/Pockagent/tree/dbaecfc/design-system/pocketagent/pages), six screenshots | Keyboard-focus visual confirmation is device-limited; no clipped-text failures observed. |
-| Release | 8/10 | [Release notes/signing template](https://github.com/sanjib20jgec-arch/Pockagent/blob/dbaecfc/docs/release.md), Gradle 8.14.4 wrapper, `1.6.1` / code 13, debug APK artifact | Tag `v1.6.1` and public release: **Not yet earned**. |
+| CI/CD | 8/10 | [Non-mutating workflow](https://github.com/sanjib20jgec-arch/Pockagent/blob/f1f99c2/.github/workflows/build.yml), zero-test guard, required lint/detekt steps | Fresh ≥19/20 green `main` window and required status check: **Not yet earned**. |
+| Security/privacy | 9/10 | [SHA-256 importer](https://github.com/sanjib20jgec-arch/Pockagent/blob/f1f99c2/app/src/main/java/com/example/pocketagent/ModelIntegrity.kt), device offline assertion, no `INTERNET`, hardened WebView, [license inventory](https://github.com/sanjib20jgec-arch/Pockagent/blob/f1f99c2/THIRD_PARTY_LICENSES.md) | Arbitrary models remain importable by owner decision; no allow-list. |
+| Docs | 9/10 | This ledger, [audit](https://github.com/sanjib20jgec-arch/Pockagent/blob/f1f99c2/PROJECT_AUDIT.md), [release notes](https://github.com/sanjib20jgec-arch/Pockagent/blob/f1f99c2/docs/release.md), [LICENSE](https://github.com/sanjib20jgec-arch/Pockagent/blob/f1f99c2/LICENSE) | Final owner merge/tag docs remain outstanding. |
+| UI/UX | 9/10 | [Accessibility checklist](https://github.com/sanjib20jgec-arch/Pockagent/blob/f1f99c2/design-system/pocketagent/ACCESSIBILITY_CHECKLIST.md), [page overrides](https://github.com/sanjib20jgec-arch/Pockagent/tree/f1f99c2/design-system/pocketagent/pages), six screenshots | Keyboard-focus visual confirmation is device-limited; no clipped-text failures observed. |
+| Release | 8/10 | [Release notes/signing template](https://github.com/sanjib20jgec-arch/Pockagent/blob/f1f99c2/docs/release.md), Gradle 8.14.4 wrapper, `1.6.1` / code 13, debug APK artifact | Tag `v1.6.1` and public release: **Not yet earned**. |
 | **Overall** | **8.8/10** | Branch evidence is complete and green | The documented 9/10 is earned after the owner-only actions below. |
 
 ## Not yet earned (owner actions only)
@@ -113,7 +115,7 @@ Report artifacts on run `45930126324`: `PocketAgent-screenshot-reports`, `Pocket
 | Fresh ≥19/20 green window on `main` | [main run history](https://github.com/sanjib20jgec-arch/Pockagent/actions?query=branch%3Amain) | Current last-20 snapshot is 9 success / 11 failure; none is a fresh post-merge window. |
 | Required status check enabled on `main` | [branch protection settings](https://github.com/sanjib20jgec-arch/Pockagent/settings/branches) | Branch-protection changes are reserved to the owner. |
 | Tag `v1.6.1` and release notes | [releases](https://github.com/sanjib20jgec-arch/Pockagent/releases) | No tag or release exists; owner must cut it after merge. |
-| README status link after merge | [README](https://github.com/sanjib20jgec-arch/Pockagent/blob/dbaecfc/README.md) | Until `main` is merged and green, the branch link cannot be a `main` badge. |
+| README status link after merge | [README](https://github.com/sanjib20jgec-arch/Pockagent/blob/f1f99c2/README.md) | Until `main` is merged and green, the branch link cannot be a `main` badge. |
 | 15 stale `arena/*` branches deleted | [branches](https://github.com/sanjib20jgec-arch/Pockagent/branches) | Owner cleanup; not touched by the agent. |
 
-No PR, merge, tag, release, branch-protection change, or CI log-push commit has been made by the agent. `main` currently resolves to `cf17544`; the hardening branch was cut from merge-base `090537c` and has 42 commits, while `main` has 12 later commits that the owner will need to reconcile during merge.
+No PR, merge, tag, release, branch-protection change, or CI log-push commit has been made by the agent. `main` currently resolves to `cf17544`; the hardening branch was cut from merge-base `090537c`, while `main` has 12 later commits that the owner will need to reconcile during merge.

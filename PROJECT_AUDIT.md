@@ -1,6 +1,6 @@
 # PocketAgent Project Audit (evidence-based)
 
-_Updated: 2026-11-27. Audited baseline: merge-base `090537c31df21c8e050e42b7dcdf0fc187d6e489`. Hardening branch `hardening/9of10` is green at `dbaecfc38baa970e41fbcf9fd243fdca3a5c1298` with 42 commits. `main` currently resolves to `cf1754447dbcc41601a394d5fc0e52bef86c87ae`; no merge, tag, release, or branch-protection change was made by the agent._
+_Updated: 2026-11-27. Audited baseline: merge-base `090537c31df21c8e050e42b7dcdf0fc187d6e489`. Hardening branch `hardening/9of10` has a green verification anchor at `f1f99c2` ([run 45934369004](https://github.com/sanjib20jgec-arch/Pockagent/actions/runs/45934369004)); the final documentation-only closeout is verified by the workflow run on its own commit. `main` currently resolves to `cf1754447dbcc41601a394d5fc0e52bef86c87ae`; no merge, tag, release, or branch-protection change was made by the agent._
 
 ## Verified snapshot
 
@@ -11,7 +11,7 @@ _Updated: 2026-11-27. Audited baseline: merge-base `090537c31df21c8e050e42b7dcdf
 | Dependencies | LiteRT-LM 0.19.1, biometric 1.1.0, PDFBox-Android 2.0.27.1, coroutines 1.8.1, serialization 1.7.3, Roborazzi 1.79.0; inventory in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) |
 | Source/tests | 68 main Kotlin files, 55 JVM test classes, 1 instrumented smoke class, 6 screenshot baselines |
 | Architecture | `MainActivity.kt` 773 LOC; 5 focused controller files; `MainViewModel` is the state owner; 3 stores use version-preserving migration |
-| CI | [Run 45930126324](https://github.com/sanjib20jgec-arch/Pockagent/actions/runs/45930126324) green at `dbaecfc`: archive check, 490-test JVM suite, APK, screenshots, required lint/detekt, API 28 + API 35 device smoke |
+| CI | [Run 45934369004](https://github.com/sanjib20jgec-arch/Pockagent/actions/runs/45934369004) green at `f1f99c2`: archive check, 491-test JVM suite, APK, screenshots, required lint/detekt, API 28 + API 35 device smoke |
 | Quality | Android lint 0 errors / 72 warnings; detekt 0 findings; no baselines or blanket suppressions |
 | Privacy posture | No `INTERNET` permission; backup/data extraction disabled; biometric lock; hardened WebView; SHA-256 model sidecar verified on startup; no model allow-list |
 | Release | MIT [LICENSE](LICENSE), [third-party inventory](THIRD_PARTY_LICENSES.md), [release/signing template](docs/release.md), unsigned debug APK artifact; no tag/release |
@@ -29,7 +29,7 @@ Full ledger: [docs/EVIDENCE.md](docs/EVIDENCE.md).
 |---|---:|---|
 | Product/vision | 9/10 | Honest capability/constraint matrix in [README](README.md) |
 | Architecture | 9/10 | 4409→773 LOC Activity, [ADR 0001](docs/adr/0001-mainviewmodel-state-owner.md), 5 controllers, serialization migration, JVM tests |
-| Testing | 9/10 | 490 JVM tests, 12 discovered instrumented tests on API 28/35, 6 screenshots, required quality gates; 3 model tests remain `Blocked` |
+| Testing | 9/10 | 491 JVM tests, 12 discovered instrumented tests on API 28/35, 6 screenshots, required quality gates; 3 model tests remain `Blocked` |
 | CI/CD | 8/10 | Green run at exact commit, read-only non-mutating workflow, zero-test guard, required lint/detekt; fresh 20-run `main` window and required check **Not yet earned** |
 | Security/privacy | 9/10 | Permission review, hardened sandbox, pinned native fetch, SHA-256 model integrity, license audit, no new `INTERNET` |
 | Docs | 9/10 | Docs reconciled to verified branch HEAD, evidence ledger, LICENSE, release notes |

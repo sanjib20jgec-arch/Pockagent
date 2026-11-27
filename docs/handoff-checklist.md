@@ -6,7 +6,7 @@ The agent produced PR-ready commits only on `hardening/9of10`. The following act
 
 - Branch: [`hardening/9of10`](https://github.com/sanjib20jgec-arch/Pockagent/tree/hardening/9of10)
 - Merge base: `090537c31df21c8e050e42b7dcdf0fc187d6e489`
-- Branch state: 42 commits, green at `dbaecfc38baa970e41fbcf9fd243fdca3a5c1298` in [run 45930126324](https://github.com/sanjib20jgec-arch/Pockagent/actions/runs/45930126324).
+- Verification anchor: last production-behavior commit `f1f99c2` is green in [run 45934369004](https://github.com/sanjib20jgec-arch/Pockagent/actions/runs/45934369004). Later commits are documentation-only and are verified by the workflow run on their own commit.
 - `main` currently has 12 later commits (`cf175444` at the time of writing). Reconcile those commits before or during the merge; do not discard them silently.
 - Merge order follows the task commits: baseline/language → CI → toolchain/license → docs → model integrity → store migration → ViewModel seam → controllers → design system → device evidence → quality gates → final evidence.
 - After merge, confirm the archive check, 490-test JVM suite, APK, screenshots, required lint/detekt, and both device legs are green on `main`.
@@ -51,6 +51,14 @@ arena/d28fb48d-pockagent
 arena/59b6ae5d-pockagent
 arena/85d065bd-pockagent
 ```
+
+## Final review record
+
+A fresh reviewer checked the diff from merge-base `090537c` through the closeout commit and reported three concrete items:
+
+1. Checksum sidecar was written after the model commit, allowing a failed sidecar write to leave an unverified model. RED regression: `d06e9e0` / [run 45933538673](https://github.com/sanjib20jgec-arch/Pockagent/actions/runs/45933538673); GREEN fix: `f1f99c2` / [run 45934369004](https://github.com/sanjib20jgec-arch/Pockagent/actions/runs/45934369004).
+2. An evidence row claimed a reviewer sign-off that had not been recorded. The claim was removed and replaced by this record.
+3. “Latest” and fixed commit-count claims became stale after the closeout commit. They were replaced with a named verification anchor plus a statement that documentation-only commits are verified by their own workflow runs.
 
 ## Agent boundary
 

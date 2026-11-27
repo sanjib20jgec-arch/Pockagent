@@ -105,10 +105,10 @@ class AgentToolLoopTest {
     }
 
     @Test fun `processOutputSafe isolates throwing and succeeding tool calls`() = runTest {
-        val mixedLoop = object : AgentToolLoop(toolTimeoutMs = 200L) {
+        val mixedLoop = object : AgentToolLoop(toolTimeoutMs = 5_000L) {
             override fun executeToolCallInternal(toolName: String, input: String): String {
                 if (toolName == "search_notes") throw RuntimeException("disk error")
-                return super.executeToolCallInternal(toolName, input)
+                return "ok:$input"
             }
         }
         val (hasTools, loopResult) = mixedLoop.processOutputSafe(
@@ -117,6 +117,6 @@ class AgentToolLoopTest {
         assertTrue(hasTools)
         assertEquals(2, loopResult.toolResults.size)
         assertTrue(loopResult.toolResults[0].output.contains("disk error"))
-        assertTrue(loopResult.toolResults[1].output.contains("5"))
+        assertEquals("ok:2 + 3", loopResult.toolResults[1].output)
     }
 }

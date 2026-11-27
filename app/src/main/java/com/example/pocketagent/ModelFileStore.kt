@@ -4,9 +4,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.io.InputStream
-import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
-import java.nio.file.StandardCopyOption.ATOMIC_MOVE
 import java.nio.file.StandardCopyOption.REPLACE_EXISTING
 import java.security.MessageDigest
 import java.util.Locale
@@ -58,6 +56,10 @@ internal class ModelFileStore(
 
         var committed = false
         val digest = MessageDigest.getInstance("SHA-256")
+        val sidecar = ModelIntegrity.sidecarFor(modelFile)
+        val pendingSidecar = File(directory, "$MODEL_FILE_NAME.sha256.part")
+        val backupSidecar = File(directory, "$MODEL_FILE_NAME.sha256.backup")
+        val modelBackup = File(directory, "$MODEL_FILE_NAME.backup")
         try {
             var copied = 0L
             var lastReported = 0L
@@ -118,13 +120,32 @@ internal class ModelFileStore(
                 throw IOException("Model checksum mismatch. The selected bytes differ from the expected SHA-256.")
             }
 
-            replaceCurrentModel(temporary, modelFile)
+            // Prepare the sidecar before touching the model. If any later step fails, the
+            // finally block restores both files from their backups.
+            pendingSidecar.writeText("$computedSha256\n")
+            if (sidecar.exists()) {
+                if (backupSidecar.exists() && !backupSidecar.delete()) {
+                    throw IOException("Could not clear a previous model checksum backup.")
+                }
+                Files.move(sidecar.toPath(), backupSidecar.toPath(), REPLACE_EXISTING)
+            }
+
+            replaceCurrentModel(temporary, modelFile, modelBackup)
+            if (!pendingSidecar.renameTo(sidecar)) {
+                throw IOException("Could not store the model checksum.")
+            }
             committed = true
-            writeChecksumSidecar(computedSha256)
+            modelBackup.delete()
+            backupSidecar.delete()
             onProgress?.invoke(copied, normalizedExpectedBytes ?: copied)
             return modelFile
         } finally {
-            if (!committed && temporary.exists()) temporary.delete()
+            if (!committed) {
+                restoreFromBackup(modelBackup, modelFile)
+                restoreFromBackup(backupSidecar, sidecar)
+                if (temporary.exists()) temporary.delete()
+                if (pendingSidecar.exists()) pendingSidecar.delete()
+            }
         }
     }
 
@@ -140,34 +161,12 @@ internal class ModelFileStore(
         return value.takeIf { ModelIntegrity.isValidHex(it) }
     }
 
-    private fun writeChecksumSidecar(sha256: String) {
-        val sidecar = ModelIntegrity.sidecarFor(modelFile)
-        val pending = File(directory, "$MODEL_FILE_NAME.sha256.part")
-        try {
-            pending.writeText("$sha256\n")
-            if (!pending.renameTo(sidecar)) throw IOException("Could not store the model checksum.")
-        } finally {
-            if (pending.exists()) pending.delete()
-        }
-    }
-
-    private fun replaceCurrentModel(temporary: File, target: File) {
-        try {
-            Files.move(temporary.toPath(), target.toPath(), ATOMIC_MOVE, REPLACE_EXISTING)
-        } catch (_: AtomicMoveNotSupportedException) {
-            replaceWithRollback(temporary, target)
-        }
-    }
-
-    private fun replaceWithRollback(temporary: File, target: File) {
-        val backup = File(directory, "$MODEL_FILE_NAME.backup")
+    private fun replaceCurrentModel(temporary: File, target: File, backup: File) {
         if (backup.exists() && !backup.delete()) throw IOException("Could not clear a previous model backup.")
-
         val hadPreviousModel = target.exists()
         if (hadPreviousModel) Files.move(target.toPath(), backup.toPath(), REPLACE_EXISTING)
         try {
             Files.move(temporary.toPath(), target.toPath(), REPLACE_EXISTING)
-            if (backup.exists()) Files.delete(backup.toPath())
         } catch (failure: Exception) {
             if (hadPreviousModel && backup.exists()) {
                 try {
@@ -177,6 +176,15 @@ internal class ModelFileStore(
                 }
             }
             throw failure
+        }
+    }
+
+    private fun restoreFromBackup(backup: File, target: File) {
+        if (!backup.exists()) return
+        try {
+            Files.move(backup.toPath(), target.toPath(), REPLACE_EXISTING)
+        } catch (_: Exception) {
+            // Never mask the original import failure; the backup remains for diagnosis.
         }
     }
 
@@ -219,6 +227,7 @@ internal class ModelFileStore(
             File(directory, "$MODEL_FILE_NAME.part"),
             File(directory, "$MODEL_FILE_NAME.backup"),
             ModelIntegrity.sidecarFor(modelFile),
+            File(directory, "$MODEL_FILE_NAME.sha256.backup"),
             File(directory, "$MODEL_FILE_NAME.sha256.part"),
         ).forEach { f ->
             if (f.exists() && !f.delete()) ok = false

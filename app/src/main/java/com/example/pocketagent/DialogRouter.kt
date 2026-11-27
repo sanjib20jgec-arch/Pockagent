@@ -8,6 +8,7 @@ import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.res.ColorStateList
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
@@ -350,12 +351,12 @@ fun MainActivity.buildLockOverlay(): LinearLayout {
     }
 
 fun MainActivity.updateLockOverlay() {
-        if (!this@updateLockOverlay::lockOverlay.isInitialized) return
+        if (!isLockOverlayInitialized()) return
         lockOverlay.visibility = if (biometricLockManager.isAppLocked) View.VISIBLE else View.GONE
     }
 
 fun MainActivity.promptBiometricUnlock() {
-        if (!this@promptBiometricUnlock::lockOverlay.isInitialized) return
+        if (!isLockOverlayInitialized()) return
         if (!biometricLockManager.isLockEnabled) {
             biometricLockManager.unlock()
             updateLockOverlay()

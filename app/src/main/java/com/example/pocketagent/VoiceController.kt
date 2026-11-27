@@ -8,6 +8,7 @@ import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.res.ColorStateList
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
@@ -94,10 +95,10 @@ import com.example.pocketagent.MainActivity.Companion.WHITE
 
 
 fun MainActivity.updateRecordingBanner() {
-        if (!this@updateRecordingBanner::recordingBanner.isInitialized) return
+        if (!isRecordingBannerInitialized()) return
         val isRec = inAppAudioRecorder.isRecordingActive
         val targetVisibility = if (isRec || isDictating) View.VISIBLE else View.GONE
-        if (recordingBanner.visibility != targetVisibility && this@updateRecordingBanner::composerCard.isInitialized) {
+        if (recordingBanner.visibility != targetVisibility && isComposerCardInitialized()) {
             TransitionManager.beginDelayedTransition(composerCard)
         }
         if (isRec || isDictating) {
@@ -239,8 +240,8 @@ fun MainActivity.resetRecordButton() {
     }
 
 fun MainActivity.updateWhisperActionButtons(enabled: Boolean) {
-        if (this@updateWhisperActionButtons::transcribeWavButton.isInitialized) transcribeWavButton.isEnabled = enabled
-        if (this@updateWhisperActionButtons::recordAudioButton.isInitialized) recordAudioButton.isEnabled = enabled
+        if (isTranscribeWavButtonInitialized()) transcribeWavButton.isEnabled = enabled
+        if (isRecordAudioButtonInitialized()) recordAudioButton.isEnabled = enabled
     }
 
 fun MainActivity.startDictation() {
@@ -298,7 +299,7 @@ fun MainActivity.startDictation() {
             }
             override fun onPartialResults(partialResults: Bundle?) {
                 val partial = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
-                if (partial.isNotBlank() && this@startDictation::recordingBannerText.isInitialized) {
+                if (partial.isNotBlank() && isRecordingBannerTextInitialized()) {
                     recordingBannerText.text = ComposerChromeHelper.formatDictationLivePreview(partial)
                 }
             }

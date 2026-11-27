@@ -8,6 +8,7 @@ import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.res.ColorStateList
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
@@ -298,9 +299,9 @@ fun MainActivity.buildInterface() {
             }
             setOnTouchListener { _, event ->
                 if (event.actionMasked == MotionEvent.ACTION_DOWN || event.actionMasked == MotionEvent.ACTION_MOVE) {
-                    val hasOpenControls = (this@buildInterface::taskInput.isInitialized && taskInput.hasFocus()) ||
+                    val hasOpenControls = (isTaskInputInitialized() && taskInput.hasFocus()) ||
                         isToolsTrayOpen ||
-                        (this@buildInterface::slashPopupContainer.isInitialized && slashPopupContainer.visibility == View.VISIBLE)
+                        (isSlashPopupContainerInitialized() && slashPopupContainer.visibility == View.VISIBLE)
                     if (hasOpenControls) {
                         dismissComposerOverlays(hideIme = true)
                     }
@@ -673,7 +674,7 @@ fun MainActivity.buildInterface() {
             setOnFocusChangeListener { _, hasFocus ->
                 if (hasFocus && isToolsTrayOpen) {
                     toggleToolsTray(force = false)
-                } else if (!hasFocus && this@buildInterface::slashPopupContainer.isInitialized && slashPopupContainer.visibility == View.VISIBLE) {
+                } else if (!hasFocus && isSlashPopupContainerInitialized() && slashPopupContainer.visibility == View.VISIBLE) {
                     slashPopupContainer.visibility = View.GONE
                 }
             }
@@ -789,12 +790,12 @@ fun MainActivity.applyImeInsets(rootLayout: LinearLayout) {
 
 fun MainActivity.toggleToolsTray(force: Boolean) {
         val open = if (force) true else !isToolsTrayOpen
-        if (this@toggleToolsTray::composerCard.isInitialized && isToolsTrayOpen != open) {
+        if (isComposerCardInitialized() && isToolsTrayOpen != open) {
             TransitionManager.beginDelayedTransition(composerCard)
         }
         isToolsTrayOpen = open
         if (open) {
-            if (this@toggleToolsTray::slashPopupContainer.isInitialized) slashPopupContainer.visibility = View.GONE
+            if (isSlashPopupContainerInitialized()) slashPopupContainer.visibility = View.GONE
             hideKeyboard(clearInputFocus = true)
         }
         toolsTray.visibility = if (open) View.VISIBLE else View.GONE
@@ -822,24 +823,24 @@ fun MainActivity.toggleToolsTray(force: Boolean) {
      */
 
 fun MainActivity.syncComposerState() {
-        if (!this@syncComposerState::heroCard.isInitialized) return
-        val hasThreadViews = this@syncComposerState::chatThreadContainer.isInitialized && chatThreadContainer.childCount > 0
+        if (!isHeroCardInitialized()) return
+        val hasThreadViews = isChatThreadContainerInitialized() && chatThreadContainer.childCount > 0
         val hasImage = !attachedImagePath.isNullOrBlank()
         val hasConversation = hasThreadViews ||
             taskInput.text.isNotBlank() || attachedContext.isNotBlank() || hasImage ||
             lastPrompt.isNotBlank() || currentSession?.messages?.isNotEmpty() == true
         val welcomeVisibility = if (hasConversation) View.GONE else View.VISIBLE
-        if (heroCard.visibility != welcomeVisibility && this@syncComposerState::chatCanvas.isInitialized) {
+        if (heroCard.visibility != welcomeVisibility && isChatCanvasInitialized()) {
             TransitionManager.beginDelayedTransition(chatCanvas)
         }
         heroCard.visibility = welcomeVisibility
         quickChips.visibility = welcomeVisibility
 
-        if (this@syncComposerState::heroModelCtaButton.isInitialized) {
+        if (isHeroModelCtaButtonInitialized()) {
             val hasModel = activeModelFile().let { it.exists() && it.length() > 0L }
             heroModelCtaButton.visibility = if (hasModel) View.GONE else View.VISIBLE
         }
-        if (this@syncComposerState::attachImageButton.isInitialized) {
+        if (isAttachImageButtonInitialized()) {
             attachImageButton.visibility = if (isVisionModeEnabled) View.VISIBLE else View.GONE
         }
 
@@ -848,9 +849,9 @@ fun MainActivity.syncComposerState() {
             attachedImageName?.let { add("Image: $it") }
         }
         val hasAttachment = attachedContext.isNotBlank() || hasImage
-        if (this@syncComposerState::attachmentChipContainer.isInitialized) {
+        if (isAttachmentChipContainerInitialized()) {
             val nextChipVisibility = if (hasAttachment) View.VISIBLE else View.GONE
-            if (attachmentChipContainer.visibility != nextChipVisibility && this@syncComposerState::composerCard.isInitialized) {
+            if (attachmentChipContainer.visibility != nextChipVisibility && isComposerCardInitialized()) {
                 TransitionManager.beginDelayedTransition(composerCard)
             }
             if (hasAttachment) {
@@ -877,7 +878,7 @@ fun MainActivity.syncComposerState() {
                 attachmentChipContainer.visibility = View.GONE
             }
         }
-        if (!hasAttachment && this@syncComposerState::attachmentCard.isInitialized) {
+        if (!hasAttachment && isAttachmentCardInitialized()) {
             attachmentCard.visibility = View.GONE
         }
 
@@ -887,13 +888,13 @@ fun MainActivity.syncComposerState() {
             hasAttachment -> "Show attachment and audio tools (attachment active)"
             else -> "Show attachment and audio tools"
         }
-        if (this@syncComposerState::recordAudioButton.isInitialized) {
+        if (isRecordAudioButtonInitialized()) {
             recordAudioButton.isEnabled = whisperContext != 0L && !isWhisperTranscribing
         }
-        if (this@syncComposerState::transcribeWavButton.isInitialized) {
+        if (isTranscribeWavButtonInitialized()) {
             transcribeWavButton.isEnabled = whisperContext != 0L && !isWhisperTranscribing
         }
-        if (this@syncComposerState::suggestButton.isInitialized) {
+        if (isSuggestButtonInitialized()) {
             val canSend = (taskInput.text.isNotBlank() || attachedContext.isNotBlank() || !attachedImagePath.isNullOrBlank()) &&
                 !isWhisperTranscribing && !transcriptReviewPending
             suggestButton.isEnabled = (isGeneratingUi && !isStoppingUi) || (!isGeneratingUi && canSend)
@@ -906,8 +907,8 @@ fun MainActivity.syncComposerState() {
     /** Updates the floating Jump-to-Bottom button based on scroll position and thread content. */
 
 fun MainActivity.updateJumpToBottomVisibility() {
-        if (!this@updateJumpToBottomVisibility::jumpToBottomButton.isInitialized || !this@updateJumpToBottomVisibility::chatScroll.isInitialized) return
-        val hasContent = this@updateJumpToBottomVisibility::chatThreadContainer.isInitialized && chatThreadContainer.childCount > 0
+        if (!isJumpToBottomButtonInitialized() || !isChatScrollInitialized()) return
+        val hasContent = isChatThreadContainerInitialized() && chatThreadContainer.childCount > 0
         val show = hasContent && isUserReadingUpwards && chatScroll.canScrollVertically(1)
         if (show == isJumpToBottomVisible) return
         isJumpToBottomVisible = show
@@ -957,10 +958,10 @@ fun MainActivity.animateCardEntrance(view: View) {
     /** Updates the visible recording banner and pulsing indicator inside the composer card. */
 
 fun MainActivity.hideKeyboard(clearInputFocus: Boolean = true) {
-        if (this@hideKeyboard::taskInput.isInitialized && clearInputFocus) {
+        if (isTaskInputInitialized() && clearInputFocus) {
             taskInput.clearFocus()
         }
-        val target = currentFocus ?: if (this@hideKeyboard::taskInput.isInitialized) taskInput else window?.decorView
+        val target = currentFocus ?: if (isTaskInputInitialized()) taskInput else window?.decorView
         val imm = getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager
         if (target != null) {
             imm?.hideSoftInputFromWindow(target.windowToken, 0)
@@ -970,7 +971,7 @@ fun MainActivity.hideKeyboard(clearInputFocus: Boolean = true) {
     /** Dismisses open composer popups (slash menu, tools tray) and optionally hides the keyboard. */
 
 fun MainActivity.dismissComposerOverlays(hideIme: Boolean = false) {
-        if (this@dismissComposerOverlays::slashPopupContainer.isInitialized && slashPopupContainer.visibility == View.VISIBLE) {
+        if (isSlashPopupContainerInitialized() && slashPopupContainer.visibility == View.VISIBLE) {
             slashPopupContainer.visibility = View.GONE
         }
         if (isToolsTrayOpen) {
@@ -984,7 +985,7 @@ fun MainActivity.dismissComposerOverlays(hideIme: Boolean = false) {
     /** Scrolls the chat canvas to the newest content unless the reader scrolled up, without stealing focus. */
 
 fun MainActivity.scrollChatToBottom(force: Boolean = false) {
-        if (!this@scrollChatToBottom::chatScroll.isInitialized || !this@scrollChatToBottom::chatCanvas.isInitialized) return
+        if (!isChatScrollInitialized() || !isChatCanvasInitialized()) return
         if (!force && isUserReadingUpwards) return
         chatScroll.post {
             if (!force && isUserReadingUpwards) return@post
@@ -1000,7 +1001,7 @@ fun MainActivity.scrollChatToBottom(force: Boolean = false) {
     }
 
 fun MainActivity.updateSlashSuggestions(currentText: String) {
-        if (!this@updateSlashSuggestions::slashPopupContainer.isInitialized) return
+        if (!isSlashPopupContainerInitialized()) return
         val trimmed = currentText.trimStart()
         val exactMatch = SlashCommandDetector.detectCommand(trimmed)
         val hasTrailingArgs = exactMatch != null && trimmed.length > exactMatch.trigger.length
@@ -1072,7 +1073,7 @@ fun MainActivity.updateWorkspaceSubtitle() {
         val docCount = runCatching { documentVault.loadAll().size }.getOrDefault(0)
         val artifactCount = runCatching { artifactStore.loadAll().size }.getOrDefault(0)
 
-        if (this@updateWorkspaceSubtitle::workspaceSubtitleView.isInitialized) {
+        if (isWorkspaceSubtitleViewInitialized()) {
             val parts = buildList {
                 proj?.let { add(it.name) }
                 if (isAgentModeEnabled) add("Agent")
@@ -1089,10 +1090,10 @@ fun MainActivity.updateWorkspaceSubtitle() {
                 workspaceSubtitleView.visibility = View.VISIBLE
             }
         }
-        if (this@updateWorkspaceSubtitle::agentModeButton.isInitialized) {
+        if (isAgentModeButtonInitialized()) {
             agentModeButton.text = if (isAgentModeEnabled) "Agent Tools: ON" else "Agent Tools: OFF"
         }
-        if (this@updateWorkspaceSubtitle::quickModeSummaryChip.isInitialized) {
+        if (isQuickModeSummaryChipInitialized()) {
             val labels = ComposerChromeHelper.formatQuickModeLabels(
                 projectName = proj?.name,
                 isAgentEnabled = isAgentModeEnabled,
@@ -1119,7 +1120,7 @@ fun MainActivity.updateWorkspaceSubtitle() {
             quickTuningChip.text = labels.tuningChipLabel
             ComposerChromeViews.styleQuickModePill(quickTuningChip, palette, isVisionModeEnabled)
         }
-        if (this@updateWorkspaceSubtitle::contextContinuityBanner.isInitialized) {
+        if (isContextContinuityBannerInitialized()) {
             if (ContextContinuityHelper.shouldSuggestContinue(ctxUsed, ctxMax)) {
                 contextContinuityText.text = ContextContinuityHelper.formatContextAlert(ctxUsed, ctxMax)
                 contextContinuityBanner.visibility = View.VISIBLE
@@ -1311,7 +1312,7 @@ fun MainActivity.showModeQuickSheet() {
     }
 
 fun MainActivity.openSlashCommandPicker() {
-        if (!this@openSlashCommandPicker::slashPopupContainer.isInitialized) return
+        if (!isSlashPopupContainerInitialized()) return
         if (slashPopupContainer.visibility == View.VISIBLE) {
             slashPopupContainer.visibility = View.GONE
             return

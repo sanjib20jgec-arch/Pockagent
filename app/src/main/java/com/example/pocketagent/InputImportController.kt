@@ -8,6 +8,7 @@ import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.res.ColorStateList
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
@@ -711,7 +712,7 @@ fun MainActivity.restoreWhisperModel() {
     /** Mirrors only the composer text owned by the ViewModel; generation UI remains local until Task 8. */
 
 fun MainActivity.refreshModelStatus() {
-        if (!this@refreshModelStatus::modelStatusPill.isInitialized) return
+        if (!isModelStatusPillInitialized()) return
         val model = activeModelFile()
         val hasModel = model.exists() && model.length() > 0L
         val activeEntry = modelLibraryStore.getActive()
@@ -728,7 +729,7 @@ fun MainActivity.refreshModelStatus() {
             formattedSize = formattedSize,
         )
         modelStatusPill.update(badgeState, palette)
-        if (this@refreshModelStatus::heroModelCtaButton.isInitialized) {
+        if (isHeroModelCtaButtonInitialized()) {
             heroModelCtaButton.visibility = if (hasModel) View.GONE else View.VISIBLE
         }
         updateWorkspaceSubtitle()

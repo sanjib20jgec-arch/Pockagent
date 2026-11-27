@@ -757,4 +757,50 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         ioExecutor.shutdown()
         super.onDestroy()
     }
+
+    internal fun isAgentModeButtonInitialized() = ::agentModeButton.isInitialized
+
+    internal fun isAttachImageButtonInitialized() = ::attachImageButton.isInitialized
+
+    internal fun isAttachmentCardInitialized() = ::attachmentCard.isInitialized
+
+    internal fun isAttachmentChipContainerInitialized() = ::attachmentChipContainer.isInitialized
+
+    internal fun isChatCanvasInitialized() = ::chatCanvas.isInitialized
+
+    internal fun isChatScrollInitialized() = ::chatScroll.isInitialized
+
+    internal fun isChatThreadContainerInitialized() = ::chatThreadContainer.isInitialized
+
+    internal fun isComposerCardInitialized() = ::composerCard.isInitialized
+
+    internal fun isContextContinuityBannerInitialized() = ::contextContinuityBanner.isInitialized
+
+    internal fun isHeroCardInitialized() = ::heroCard.isInitialized
+
+    internal fun isHeroModelCtaButtonInitialized() = ::heroModelCtaButton.isInitialized
+
+    internal fun isJumpToBottomButtonInitialized() = ::jumpToBottomButton.isInitialized
+
+    internal fun isLockOverlayInitialized() = ::lockOverlay.isInitialized
+
+    internal fun isModelStatusPillInitialized() = ::modelStatusPill.isInitialized
+
+    internal fun isQuickModeSummaryChipInitialized() = ::quickModeSummaryChip.isInitialized
+
+    internal fun isRecordAudioButtonInitialized() = ::recordAudioButton.isInitialized
+
+    internal fun isRecordingBannerInitialized() = ::recordingBanner.isInitialized
+
+    internal fun isRecordingBannerTextInitialized() = ::recordingBannerText.isInitialized
+
+    internal fun isSlashPopupContainerInitialized() = ::slashPopupContainer.isInitialized
+
+    internal fun isSuggestButtonInitialized() = ::suggestButton.isInitialized
+
+    internal fun isTaskInputInitialized() = ::taskInput.isInitialized
+
+    internal fun isTranscribeWavButtonInitialized() = ::transcribeWavButton.isInitialized
+
+    internal fun isWorkspaceSubtitleViewInitialized() = ::workspaceSubtitleView.isInitialized
 }

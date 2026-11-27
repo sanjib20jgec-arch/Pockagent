@@ -182,7 +182,12 @@ class DuplexVoiceControllerTest {
         steadyController.interrupt()
         assertTrue(fakeTts.isStopped)
         assertTrue(steadyController.isActive)
-        assertEquals(DuplexVoiceController.DuplexState.LISTENING, steadyController.state)
+        // A cancelled recording run must not revive the pipeline after interrupt re-arms listening.
+        val deadline = System.currentTimeMillis() + 300
+        while (System.currentTimeMillis() < deadline) {
+            assertEquals(DuplexVoiceController.DuplexState.LISTENING, steadyController.state)
+            Thread.sleep(10)
+        }
         steadyController.stopSession()
     }
 

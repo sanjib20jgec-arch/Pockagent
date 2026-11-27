@@ -12,6 +12,7 @@ import androidx.test.espresso.Espresso.onView
 import androidx.test.espresso.ViewAssertion
 import androidx.test.espresso.action.ViewActions.click
 import androidx.test.espresso.assertion.ViewAssertions.matches
+import androidx.test.espresso.matcher.RootMatchers.isDialog
 import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
 import androidx.test.espresso.matcher.ViewMatchers.withContentDescription
 import androidx.test.espresso.matcher.ViewMatchers.withText
@@ -84,15 +85,23 @@ class SmokeTests {
             // Let the main window settle before adding a dialog root; on API 35 an immediate
             // dialog can be shown while the activity is being torn down and leak its window.
             waitForText("Ask")
+            // A dialog shown while the activity window is still losing focus never receives
+            // focus itself, leaving every Espresso root focusless. Wait for the real condition
+            // before showing it, then match the dialog root explicitly.
+            waitFor(5_000) {
+                scenario.onActivity { assertTrue(it.window.decorView.hasWindowFocus()) }
+            }
             scenario.onActivity { activity ->
                 activity.showSaveArtifactDialog(
                     code = "<p>offline draft</p>",
                     language = normalizeArtifactLanguage(null),
                 )
             }
-            waitForText("Save to Artifact Vault", timeoutMs = 10_000)
-            onView(withText("Save to Artifact Vault")).check(matches(isDisplayed()))
-            onView(withText("Cancel")).perform(click())
+            waitFor(10_000) {
+                onView(withText("Save to Artifact Vault")).inRoot(isDialog()).check(matches(isDisplayed()))
+            }
+            onView(withText("Save to Artifact Vault")).inRoot(isDialog()).check(matches(isDisplayed()))
+            onView(withText("Cancel")).inRoot(isDialog()).perform(click())
         }
     }
 

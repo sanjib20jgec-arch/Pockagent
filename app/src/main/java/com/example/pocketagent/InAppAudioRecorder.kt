@@ -10,6 +10,7 @@ import android.media.MediaRecorder
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Seam abstraction for audio input hardware, allowing unit testing without Android AudioRecord stubs.
@@ -107,7 +108,9 @@ class InAppAudioRecorder(
     }
 
     private val isRecording = AtomicBoolean(false)
-    private val isCancelled = AtomicBoolean(false)
+    // Cancellation belongs to one recording run. A shared flag let an old, interrupted run observe
+    // the next run's reset flag and deliver stale samples into the voice pipeline.
+    private val cancellation = AtomicReference(AtomicBoolean(false))
     private var recordingThread: Thread? = null
 
     val isRecordingActive: Boolean
@@ -128,7 +131,8 @@ class InAppAudioRecorder(
         }
 
         buffer.wipe()
-        isCancelled.set(false)
+        val runCancellation = AtomicBoolean(false)
+        cancellation.set(runCancellation)
         isRecording.set(true)
 
         val thread = Thread({
@@ -160,12 +164,12 @@ class InAppAudioRecorder(
                 }
 
                 // If cancelled while recording, don't trigger completion
-                if (!isCancelled.get()) {
+                if (!runCancellation.get()) {
                     val samples = buffer.toNormalizedFloats()
                     listener.onRecordingComplete(samples)
                 }
             } catch (error: InterruptedException) {
-                if (!isCancelled.get()) {
+                if (!runCancellation.get()) {
                     val samples = buffer.toNormalizedFloats()
                     listener.onRecordingComplete(samples)
                 }
@@ -201,7 +205,7 @@ class InAppAudioRecorder(
      */
     @Synchronized
     fun cancelRecording() {
-        isCancelled.set(true)
+        cancellation.get().set(true)
         isRecording.set(false)
         recordingThread?.interrupt()
         buffer.wipe()

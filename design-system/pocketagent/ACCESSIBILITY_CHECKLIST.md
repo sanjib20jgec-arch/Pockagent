@@ -1,7 +1,9 @@
 # PocketAgent Accessibility Checklist
 
-> Static checks are verified by `UiThemeTest.kt` and source inspection. Device/screenshot evidence is
-> intentionally marked **Pending Task 10** until emulator runs and captured images exist.
+> Static checks are verified by `UiThemeTest.kt` and source inspection. Device/screenshot evidence
+> comes from [CI run 45925286889](https://github.com/sanjib20jgec-arch/Pockagent/actions/runs/45925286889)
+> (commit `ea0eb1b`): six Roborazzi PNGs at 375dp and a green `connectedDebugAndroidTest` on API 28
+> and API 35. See [docs/EVIDENCE.md](../../docs/EVIDENCE.md) for counts and blocked tests.
 
 ---
 
@@ -9,19 +11,19 @@
 
 | Requirement | Static Status | Device / Screenshot Evidence | Notes |
 | :--- | :--- | :--- | :--- |
-| `375dp` compact layout | PASS (tokens) | Pending Task 10 | Single column, `16dp` gutters, wrapping labels. |
-| `768dp` layout | PASS (tokens) | Pending Task 10 | Vault grid becomes two columns. |
-| `1024dp` layout | PASS (tokens) | Pending Task 10 | Vault grid may reach three columns; chat bubbles remain readable. |
-| `>= 48dp` touch targets | PASS | Pending Task 10 | `UiTokens.TOUCH_TARGET_DP` used by `pillButton`, `iconTouchButton`, `vectorIconButton`, `createActionPillButton`. |
+| `375dp` compact layout | PASS (tokens) | [chat](https://github.com/sanjib20jgec-arch/Pockagent/blob/ea0eb1b/app/src/screenshots/chat_light_375.png), [vault](https://github.com/sanjib20jgec-arch/Pockagent/blob/ea0eb1b/app/src/screenshots/vault_light_375.png), [settings](https://github.com/sanjib20jgec-arch/Pockagent/blob/ea0eb1b/app/src/screenshots/settings_light_375.png) | Single column, `16dp` gutters, wrapping labels. |
+| `768dp` layout | PASS (tokens) | Static only — no 768dp baseline captured | Vault grid becomes two columns; verified by tokens/page overrides, not a screenshot. |
+| `1024dp` layout | PASS (tokens) | Static only — no 1024dp baseline captured | Vault grid may reach three columns; chat bubbles remain readable. |
+| `>= 48dp` touch targets | PASS | Device smoke `layoutTouchTargets` green on API 28/35 | `UiTokens.TOUCH_TARGET_DP` used by `pillButton`, `iconTouchButton`, `vectorIconButton`, `createActionPillButton`; device check asserts the `Ask` control height. |
 | `>= 4.5:1` normal text contrast | PASS | Code verified | Ratios below; asserted in `UiThemeTest.kt`. |
-| `>= 3:1` large text / active icon contrast | PASS | Pending Task 10 | Hero subtitle ratios are `>= 6.22:1`; status dots rely on adjacent text labels. |
-| Visible keyboard focus | PARTIAL | Pending Task 10 | Controls are focusable; visible focus ring must be confirmed on device. |
-| Reduced motion | PASS | Pending Task 10 | `sheetEntranceDurationMs(0f) == 0L`; final static state rendered. |
-| Wrapping chips / labels | PASS (spec) | Pending Task 10 | Page overrides forbid unlabeled ellipsis truncation. |
-| Accessible error summary | PARTIAL | Pending Task 10 | Chat override requires persistent inline summary; device announcement not yet proven. |
-| No clipped text | PASS (spec) | Pending Task 10 | Rows and bubbles use `WRAP_CONTENT`; inspect at all three widths. |
-| Dark mode independently checked | PASS (tokens) | Pending Task 10 | Distinct `DARK_PALETTE`; contrast ratios below. |
-| Vector icons only | PASS | Pending Task 10 | `res/drawable/ic_*.xml`; no emoji glyphs as UI chrome. |
+| `>= 3:1` large text / active icon contrast | PASS | Code verified | Hero subtitle ratios are `>= 6.22:1`; status dots rely on adjacent text labels. |
+| Visible keyboard focus | PARTIAL | Not proven on device | Controls are focusable; visible focus ring cannot be captured by Roborazzi. |
+| Reduced motion | PASS | Code verified | `sheetEntranceDurationMs(0f) == 0L`; final static state rendered. |
+| Wrapping chips / labels | PASS (spec) | 375dp baselines above | Page overrides forbid unlabeled ellipsis truncation. |
+| Accessible error summary | PARTIAL | Not proven on device | Chat override requires persistent inline summary; device announcement not yet proven. |
+| No clipped text | PASS (spec) | 375dp baselines above | Rows and bubbles use `WRAP_CONTENT`; wider widths remain static-only. |
+| Dark mode independently checked | PASS (tokens) | [chat](https://github.com/sanjib20jgec-arch/Pockagent/blob/ea0eb1b/app/src/screenshots/chat_dark_375.png), [vault](https://github.com/sanjib20jgec-arch/Pockagent/blob/ea0eb1b/app/src/screenshots/vault_dark_375.png), [settings](https://github.com/sanjib20jgec-arch/Pockagent/blob/ea0eb1b/app/src/screenshots/settings_dark_375.png) | Distinct `DARK_PALETTE`; contrast ratios below. |
+| Vector icons only | PASS | Source inspection | `res/drawable/ic_*.xml`; no emoji glyphs as UI chrome. |
 
 ---
 
@@ -58,11 +60,15 @@ All normal-text pairs clear `4.5:1`; palette anchors were not changed.
 
 ---
 
-## Evidence Links (fill in Task 10)
+## Evidence links
 
-- Chat 375dp light: Pending Task 10
-- Chat 375dp dark: Pending Task 10
-- Vault 768dp: Pending Task 10
-- Settings 1024dp: Pending Task 10
-- Reduced-motion run: Pending Task 10
-- Keyboard-focus run: Pending Task 10
+- Chat 375dp light: [chat_light_375.png](https://github.com/sanjib20jgec-arch/Pockagent/blob/ea0eb1b/app/src/screenshots/chat_light_375.png)
+- Chat 375dp dark: [chat_dark_375.png](https://github.com/sanjib20jgec-arch/Pockagent/blob/ea0eb1b/app/src/screenshots/chat_dark_375.png)
+- Vault 375dp light: [vault_light_375.png](https://github.com/sanjib20jgec-arch/Pockagent/blob/ea0eb1b/app/src/screenshots/vault_light_375.png)
+- Vault 375dp dark: [vault_dark_375.png](https://github.com/sanjib20jgec-arch/Pockagent/blob/ea0eb1b/app/src/screenshots/vault_dark_375.png)
+- Settings 375dp light: [settings_light_375.png](https://github.com/sanjib20jgec-arch/Pockagent/blob/ea0eb1b/app/src/screenshots/settings_light_375.png)
+- Settings 375dp dark: [settings_dark_375.png](https://github.com/sanjib20jgec-arch/Pockagent/blob/ea0eb1b/app/src/screenshots/settings_dark_375.png)
+- Screenshot report artifact: `PocketAgent-screenshot-reports` on [run 45925286889](https://github.com/sanjib20jgec-arch/Pockagent/actions/runs/45925286889)
+- Device smoke reports: `PocketAgent-device-reports-api-28`, `PocketAgent-device-reports-api-35` on the same run
+- Reduced motion: asserted in `UiThemeTest.kt`; no animated capture
+- Keyboard focus / TalkBack announcement: **Not yet proven on device** — no accessibility-scanner evidence

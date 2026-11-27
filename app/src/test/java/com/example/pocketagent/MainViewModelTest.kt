@@ -622,6 +622,33 @@ class MainViewModelTest {
     }
 
     @Test
+    fun observerReceivesCurrentStateImmediately() {
+        val observed = mutableListOf<MainUiState>()
+
+        viewModel.addObserver { observed.add(it) }
+
+        assertEquals(1, observed.size)
+        assertEquals(viewModel.uiState.value, observed.single())
+    }
+
+    @Test
+    fun observerReceivesUpdatesAfterTaskInputChange() {
+        val observed = mutableListOf<MainUiState>()
+        viewModel.addObserver { observed.add(it) }
+
+        viewModel.onTaskInputChanged("hello")
+
+        assertEquals("hello", observed.last().taskInput)
+    }
+
+    @Test
+    fun exposesSharedStoresForActivityDelegation() {
+        assertEquals(File(filesDir, "sessions"), viewModel.sessionStore.directory)
+        assertEquals(File(filesDir, "memories"), viewModel.userMemoryStore.baseDir)
+        assertEquals(File(filesDir, "notes"), viewModel.notesStore.baseDir)
+    }
+
+    @Test
     fun initModelsAcceptsUntamperedModelWithStoredHash() {
         val store = ModelFileStore(filesDir, minBytes = 1L)
         store.importModel(ByteArrayInputStream(byteArrayOf(0x50, 0x4B, 0x03, 0x04, 0x05, 0x06)))

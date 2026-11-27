@@ -3602,9 +3602,9 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                             latch.await(1_500L, java.util.concurrent.TimeUnit.MILLISECONDS)
                             writeMsg
                         },
-                        flashlightController = { mode -> PhoneEquipmentTools.toggleFlashlight(this@MainActivity, mode) },
-                        sensorReader = { mode -> PhoneEquipmentTools.readSensors(this@MainActivity, mode) },
-                        locationReader = { PhoneEquipmentTools.getOfflineLocation(this@MainActivity) },
+                        flashlightController = { mode -> toggleFlashlight(this@MainActivity, mode) },
+                        sensorReader = { mode -> readSensors(this@MainActivity, mode) },
+                        locationReader = { getOfflineLocation(this@MainActivity) },
                         maxIterations = 3,
                     )
                     var loopPrompt = activeBuild.prompt

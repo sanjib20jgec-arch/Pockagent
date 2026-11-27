@@ -210,4 +210,26 @@ class AgentToolLoopTest {
         val loopWithJs = AgentToolLoop(jsEvaluator = { script -> "eval:$script" })
         assertEquals("eval:2 + 2", loopWithJs.executeToolCall("run_js", "2 + 2"))
     }
+
+    @Test fun `read_clipboard invokes reader and handles null reader`() {
+        assertEquals("Clipboard access unavailable.", loop().executeToolCall("read_clipboard", ""))
+        val loopWithClipboard = AgentToolLoop(clipboardReader = { "copied text" })
+        assertEquals("copied text", loopWithClipboard.executeToolCall("read_clipboard", ""))
+    }
+
+    @Test fun `write_clipboard invokes writer and handles blank input or null writer`() {
+        assertEquals("Clipboard text cannot be blank.", loop().executeToolCall("write_clipboard", "   "))
+        assertEquals("Clipboard write unavailable.", loop().executeToolCall("write_clipboard", "hello"))
+
+        var written = ""
+        val loopWithClipboard = AgentToolLoop(
+            clipboardWriter = { text ->
+                written = text
+                "Copied to clipboard (${text.length} chars)."
+            }
+        )
+        assertEquals("Clipboard text cannot be blank.", loopWithClipboard.executeToolCall("write_clipboard", ""))
+        assertEquals("Copied to clipboard (11 chars).", loopWithClipboard.executeToolCall("write_clipboard", "hello world"))
+        assertEquals("hello world", written)
+    }
 }

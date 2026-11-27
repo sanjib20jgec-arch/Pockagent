@@ -34,6 +34,8 @@ import kotlinx.coroutines.withTimeout
  *   TOOL_CALL: device_status()
  *   TOOL_CALL: run_js(<script>)
  *   TOOL_CALL: trigger_system_action(<type>|<details>)
+ *   TOOL_CALL: read_clipboard()
+ *   TOOL_CALL: write_clipboard(<text>)
  *
  * 100% offline, zero network calls, zero telemetry.
  */
@@ -48,6 +50,8 @@ open class AgentToolLoop(
     private val deviceStatusProvider: (() -> String)? = null,
     private val jsEvaluator: ((String) -> String)? = null,
     private val systemActionBridge: ((String, String) -> String)? = null,
+    private val clipboardReader: (() -> String)? = null,
+    private val clipboardWriter: ((String) -> String)? = null,
 ) {
 
     companion object {
@@ -69,6 +73,8 @@ open class AgentToolLoop(
                 "- TOOL_CALL: device_status()\n" +
                 "- TOOL_CALL: run_js(<javascript_code>)\n" +
                 "- TOOL_CALL: trigger_system_action(<type>|<details>)\n" +
+                "- TOOL_CALL: read_clipboard()\n" +
+                "- TOOL_CALL: write_clipboard(<text>)\n" +
                 "If a calculation, local lookup, artifact operation, or offline tool helps answer accurately, " +
                 "emit one or more exact TOOL_CALL lines cleanly and wait for [TOOL_RESULT: ...]. " +
                 "Once you have what you need, write the final answer without TOOL_CALL lines."
@@ -358,6 +364,13 @@ open class AgentToolLoop(
                 val details = parts.getOrElse(1) { "" }.trim()
                 if (type.isBlank()) return "System action type cannot be blank."
                 bridge.invoke(type, details)
+            }
+            "read_clipboard" -> {
+                clipboardReader?.invoke() ?: "Clipboard access unavailable."
+            }
+            "write_clipboard" -> {
+                if (input.isBlank()) "Clipboard text cannot be blank."
+                else clipboardWriter?.invoke(input) ?: "Clipboard write unavailable."
             }
             else -> "Unknown tool: $toolName"
         }

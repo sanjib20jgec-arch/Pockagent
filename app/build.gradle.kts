@@ -9,8 +9,8 @@ android {
         applicationId = "com.example.pocketagent"
         minSdk = 28
         targetSdk = 35
-        versionCode = 13
-        versionName = "1.7.0"
+        versionCode = 14
+        versionName = "1.8.0"
     }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     lint {

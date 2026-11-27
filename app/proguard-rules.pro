@@ -34,3 +34,6 @@
 
 # Keep FileProvider for camera capture URI sharing under R8 Full Mode
 -keep class androidx.core.content.FileProvider { *; }
+
+# Keep Quick Settings TileService entry point
+-keep class com.example.pocketagent.PocketAgentTileService { *; }

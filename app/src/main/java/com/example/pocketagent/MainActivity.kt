@@ -207,6 +207,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     @Volatile private var attachedImagePath: String? = null
     private var attachedImageName: String? = null
     private var pendingCameraCaptureUri: Uri? = null
+    @Volatile private var hasWindowFocusForClipboard: Boolean = false
     private var pendingHtmlToExport: String? = null
     private lateinit var workspaceSubtitleView: TextView
     private lateinit var slashPopupContainer: LinearLayout
@@ -369,9 +370,19 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         handleWidgetLaunchIntent(intent)
     }
 
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        hasWindowFocusForClipboard = hasFocus
+    }
+
     private fun handleWidgetLaunchIntent(launchIntent: Intent?) {
-        if (launchIntent?.getBooleanExtra(PocketAgentWidget.EXTRA_WIDGET_VOICE, false) == true) {
-            launchIntent.removeExtra(PocketAgentWidget.EXTRA_WIDGET_VOICE)
+        val isAssist = launchIntent?.action == Intent.ACTION_ASSIST
+        val isTileVoice = launchIntent?.getStringExtra(PocketAgentTileService.EXTRA_QUICK_ACTION) == PocketAgentTileService.ACTION_VOICE
+        val isWidgetVoice = launchIntent?.getBooleanExtra(PocketAgentWidget.EXTRA_WIDGET_VOICE, false) == true
+        if (isAssist || isTileVoice || isWidgetVoice) {
+            launchIntent?.removeExtra(PocketAgentWidget.EXTRA_WIDGET_VOICE)
+            launchIntent?.removeExtra(PocketAgentTileService.EXTRA_QUICK_ACTION)
+            if (isAssist) launchIntent?.action = null
             mainHandler.postDelayed({
                 if (!isDestroyed && !isFinishing) startDictation()
             }, 450L)
@@ -379,7 +390,27 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun handleSharedIntent(shareIntent: Intent?) {
-        if (shareIntent == null || shareIntent.action != Intent.ACTION_SEND) return
+        if (shareIntent == null) return
+        if (shareIntent.action == Intent.ACTION_SEND_MULTIPLE) {
+            val mime = shareIntent.type.orEmpty().lowercase(Locale.ROOT)
+            val uris = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                shareIntent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                shareIntent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)
+            }?.filterNotNull().orEmpty()
+            if (uris.isNotEmpty()) {
+                if (mime.startsWith("image/")) {
+                    if (isVisionModeEnabled) stageImageUri(uris.first())
+                    else Toast.makeText(this, "Enable Vision Mode in Model Manager first for images.", Toast.LENGTH_LONG).show()
+                } else {
+                    importTextFiles(uris)
+                }
+            }
+            shareIntent.action = null
+            return
+        }
+        if (shareIntent.action != Intent.ACTION_SEND) return
         val mime = shareIntent.type.orEmpty().lowercase(Locale.ROOT)
         val sharedText = shareIntent.getStringExtra(Intent.EXTRA_TEXT)
         val sharedUri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -412,6 +443,8 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 }
             } else if (mime == "application/pdf" || displayName.endsWith(".pdf")) {
                 importPdf(sharedUri)
+            } else if (mime.startsWith("audio/") || displayName.endsWith(".m4a") || displayName.endsWith(".mp3") || displayName.endsWith(".ogg") || displayName.endsWith(".opus") || displayName.endsWith(".wav")) {
+                transcribeWav(sharedUri)
             } else {
                 importTextFiles(listOf(sharedUri))
             }
@@ -603,7 +636,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         }
         val trustBadge = styledText(
             context = this,
-            text = "v1.7 · 100% Offline",
+            text = "v1.8 · 100% Offline",
             sizeSp = 11.5f,
             color = palette.teal,
             bold = true,
@@ -1455,7 +1488,6 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
         val picker = Intent(Intent.ACTION_OPEN_DOCUMENT)
             .addCategory(Intent.CATEGORY_OPENABLE)
             .setType("audio/*")
-            .putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("audio/wav", "audio/x-wav", "audio/vnd.wave"))
         startActivityForResult(picker, PICK_WAV)
     }
 
@@ -1722,7 +1754,7 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 artifactCount = artCount,
                 activeModelLabel = modelLabel,
                 activeBackendLabel = backendLabel,
-                appVersionLabel = "v1.7 · Offline",
+                appVersionLabel = "v1.8 · Offline",
             ),
             palette = palette,
             callbacks = DrawerCallbacks(
@@ -2268,9 +2300,14 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                 require(availableChars > sourceLabel.length) {
                     "Remove the current attachment to make room for a transcript."
                 }
-                val input = contentResolver.openInputStream(uri) ?: error("Could not open the selected WAV file.")
-                staged = BoundedAudioFile.stage(input, cacheDir, PcmWavReader.MAX_FILE_BYTES)
-                val samples = PcmWavReader.read(staged)
+                val samples = if (displayName.endsWith(".wav", ignoreCase = true)) {
+                    val input = contentResolver.openInputStream(uri) ?: error("Could not open the selected WAV file.")
+                    staged = BoundedAudioFile.stage(input, cacheDir, PcmWavReader.MAX_FILE_BYTES)
+                    PcmWavReader.read(staged)
+                } else {
+                    mainHandler.post { updateStatus("Decoding audio locally via hardware codec…") }
+                    HardwareAudioDecoder.decodeTo16kMonoFloat(this@MainActivity, uri)
+                }
                 val context = whisperContext
                 require(context != 0L) { "Select a Whisper model before transcribing audio." }
                 val textLimit = minOf(MAX_ATTACHMENT_CHARS, availableChars - sourceLabel.length)
@@ -3480,6 +3517,41 @@ class MainActivity : FragmentActivity(), TextToSpeech.OnInitListener {
                         jsEvaluator = { script -> OfflineJsSandbox.evaluate(this@MainActivity, script) },
                         systemActionBridge = { type, details ->
                             "Action prepared [$type]: $details (user confirmation card will appear if actionable)"
+                        },
+                        clipboardReader = {
+                            if (!hasWindowFocusForClipboard) {
+                                "Clipboard unavailable while PocketAgent is not in foreground focus."
+                            } else {
+                                val latch = java.util.concurrent.CountDownLatch(1)
+                                var textResult = "Clipboard is empty."
+                                mainHandler.post {
+                                    try {
+                                        val cm = getSystemService(CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+                                        val clipText = cm?.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(this@MainActivity)?.toString()?.trim()
+                                        if (!clipText.isNullOrEmpty()) textResult = clipText.take(2_000)
+                                    } finally {
+                                        latch.countDown()
+                                    }
+                                }
+                                latch.await(1_500L, java.util.concurrent.TimeUnit.MILLISECONDS)
+                                textResult
+                            }
+                        },
+                        clipboardWriter = { text ->
+                            val latch = java.util.concurrent.CountDownLatch(1)
+                            var writeMsg = "Copied ${text.length} chars to clipboard."
+                            mainHandler.post {
+                                try {
+                                    val cm = getSystemService(CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+                                    cm?.setPrimaryClip(android.content.ClipData.newPlainText("PocketAgent", text))
+                                } catch (e: Exception) {
+                                    writeMsg = "Clipboard write failed: ${e.message}"
+                                } finally {
+                                    latch.countDown()
+                                }
+                            }
+                            latch.await(1_500L, java.util.concurrent.TimeUnit.MILLISECONDS)
+                            writeMsg
                         },
                         maxIterations = 3,
                     )

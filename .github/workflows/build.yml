@@ -160,7 +160,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        api-level: [28, 35]
+        include:
+          - api-level: 28
+            target: google_apis
+          # The API 35 google_apis launcher can ANR with "Application does not have a
+          # focused window", which leaves Espresso roots permanently focusless. The
+          # offline app has no GMS dependency, so use the AOSP image on that leg.
+          - api-level: 35
+            target: default
     steps:
       - name: Check out source
         uses: actions/checkout@v6
@@ -191,7 +198,7 @@ jobs:
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: ${{ matrix.api-level }}
-          target: google_apis
+          target: ${{ matrix.target }}
           arch: x86_64
           profile: pixel_xl
           disable-animations: true

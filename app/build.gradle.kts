@@ -66,7 +66,6 @@ configurations.configureEach {
         )
     ) {
         exclude(group = "org.jetbrains.kotlin", module = "kotlin-reflect")
-        exclude(group = "com.google.code.gson", module = "gson")
         exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-coroutines-debug")
     }
 }

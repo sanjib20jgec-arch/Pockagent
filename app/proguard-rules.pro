@@ -26,6 +26,7 @@
 -keep class com.tom_roush.pdfbox.text.PDFTextStripper { *; }
 -keep class com.tom_roush.pdfbox.io.MemoryUsageSetting { *; }
 
+-dontwarn kotlin.reflect.**
 -dontwarn com.tom_roush.**
 -dontwarn org.bouncycastle.**
 -dontwarn java.awt.**
